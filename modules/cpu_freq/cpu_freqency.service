@@ -1,0 +1,13 @@
+[Unit]
+Description=i3status cpufreq
+After=network.target
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/bin/i3cpu_freq
+WorkingDirectory=/opt/misc
+
+[Install]
+WantedBy=default.target
