@@ -121,8 +121,8 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	workspace_data_t *data = self->data;
 	(void)w;
 
-	int          indicator_size = 24;
-	int          spacing        = 6;
+	int          indicator_size = data->state->config.workspace_indicator_size;
+	int          spacing        = data->state->config.workspace_spacing;
 	int          total_width    = 0;
 
 	PangoLayout *layout         = pango_cairo_create_layout(cr);
@@ -211,8 +211,8 @@ workspace_click(barny_module_t *self, int button, int click_x, int click_y)
 	if (button != 272)
 		return; /* BTN_LEFT */
 
-	int indicator_size = 24;
-	int spacing        = 6;
+	int indicator_size = data->state->config.workspace_indicator_size;
+	int spacing        = data->state->config.workspace_spacing;
 
 	/* Find which workspace was clicked */
 	int x              = 0;

@@ -16,7 +16,7 @@ main()
 
 	struct location ldata   = get_location();
 
-	FILE           *api_key = fopen("/opt/weather_app/api_key", "r");
+	FILE           *api_key = fopen("/opt/barny/modules/api_key", "r");
 	char            API_KEY[100];
 
 	if (!api_key) {
@@ -37,7 +37,7 @@ main()
 
 	while (1) {
 		struct weather res = get_weather(ldata, API_KEY);
-		FILE          *f   = fopen("/opt/weather_app/weather", "w");
+		FILE          *f   = fopen("/opt/barny/modules/weather", "w");
 		if (!f) {
 			fprintf(stderr,
 			        "Error: Could not open weather output file\n");

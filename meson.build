@@ -7,6 +7,7 @@ project(
         'c_std=c2x',
         'warning_level=3',
         'optimization=2',
+        'prefix=/usr',
     ],
 )
 
@@ -73,8 +74,28 @@ barny = executable(
 )
 
 subdir('tests')
+subdir('modules/weather')
+subdir('modules/btc_price')
+subdir('modules/cpu_freq')
+subdir('modules/cpu_power')
 
+# Install config file
 install_data(
     'config/barny.conf',
     install_dir: get_option('sysconfdir') / 'barny',
+)
+
+# Install systemd user service
+install_data(
+    'config/barny.service',
+    install_dir: '/usr/lib/systemd/user',
+)
+
+# Post-install script: create dirs, enable and start services
+meson.add_install_script('scripts/post-install.sh')
+
+# Uninstall target
+uninstall_script = files('scripts/uninstall.sh')
+run_target('uninstall-barny',
+    command: ['sudo', 'sh', uninstall_script],
 )

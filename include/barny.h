@@ -57,6 +57,14 @@ struct barny_config {
     double blur_radius;
     double brightness;
 
+    /* Workspace module */
+    int workspace_indicator_size;  /* Diameter of workspace bubbles (default 24) */
+    int workspace_spacing;         /* Space between bubbles (default 6) */
+
+    /* Sysinfo module */
+    bool sysinfo_freq_combined;    /* true = combined avg, false = "P: X.XX E: X.XX" */
+    int sysinfo_power_decimals;    /* 0, 1, or 2 decimal places for watts */
+
     /* Liquid glass effect parameters */
     barny_refraction_mode_t refraction_mode;  /* Type of displacement */
     double displacement_scale;    /* Strength of lens/displacement effect (0-50) */
@@ -193,5 +201,6 @@ int barny_watch_file(barny_state_t *state, const char *path, void (*callback)(vo
 /* Configuration */
 int barny_config_load(barny_config_t *config, const char *path);
 void barny_config_defaults(barny_config_t *config);
+void barny_config_validate_font(const barny_config_t *config);
 
 #endif /* BARNY_H */

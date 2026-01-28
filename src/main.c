@@ -163,6 +163,9 @@ main(int argc, char *argv[])
 		barny_config_load(&state.config, config_path);
 	}
 
+	/* Validate font configuration */
+	barny_config_validate_font(&state.config);
+
 	/* Initialize Wayland connection */
 	if (barny_wayland_init(&state) < 0) {
 		fprintf(stderr, "barny: failed to initialize wayland\n");
@@ -230,6 +233,9 @@ main(int argc, char *argv[])
 	/* Initialize modules */
 	barny_module_register(&state, barny_module_clock_create());
 	barny_module_register(&state, barny_module_workspace_create());
+	barny_module_register(&state, barny_module_weather_create());
+	barny_module_register(&state, barny_module_crypto_create());
+	barny_module_register(&state, barny_module_sysinfo_create());
 	barny_modules_init(&state);
 
 	/* Setup signal handlers */

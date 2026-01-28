@@ -7,7 +7,7 @@ LD = clang
 SRC_DIR = .
 SRC = $(wildcard $(addsuffix /*.c, $(SRC_DIR)))
 
-INSTALL_DIR = /opt/weather_app
+INSTALL_DIR = /opt/barny/modules
 SYSTEMD_UNIT_PATH = /usr/lib/systemd/system
 BIN_INSTALL_PATH = /usr/bin
 

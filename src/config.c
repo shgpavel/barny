@@ -2,8 +2,59 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <strings.h>
 
 #include "barny.h"
+
+void
+barny_config_validate_font(const barny_config_t *config)
+{
+	const char *font_str = config->font;
+	if (!font_str) {
+		fprintf(stderr, "barny: no font configured, modules will use built-in defaults\n");
+		return;
+	}
+
+	PangoFontDescription *desc = pango_font_description_from_string(font_str);
+	if (!desc) {
+		fprintf(stderr, "barny: failed to parse font string: \"%s\"\n", font_str);
+		return;
+	}
+
+	const char *requested_family = pango_font_description_get_family(desc);
+	if (!requested_family) {
+		fprintf(stderr, "barny: font string \"%s\" has no family component\n", font_str);
+		pango_font_description_free(desc);
+		return;
+	}
+
+	/* Use a temporary PangoFontMap to check if the font actually resolves */
+	PangoFontMap *font_map = pango_cairo_font_map_get_default();
+	PangoContext *context   = pango_font_map_create_context(font_map);
+	PangoFont    *font      = pango_font_map_load_font(font_map, context, desc);
+
+	if (!font) {
+		fprintf(stderr, "barny: ERROR: font \"%s\" not found on system, "
+		        "text will render with fallback font\n", font_str);
+	} else {
+		PangoFontDescription *actual = pango_font_describe(font);
+		const char *actual_family    = pango_font_description_get_family(actual);
+
+		if (actual_family && strcasecmp(actual_family, requested_family) != 0) {
+			fprintf(stderr, "barny: WARNING: font \"%s\" resolved to \"%s\" "
+			        "(requested family \"%s\" not found)\n",
+			        font_str, actual_family, requested_family);
+		} else {
+			printf("barny: font loaded: \"%s\"\n", font_str);
+		}
+
+		pango_font_description_free(actual);
+		g_object_unref(font);
+	}
+
+	g_object_unref(context);
+	pango_font_description_free(desc);
+}
 
 void
 barny_config_defaults(barny_config_t *config)
@@ -21,6 +72,14 @@ barny_config_defaults(barny_config_t *config)
 	config->wallpaper_path       = NULL;
 	config->blur_radius          = BARNY_BLUR_RADIUS;
 	config->brightness           = 1.1;
+
+	/* Workspace module defaults */
+	config->workspace_indicator_size = 30;
+	config->workspace_spacing        = 10;
+
+	/* Sysinfo module defaults */
+	config->sysinfo_freq_combined    = true;
+	config->sysinfo_power_decimals   = 0;
 
 	/* Liquid glass effect defaults */
 	config->refraction_mode      = BARNY_REFRACT_LENS;
@@ -92,6 +151,16 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->noise_scale = atof(value);
 	} else if (strcmp(key, "noise_octaves") == 0) {
 		config->noise_octaves = atoi(value);
+	} else if (strcmp(key, "workspace_indicator_size") == 0) {
+		config->workspace_indicator_size = atoi(value);
+	} else if (strcmp(key, "workspace_spacing") == 0) {
+		config->workspace_spacing = atoi(value);
+	} else if (strcmp(key, "sysinfo_freq_combined") == 0) {
+		config->sysinfo_freq_combined = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "sysinfo_power_decimals") == 0) {
+		config->sysinfo_power_decimals = atoi(value);
+		if (config->sysinfo_power_decimals < 0) config->sysinfo_power_decimals = 0;
+		if (config->sysinfo_power_decimals > 2) config->sysinfo_power_decimals = 2;
 	}
 }
 

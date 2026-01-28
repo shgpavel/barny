@@ -58,14 +58,43 @@ To run tests:
 meson test -C build
 ```
 
-To install:
+## Installation
+
+Install barny and all modules:
 ```bash
 sudo meson install -C build
 ```
 
-To reconfigure from scratch:
+Enable and start services (run as your regular user, not root):
 ```bash
-meson setup --wipe build
+systemctl --user daemon-reload
+systemctl --user enable --now barny.service
+```
+
+## Uninstallation
+
+```bash
+ninja -C build uninstall-barny
+```
+
+This stops all services, removes binaries, and cleans up `/opt/barny/`.
+
+## Modules
+
+Barny uses external data provider modules that run as systemd user services:
+
+| Module | Service | Data File | Description |
+|--------|---------|-----------|-------------|
+| Weather | `barny-weather` | `/opt/barny/modules/weather` | Weather data (requires API key) |
+| BTC Price | `barny-btc-price` | `/opt/barny/modules/btc_price` | Bitcoin price from OKX |
+| CPU Freq | `barny-cpu-freq` | `/opt/barny/modules/cpu_freq` | CPU frequency (P/E cores) |
+| CPU Power | `barny-cpu-power` | `/opt/barny/modules/cpu_power` | CPU power consumption |
+
+### Weather API Key
+
+The weather module requires an API key:
+```bash
+echo "YOUR_API_KEY" | sudo tee /opt/barny/modules/api_key
 ```
 
 ## Configuration
@@ -73,6 +102,26 @@ meson setup --wipe build
 Barny reads configuration from:
 1. `/etc/barny/barny.conf` (system-wide)
 2. `~/.config/barny/barny.conf` (user override)
+
+### General Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `position` | top | Bar position: `top` or `bottom` |
+| `height` | 48 | Bar height in pixels |
+| `margin_*` | 0 | Margins from screen edges |
+| `border_radius` | 28 | Corner radius for glass effect |
+| `font` | Sans 12 | Pango font string |
+| `wallpaper` | - | Path to wallpaper PNG for glass effect |
+| `blur_radius` | 2 | Blur strength for glass background |
+| `brightness` | 1.1 | Brightness multiplier |
+
+### Workspace Module
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `workspace_indicator_size` | 24 | Diameter of workspace bubbles |
+| `workspace_spacing` | 6 | Space between bubbles |
 
 ### Liquid Glass Parameters
 

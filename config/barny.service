@@ -1,0 +1,14 @@
+[Unit]
+Description=Barny liquid glass status bar
+After=graphical-session.target
+Wants=barny-weather.service barny-btc-price.service barny-cpu-freq.service barny-cpu-power.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/barny
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=graphical-session.target

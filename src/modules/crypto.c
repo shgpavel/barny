@@ -42,8 +42,8 @@ crypto_update(barny_module_t *self)
 {
 	crypto_data_t *data = self->data;
 
-	/* Try to read from tradebot price file */
-	FILE          *f    = fopen("/opt/tradebot/price", "r");
+	/* Try to read from btc_price module */
+	FILE          *f    = fopen("/opt/barny/modules/btc_price", "r");
 	if (f) {
 		double price;
 		if (fscanf(f, "%lf", &price) == 1) {

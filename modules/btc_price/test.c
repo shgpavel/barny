@@ -15,7 +15,7 @@ main()
 	char    ticker[30] = "BTC-USDT-SWAP";
 
 	while (1) {
-		FILE *f = fopen("/opt/misc/btc_price.tmp", "w");
+		FILE *f = fopen("/opt/barny/modules/btc_price.tmp", "w");
 		if (!f) {
 			return -1;
 		}
@@ -23,7 +23,7 @@ main()
 		price = get_price(ticker);
 		fprintf(f, "%lg\n", price.price);
 		fclose(f);
-		if (rename("/opt/misc/btc_price.tmp", "/opt/misc/btc_price")
+		if (rename("/opt/barny/modules/btc_price.tmp", "/opt/barny/modules/btc_price")
 		    != 0) {
 			return -1;
 		}

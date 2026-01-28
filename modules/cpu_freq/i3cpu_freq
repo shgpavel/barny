@@ -1,7 +1,7 @@
 #!/bin/zsh
 
-output_file="/opt/misc/frequency.tmp"
-final_file="/opt/misc/frequency"
+output_file="/opt/barny/modules/cpu_freq.tmp"
+final_file="/opt/barny/modules/cpu_freq"
 
 while true; do
   p_sum=0

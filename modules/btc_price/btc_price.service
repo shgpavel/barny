@@ -1,12 +1,12 @@
 [Unit]
-Description=Barny weather module
+Description=Barny BTC price module
 After=network-online.target
 Wants=network-online.target
 PartOf=barny.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/barny-weather
+ExecStart=/usr/bin/barny-btc-price
 Restart=on-failure
 RestartSec=5s
 

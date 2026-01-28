@@ -6,9 +6,10 @@
 
 typedef struct {
 	barny_state_t        *state;
-	char                  freq_str[32];
+	char                  freq_str[48];
 	char                  power_str[32];
-	double                frequency;
+	double                p_freq;
+	double                e_freq;
 	double                power;
 	PangoFontDescription *font_desc;
 } sysinfo_data_t;
@@ -41,36 +42,60 @@ static void
 sysinfo_update(barny_module_t *self)
 {
 	sysinfo_data_t *data = self->data;
+	barny_config_t *cfg  = &data->state->config;
 
 	/* Read CPU frequency */
-	FILE           *f    = fopen("/opt/misc/frequency", "r");
+	FILE           *f    = fopen("/opt/barny/modules/cpu_freq", "r");
 	if (f) {
-		double freq;
-		if (fscanf(f, "%lf", &freq) == 1) {
-			if (freq != data->frequency) {
-				data->frequency = freq;
-				snprintf(data->freq_str,
-				         sizeof(data->freq_str),
-				         "%.1f GHz",
-				         freq / 1000.0);
-				self->dirty = true;
+		char line[64];
+		if (fgets(line, sizeof(line), f)) {
+			double p_freq = 0, e_freq = 0;
+			if (sscanf(line, "P: %lf E: %lf", &p_freq, &e_freq) == 2) {
+				if (p_freq != data->p_freq || e_freq != data->e_freq) {
+					data->p_freq = p_freq;
+					data->e_freq = e_freq;
+
+					if (cfg->sysinfo_freq_combined) {
+						double avg = (p_freq + e_freq) / 2.0;
+						snprintf(data->freq_str,
+						         sizeof(data->freq_str),
+						         "%.2f GHz",
+						         avg);
+					} else {
+						snprintf(data->freq_str,
+						         sizeof(data->freq_str),
+						         "P: %.2f E: %.2f",
+						         p_freq, e_freq);
+					}
+					self->dirty = true;
+				}
 			}
 		}
 		fclose(f);
 	}
 
 	/* Read power consumption */
-	f = fopen("/opt/misc/power", "r");
+	f = fopen("/opt/barny/modules/cpu_power", "r");
 	if (f) {
-		double power;
-		if (fscanf(f, "%lf", &power) == 1) {
-			if (power != data->power) {
-				data->power = power;
-				snprintf(data->power_str,
-				         sizeof(data->power_str),
-				         "%.0f W",
-				         power);
-				self->dirty = true;
+		char line[64];
+		if (fgets(line, sizeof(line), f)) {
+			double power;
+			if (sscanf(line, "PWR: %lf", &power) == 1) {
+				if (power != data->power) {
+					data->power = power;
+
+					const char *fmt;
+					switch (cfg->sysinfo_power_decimals) {
+					case 1:  fmt = "%.1f W"; break;
+					case 2:  fmt = "%.2f W"; break;
+					default: fmt = "%.0f W"; break;
+					}
+					snprintf(data->power_str,
+					         sizeof(data->power_str),
+					         fmt,
+					         power);
+					self->dirty = true;
+				}
 			}
 		}
 		fclose(f);

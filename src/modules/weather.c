@@ -21,7 +21,7 @@ weather_init(barny_module_t *self, barny_state_t *state)
                 state->config.font ? state->config.font : "Sans 11");
 
 	/* Read initial weather data */
-	FILE *f = fopen("/opt/weather_app/weather", "r");
+	FILE *f = fopen("/opt/barny/modules/weather", "r");
 	if (f) {
 		if (fgets(data->weather_str, sizeof(data->weather_str), f)) {
 			/* Remove newline */
@@ -53,7 +53,7 @@ weather_update(barny_module_t *self)
 	char            old_weather[128];
 	strcpy(old_weather, data->weather_str);
 
-	FILE *f = fopen("/opt/weather_app/weather", "r");
+	FILE *f = fopen("/opt/barny/modules/weather", "r");
 	if (f) {
 		if (fgets(data->weather_str, sizeof(data->weather_str), f)) {
 			char *nl = strchr(data->weather_str, '\n');
