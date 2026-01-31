@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "barny.h"
 
@@ -8,7 +7,6 @@ typedef struct {
 	barny_state_t        *state;
 	char                  price_str[64];
 	double                price;
-	double                change_pct;
 	PangoFontDescription *font_desc;
 } crypto_data_t;
 
@@ -21,9 +19,8 @@ crypto_init(barny_module_t *self, barny_state_t *state)
 	data->font_desc     = pango_font_description_from_string(
                 state->config.font ? state->config.font : "Sans 11");
 
-	strcpy(data->price_str, "BTC --");
-	data->price      = 0;
-	data->change_pct = 0;
+	snprintf(data->price_str, sizeof(data->price_str), "BTC --");
+	data->price = 0;
 
 	return 0;
 }
@@ -76,12 +73,12 @@ crypto_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	cairo_move_to(cr, x + 1, y + (h - th) / 2 + 1);
 	pango_cairo_show_layout(cr, layout);
 
-	/* Text - green for positive, red for negative */
-	if (data->change_pct >= 0) {
+	/* Text */
+	barny_config_t *cfg = &data->state->config;
+	if (cfg->text_color_set)
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 0.9);
+	else
 		cairo_set_source_rgba(cr, 0.5, 1, 0.5, 0.9);
-	} else {
-		cairo_set_source_rgba(cr, 1, 0.5, 0.5, 0.9);
-	}
 	cairo_move_to(cr, x, y + (h - th) / 2);
 	pango_cairo_show_layout(cr, layout);
 

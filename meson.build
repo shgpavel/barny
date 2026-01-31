@@ -20,6 +20,7 @@ pangocairo = dependency('pangocairo')
 libjpeg = dependency('libjpeg')
 cjson = dependency('libcjson')
 libcurl = dependency('libcurl')
+libsystemd = dependency('libsystemd')
 math = cc.find_library('m')
 
 all_deps = [
@@ -29,6 +30,7 @@ all_deps = [
     libjpeg,
     cjson,
     libcurl,
+    libsystemd,
     math,
 ]
 
@@ -74,10 +76,10 @@ barny = executable(
 )
 
 subdir('tests')
-subdir('modules/weather')
-subdir('modules/btc_price')
-subdir('modules/cpu_freq')
-subdir('modules/cpu_power')
+subdir('src/modules/helpers/weather')
+subdir('src/modules/helpers/btc_price')
+subdir('src/modules/helpers/cpu_freq')
+subdir('src/modules/helpers/cpu_power')
 
 # Install config file
 install_data(

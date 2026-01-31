@@ -33,6 +33,19 @@ test_module_positions(void);
 extern void
 test_module_data(void);
 
+extern void
+test_clock_module_behavior(void);
+extern void
+test_ram_module_behavior(void);
+extern void
+test_disk_module_behavior(void);
+extern void
+test_cpu_temp_module_behavior(void);
+extern void
+test_fileread_module_behavior(void);
+extern void
+test_network_module_behavior(void);
+
 TEST_MAIN_BEGIN()
 
 printf("\n--- Configuration Tests ---\n");
@@ -55,5 +68,13 @@ RUN_SUITE(test_module_lifecycle);
 RUN_SUITE(test_module_factories);
 RUN_SUITE(test_module_positions);
 RUN_SUITE(test_module_data);
+
+printf("\n--- New Module Behavior Tests ---\n");
+RUN_SUITE(test_clock_module_behavior);
+RUN_SUITE(test_ram_module_behavior);
+RUN_SUITE(test_disk_module_behavior);
+RUN_SUITE(test_cpu_temp_module_behavior);
+RUN_SUITE(test_fileread_module_behavior);
+RUN_SUITE(test_network_module_behavior);
 
 TEST_MAIN_END()

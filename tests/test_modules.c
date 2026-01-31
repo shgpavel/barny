@@ -224,10 +224,10 @@ test_module_factories(void)
 		free(mod);
 	}
 
-	TEST("clock module has center position")
+	TEST("clock module has right position")
 	{
 		barny_module_t *mod = barny_module_clock_create();
-		ASSERT_EQ_INT(BARNY_POS_CENTER, mod->position);
+		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
 		free(mod);
@@ -248,6 +248,121 @@ test_module_factories(void)
 	{
 		barny_module_t *mod = barny_module_workspace_create();
 		ASSERT_EQ_INT(BARNY_POS_LEFT, mod->position);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	/* Disk module */
+	TEST("disk module created with correct name")
+	{
+		barny_module_t *mod = barny_module_disk_create();
+		ASSERT_NOT_NULL(mod);
+		ASSERT_EQ_STR("disk", mod->name);
+		ASSERT_NOT_NULL(mod->init);
+		ASSERT_NOT_NULL(mod->update);
+		ASSERT_NOT_NULL(mod->render);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("disk module has right position")
+	{
+		barny_module_t *mod = barny_module_disk_create();
+		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	/* CPU temp module */
+	TEST("cpu_temp module created with correct name")
+	{
+		barny_module_t *mod = barny_module_cpu_temp_create();
+		ASSERT_NOT_NULL(mod);
+		ASSERT_EQ_STR("cpu_temp", mod->name);
+		ASSERT_NOT_NULL(mod->init);
+		ASSERT_NOT_NULL(mod->update);
+		ASSERT_NOT_NULL(mod->render);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("cpu_temp module has right position")
+	{
+		barny_module_t *mod = barny_module_cpu_temp_create();
+		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	/* RAM module */
+	TEST("ram module created with correct name")
+	{
+		barny_module_t *mod = barny_module_ram_create();
+		ASSERT_NOT_NULL(mod);
+		ASSERT_EQ_STR("ram", mod->name);
+		ASSERT_NOT_NULL(mod->init);
+		ASSERT_NOT_NULL(mod->update);
+		ASSERT_NOT_NULL(mod->render);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("ram module has right position")
+	{
+		barny_module_t *mod = barny_module_ram_create();
+		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	/* Network module */
+	TEST("network module created with correct name")
+	{
+		barny_module_t *mod = barny_module_network_create();
+		ASSERT_NOT_NULL(mod);
+		ASSERT_EQ_STR("network", mod->name);
+		ASSERT_NOT_NULL(mod->init);
+		ASSERT_NOT_NULL(mod->update);
+		ASSERT_NOT_NULL(mod->render);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("network module has right position")
+	{
+		barny_module_t *mod = barny_module_network_create();
+		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	/* Fileread module */
+	TEST("fileread module created with correct name")
+	{
+		barny_module_t *mod = barny_module_fileread_create();
+		ASSERT_NOT_NULL(mod);
+		ASSERT_EQ_STR("fileread", mod->name);
+		ASSERT_NOT_NULL(mod->init);
+		ASSERT_NOT_NULL(mod->update);
+		ASSERT_NOT_NULL(mod->render);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("fileread module has right position")
+	{
+		barny_module_t *mod = barny_module_fileread_create();
+		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
 		free(mod);

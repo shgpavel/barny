@@ -73,6 +73,13 @@ barny_config_defaults(barny_config_t *config)
 	config->blur_radius          = BARNY_BLUR_RADIUS;
 	config->brightness           = 1.1;
 
+	/* Global text color (NULL = use module defaults) */
+	config->text_color           = NULL;
+	config->text_color_r         = 0.0;
+	config->text_color_g         = 0.0;
+	config->text_color_b         = 0.0;
+	config->text_color_set       = false;
+
 	/* Workspace module defaults */
 	config->workspace_indicator_size = 30;
 	config->workspace_spacing        = 10;
@@ -81,6 +88,10 @@ barny_config_defaults(barny_config_t *config)
 	config->sysinfo_freq_combined    = true;
 	config->sysinfo_power_decimals   = 0;
 
+	/* Tray module defaults */
+	config->tray_icon_size           = 24;
+	config->tray_icon_spacing        = 4;
+
 	/* Liquid glass effect defaults */
 	config->refraction_mode      = BARNY_REFRACT_LENS;
 	config->displacement_scale   = 8.0;
@@ -88,6 +99,71 @@ barny_config_defaults(barny_config_t *config)
 	config->edge_refraction      = 1.2;
 	config->noise_scale          = 0.02;
 	config->noise_octaves        = 2;
+
+	/* Clock module defaults */
+	config->clock_show_time      = true;
+	config->clock_24h_format     = true;
+	config->clock_show_seconds   = true;
+	config->clock_show_date      = false;
+	config->clock_show_year      = true;
+	config->clock_show_month     = true;
+	config->clock_show_day       = true;
+	config->clock_show_weekday   = true;
+	config->clock_date_order     = 0;  /* dd/mm/yyyy */
+	config->clock_date_separator = '/';
+
+	/* Disk module defaults */
+	config->disk_path            = NULL;  /* will use "/" as default */
+	config->disk_show_percentage = false;
+	config->disk_decimals        = 0;
+
+	/* CPU temperature module defaults */
+	config->cpu_temp_path        = NULL;  /* auto-detect */
+	config->cpu_temp_zone        = 0;
+	config->cpu_temp_show_unit   = true;
+
+	/* RAM module defaults */
+	config->ram_show_percentage  = false;
+	config->ram_decimals         = 1;
+	config->ram_used_method      = NULL;  /* will use "available" */
+
+	/* Network module defaults */
+	config->network_interface    = NULL;  /* auto */
+	config->network_show_ip      = true;
+	config->network_show_interface = false;
+	config->network_prefer_ipv4  = true;
+
+	/* File read module defaults */
+	config->fileread_path        = NULL;
+	config->fileread_title       = NULL;
+	config->fileread_max_chars   = 64;
+}
+
+static int
+parse_hex_color(const char *str, double *r, double *g, double *b)
+{
+	/* Handle common color names */
+	if (strcasecmp(str, "black") == 0) {
+		*r = *g = *b = 0.0;
+		return 0;
+	}
+	if (strcasecmp(str, "white") == 0) {
+		*r = *g = *b = 1.0;
+		return 0;
+	}
+
+	/* Parse #RRGGBB format */
+	if (str[0] != '#' || strlen(str) != 7)
+		return -1;
+
+	unsigned int rv, gv, bv;
+	if (sscanf(str + 1, "%02x%02x%02x", &rv, &gv, &bv) != 3)
+		return -1;
+
+	*r = rv / 255.0;
+	*g = gv / 255.0;
+	*b = bv / 255.0;
+	return 0;
 }
 
 static char *
@@ -133,6 +209,22 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->blur_radius = atof(value);
 	} else if (strcmp(key, "brightness") == 0) {
 		config->brightness = atof(value);
+	} else if (strcmp(key, "text_color") == 0) {
+		free(config->text_color);
+		if (strcmp(value, "default") == 0 || strlen(value) == 0) {
+			config->text_color = NULL;
+			config->text_color_set = false;
+		} else {
+			config->text_color = strdup(value);
+			if (parse_hex_color(value, &config->text_color_r,
+			                    &config->text_color_g,
+			                    &config->text_color_b) == 0) {
+				config->text_color_set = true;
+			} else {
+				fprintf(stderr, "barny: invalid text_color '%s', using default\n", value);
+				config->text_color_set = false;
+			}
+		}
 	} else if (strcmp(key, "refraction") == 0) {
 		if (strcmp(value, "none") == 0) {
 			config->refraction_mode = BARNY_REFRACT_NONE;
@@ -161,6 +253,86 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->sysinfo_power_decimals = atoi(value);
 		if (config->sysinfo_power_decimals < 0) config->sysinfo_power_decimals = 0;
 		if (config->sysinfo_power_decimals > 2) config->sysinfo_power_decimals = 2;
+	} else if (strcmp(key, "tray_icon_size") == 0) {
+		config->tray_icon_size = atoi(value);
+		if (config->tray_icon_size < 8) config->tray_icon_size = 8;
+		if (config->tray_icon_size > 64) config->tray_icon_size = 64;
+	} else if (strcmp(key, "tray_icon_spacing") == 0) {
+		config->tray_icon_spacing = atoi(value);
+		if (config->tray_icon_spacing < 0) config->tray_icon_spacing = 0;
+		if (config->tray_icon_spacing > 32) config->tray_icon_spacing = 32;
+	/* Clock module */
+	} else if (strcmp(key, "clock_show_time") == 0) {
+		config->clock_show_time = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "clock_24h_format") == 0) {
+		config->clock_24h_format = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "clock_show_seconds") == 0) {
+		config->clock_show_seconds = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "clock_show_date") == 0) {
+		config->clock_show_date = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "clock_show_year") == 0) {
+		config->clock_show_year = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "clock_show_month") == 0) {
+		config->clock_show_month = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "clock_show_day") == 0) {
+		config->clock_show_day = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "clock_show_weekday") == 0) {
+		config->clock_show_weekday = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "clock_date_order") == 0) {
+		config->clock_date_order = atoi(value);
+		if (config->clock_date_order < 0) config->clock_date_order = 0;
+		if (config->clock_date_order > 2) config->clock_date_order = 2;
+	} else if (strcmp(key, "clock_date_separator") == 0) {
+		if (strlen(value) > 0) config->clock_date_separator = value[0];
+	/* Disk module */
+	} else if (strcmp(key, "disk_path") == 0) {
+		free(config->disk_path);
+		config->disk_path = strdup(value);
+	} else if (strcmp(key, "disk_show_percentage") == 0) {
+		config->disk_show_percentage = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "disk_decimals") == 0) {
+		config->disk_decimals = atoi(value);
+		if (config->disk_decimals < 0) config->disk_decimals = 0;
+		if (config->disk_decimals > 2) config->disk_decimals = 2;
+	/* CPU temperature module */
+	} else if (strcmp(key, "cpu_temp_path") == 0) {
+		free(config->cpu_temp_path);
+		config->cpu_temp_path = strdup(value);
+	} else if (strcmp(key, "cpu_temp_zone") == 0) {
+		config->cpu_temp_zone = atoi(value);
+	} else if (strcmp(key, "cpu_temp_show_unit") == 0) {
+		config->cpu_temp_show_unit = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	/* RAM module */
+	} else if (strcmp(key, "ram_show_percentage") == 0) {
+		config->ram_show_percentage = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "ram_decimals") == 0) {
+		config->ram_decimals = atoi(value);
+		if (config->ram_decimals < 0) config->ram_decimals = 0;
+		if (config->ram_decimals > 2) config->ram_decimals = 2;
+	} else if (strcmp(key, "ram_used_method") == 0) {
+		free(config->ram_used_method);
+		config->ram_used_method = strdup(value);
+	/* Network module */
+	} else if (strcmp(key, "network_interface") == 0) {
+		free(config->network_interface);
+		config->network_interface = strdup(value);
+	} else if (strcmp(key, "network_show_ip") == 0) {
+		config->network_show_ip = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "network_show_interface") == 0) {
+		config->network_show_interface = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "network_prefer_ipv4") == 0) {
+		config->network_prefer_ipv4 = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	/* File read module */
+	} else if (strcmp(key, "fileread_path") == 0) {
+		free(config->fileread_path);
+		config->fileread_path = strdup(value);
+	} else if (strcmp(key, "fileread_title") == 0) {
+		free(config->fileread_title);
+		config->fileread_title = strdup(value);
+	} else if (strcmp(key, "fileread_max_chars") == 0) {
+		config->fileread_max_chars = atoi(value);
+		if (config->fileread_max_chars < 1) config->fileread_max_chars = 1;
+		if (config->fileread_max_chars > 256) config->fileread_max_chars = 256;
 	}
 }
 

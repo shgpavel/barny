@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <ctype.h>
 
 #include "barny.h"
 
@@ -11,8 +13,74 @@ typedef struct {
 	double                p_freq;
 	double                e_freq;
 	double                power;
+	int                   p_core_count;
+	int                   e_core_count;
 	PangoFontDescription *font_desc;
 } sysinfo_data_t;
+
+static int
+read_int_file(const char *path)
+{
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return -1;
+	int val;
+	if (fscanf(f, "%d", &val) != 1)
+		val = -1;
+	fclose(f);
+	return val;
+}
+
+static void
+detect_core_counts(sysinfo_data_t *data)
+{
+	DIR *dir = opendir("/sys/devices/system/cpu");
+	if (!dir)
+		return;
+
+	int max_freqs[256];
+	int cpu_count = 0;
+	int highest_freq = 0;
+	int lowest_freq = 0;
+
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != NULL && cpu_count < 256) {
+		if (strncmp(entry->d_name, "cpu", 3) != 0)
+			continue;
+		if (!isdigit(entry->d_name[3]))
+			continue;
+
+		int cpu_id = atoi(entry->d_name + 3);
+		char path[256];
+
+		snprintf(path, sizeof(path),
+		         "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu_id);
+		int max_freq = read_int_file(path);
+		if (max_freq < 0)
+			continue;
+
+		max_freqs[cpu_count] = max_freq;
+
+		if (max_freq > highest_freq)
+			highest_freq = max_freq;
+		if (lowest_freq == 0 || max_freq < lowest_freq)
+			lowest_freq = max_freq;
+
+		cpu_count++;
+	}
+	closedir(dir);
+
+	/* Classify P vs E cores based on max frequency gap */
+	int gap = highest_freq - lowest_freq;
+	int threshold = (gap > 100000) ? lowest_freq + 100000 : 0;
+
+	for (int i = 0; i < cpu_count; i++) {
+		if (max_freqs[i] >= threshold)
+			data->p_core_count++;
+		else
+			data->e_core_count++;
+	}
+}
 
 static int
 sysinfo_init(barny_module_t *self, barny_state_t *state)
@@ -25,6 +93,8 @@ sysinfo_init(barny_module_t *self, barny_state_t *state)
 
 	strcpy(data->freq_str, "-- GHz");
 	strcpy(data->power_str, "-- W");
+
+	detect_core_counts(data);
 
 	return 0;
 }
@@ -56,7 +126,10 @@ sysinfo_update(barny_module_t *self)
 					data->e_freq = e_freq;
 
 					if (cfg->sysinfo_freq_combined) {
-						double avg = (p_freq + e_freq) / 2.0;
+						int total = data->p_core_count + data->e_core_count;
+						double avg = (total > 0)
+						    ? (p_freq * data->p_core_count + e_freq * data->e_core_count) / total
+						    : 0.0;
 						snprintf(data->freq_str,
 						         sizeof(data->freq_str),
 						         "%.2f GHz",
@@ -121,7 +194,11 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	cairo_move_to(cr, x + 1, y + (h - th) / 2 + 1);
 	pango_cairo_show_layout(cr, layout);
 
-	cairo_set_source_rgba(cr, 0.7, 0.9, 1, 0.9);
+	barny_config_t *cfg = &data->state->config;
+	if (cfg->text_color_set)
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 0.9);
+	else
+		cairo_set_source_rgba(cr, 0.7, 0.9, 1, 0.9);
 	cairo_move_to(cr, x, y + (h - th) / 2);
 	pango_cairo_show_layout(cr, layout);
 
@@ -138,7 +215,10 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	cairo_move_to(cr, x + total_width + 1, y + (h - th) / 2 + 1);
 	pango_cairo_show_layout(cr, layout);
 
-	cairo_set_source_rgba(cr, 1, 0.9, 0.7, 0.9);
+	if (cfg->text_color_set)
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 0.9);
+	else
+		cairo_set_source_rgba(cr, 1, 0.9, 0.7, 0.9);
 	cairo_move_to(cr, x + total_width, y + (h - th) / 2);
 	pango_cairo_show_layout(cr, layout);
 

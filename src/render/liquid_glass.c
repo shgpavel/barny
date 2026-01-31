@@ -134,7 +134,6 @@ barny_blur_surface(cairo_surface_t *surface, int radius)
 	uint8_t *data   = cairo_image_surface_get_data(surface);
 
 	uint8_t *temp   = malloc(width * 4);
-	uint8_t *temp2  = malloc(width * 4);
 
 	/* Horizontal pass */
 	for (int y = 0; y < height; y++) {
@@ -166,7 +165,6 @@ barny_blur_surface(cairo_surface_t *surface, int radius)
 	free(col);
 	free(col_out);
 	free(temp);
-	free(temp2);
 
 	cairo_surface_mark_dirty(surface);
 }

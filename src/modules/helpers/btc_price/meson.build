@@ -1,6 +1,5 @@
 btc_price_sources = files(
-    'test.c',
-    'get_price.c',
+    'main.c',
 )
 
 btc_price_deps = [

@@ -41,6 +41,7 @@ output_mode(void *data, struct wl_output *output, uint32_t flags, int32_t width,
 {
 	barny_output_t *out = data;
 	(void)output;
+	(void)height;
 	(void)refresh;
 
 	if (flags & WL_OUTPUT_MODE_CURRENT) {
@@ -257,6 +258,7 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
                 const char *interface, uint32_t version)
 {
 	barny_state_t *state = data;
+	(void)version;
 
 	if (strcmp(interface, wl_compositor_interface.name) == 0) {
 		state->compositor = wl_registry_bind(registry, name,

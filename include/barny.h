@@ -6,6 +6,7 @@
 #include <wayland-client.h>
 #include <cairo/cairo.h>
 #include <pango/pangocairo.h>
+#include <systemd/sd-bus.h>
 
 #define BARNY_VERSION "0.1.0"
 #define BARNY_DEFAULT_HEIGHT 48
@@ -57,6 +58,13 @@ struct barny_config {
     double blur_radius;
     double brightness;
 
+    /* Global text color */
+    char *text_color;              /* NULL = default module colors, or "#XXXXXX" hex */
+    double text_color_r;           /* Parsed RGB values (0.0-1.0) */
+    double text_color_g;
+    double text_color_b;
+    bool text_color_set;           /* true if custom color is set */
+
     /* Workspace module */
     int workspace_indicator_size;  /* Diameter of workspace bubbles (default 24) */
     int workspace_spacing;         /* Space between bubbles (default 6) */
@@ -65,6 +73,10 @@ struct barny_config {
     bool sysinfo_freq_combined;    /* true = combined avg, false = "P: X.XX E: X.XX" */
     int sysinfo_power_decimals;    /* 0, 1, or 2 decimal places for watts */
 
+    /* Tray module */
+    int tray_icon_size;            /* Icon size in pixels (default 24) */
+    int tray_icon_spacing;         /* Space between icons (default 4) */
+
     /* Liquid glass effect parameters */
     barny_refraction_mode_t refraction_mode;  /* Type of displacement */
     double displacement_scale;    /* Strength of lens/displacement effect (0-50) */
@@ -72,6 +84,44 @@ struct barny_config {
     double edge_refraction;       /* Extra displacement at edges (0-2) */
     double noise_scale;           /* Scale for Perlin noise (0.01-0.1) */
     int noise_octaves;            /* Perlin noise detail level (1-4) */
+
+    /* Clock module */
+    bool clock_show_time;
+    bool clock_24h_format;
+    bool clock_show_seconds;
+    bool clock_show_date;
+    bool clock_show_year;
+    bool clock_show_month;
+    bool clock_show_day;
+    bool clock_show_weekday;
+    int clock_date_order;         /* 0=dd/mm/yyyy, 1=mm/dd/yyyy, 2=yyyy/mm/dd */
+    char clock_date_separator;
+
+    /* Disk module */
+    char *disk_path;
+    bool disk_show_percentage;
+    int disk_decimals;
+
+    /* CPU temperature module */
+    char *cpu_temp_path;
+    int cpu_temp_zone;
+    bool cpu_temp_show_unit;
+
+    /* RAM module */
+    bool ram_show_percentage;
+    int ram_decimals;
+    char *ram_used_method;        /* "available" or "free" */
+
+    /* Network module */
+    char *network_interface;      /* interface name or "auto" */
+    bool network_show_ip;
+    bool network_show_interface;
+    bool network_prefer_ipv4;
+
+    /* File read module */
+    char *fileread_path;
+    char *fileread_title;
+    int fileread_max_chars;
 };
 
 /* Per-output state (for multi-monitor support) */
@@ -138,6 +188,10 @@ struct barny_state {
 
     /* Sway IPC */
     int sway_ipc_fd;
+
+    /* D-Bus (for system tray) */
+    sd_bus *dbus;
+    int dbus_fd;
 };
 
 /* Wayland client functions */
@@ -186,6 +240,42 @@ void barny_workspace_refresh(barny_module_t *mod);
 barny_module_t *barny_module_weather_create(void);
 barny_module_t *barny_module_crypto_create(void);
 barny_module_t *barny_module_sysinfo_create(void);
+barny_module_t *barny_module_tray_create(void);
+barny_module_t *barny_module_disk_create(void);
+barny_module_t *barny_module_cpu_temp_create(void);
+barny_module_t *barny_module_ram_create(void);
+barny_module_t *barny_module_network_create(void);
+barny_module_t *barny_module_fileread_create(void);
+
+/* D-Bus (system tray support) */
+int barny_dbus_init(barny_state_t *state);
+void barny_dbus_cleanup(barny_state_t *state);
+int barny_dbus_dispatch(barny_state_t *state);
+int barny_dbus_get_fd(barny_state_t *state);
+
+/* StatusNotifierWatcher */
+int barny_sni_watcher_init(barny_state_t *state);
+void barny_sni_watcher_cleanup(barny_state_t *state);
+
+/* StatusNotifierHost */
+typedef struct sni_item sni_item_t;
+
+struct sni_item {
+    char *service;           /* D-Bus service name */
+    char *object_path;       /* Object path (usually /StatusNotifierItem) */
+    char *id;
+    char *title;
+    char *status;            /* Passive, Active, NeedsAttention */
+    char *icon_name;
+    cairo_surface_t *icon;   /* Rendered icon surface */
+    sni_item_t *next;
+};
+
+int barny_sni_host_init(barny_state_t *state);
+void barny_sni_host_cleanup(barny_state_t *state);
+sni_item_t *barny_sni_host_get_items(barny_state_t *state);
+void barny_sni_item_activate(barny_state_t *state, sni_item_t *item, int x, int y);
+void barny_sni_item_secondary_activate(barny_state_t *state, sni_item_t *item, int x, int y);
 
 /* Sway IPC */
 int barny_sway_ipc_init(barny_state_t *state);
@@ -194,9 +284,6 @@ int barny_sway_ipc_subscribe(barny_state_t *state, const char *events);
 int barny_sway_ipc_send(barny_state_t *state, uint32_t type, const char *payload);
 char *barny_sway_ipc_recv(barny_state_t *state, uint32_t *type);
 char *barny_sway_ipc_recv_sync(barny_state_t *state, uint32_t *type, int timeout_ms);
-
-/* File watchers */
-int barny_watch_file(barny_state_t *state, const char *path, void (*callback)(void *), void *data);
 
 /* Configuration */
 int barny_config_load(barny_config_t *config, const char *path);

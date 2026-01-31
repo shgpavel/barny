@@ -1,7 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "barny.h"
 
 void
@@ -70,6 +66,17 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 		}
 	}
 
+	/* Module spacing */
+	int spacing = 16;
+
+	/* Calculate center total width for positioning */
+	int center_total_width = 0;
+	for (int i = 0; i < center_count; i++) {
+		center_total_width += state->modules[center_modules[i]]->width;
+		if (i < center_count - 1)
+			center_total_width += spacing;
+	}
+
 	/* Render left modules */
 	int x = left_x;
 	for (int i = 0; i < left_count; i++) {
@@ -83,17 +90,10 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 		}
 		cairo_restore(cr);
 
-		x += mod->width + 8;
+		x += mod->width + spacing;
 	}
 
 	/* Render center modules */
-	int center_total_width = 0;
-	for (int i = 0; i < center_count; i++) {
-		center_total_width += state->modules[center_modules[i]]->width;
-		if (i < center_count - 1)
-			center_total_width += 8;
-	}
-
 	x = center_x - center_total_width / 2;
 	for (int i = 0; i < center_count; i++) {
 		barny_module_t *mod = state->modules[center_modules[i]];
@@ -106,7 +106,7 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 		}
 		cairo_restore(cr);
 
-		x += mod->width + 8;
+		x += mod->width + spacing;
 	}
 
 	/* Render right modules (right-to-left) */
@@ -124,6 +124,6 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 		}
 		cairo_restore(cr);
 
-		x -= 8;
+		x -= spacing;
 	}
 }

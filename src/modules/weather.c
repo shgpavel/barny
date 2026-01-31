@@ -87,7 +87,11 @@ weather_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	pango_cairo_show_layout(cr, layout);
 
 	/* Text */
-	cairo_set_source_rgba(cr, 1, 1, 1, 0.9);
+	barny_config_t *cfg = &data->state->config;
+	if (cfg->text_color_set)
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 0.9);
+	else
+		cairo_set_source_rgba(cr, 1, 1, 1, 0.9);
 	cairo_move_to(cr, x, y + (h - th) / 2);
 	pango_cairo_show_layout(cr, layout);
 

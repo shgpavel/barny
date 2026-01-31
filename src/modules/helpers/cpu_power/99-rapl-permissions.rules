@@ -1,0 +1,8 @@
+# Allow users to read Intel/AMD RAPL energy counters for power monitoring
+# Install to /etc/udev/rules.d/
+
+# Intel RAPL
+SUBSYSTEM=="powercap", KERNEL=="intel-rapl:*", ACTION=="add", RUN+="/bin/chmod o+r /sys/class/powercap/%k/energy_uj"
+
+# AMD RAPL
+SUBSYSTEM=="powercap", KERNEL=="amd_rapl:*", ACTION=="add", RUN+="/bin/chmod o+r /sys/class/powercap/%k/energy_uj"

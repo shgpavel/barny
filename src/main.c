@@ -53,6 +53,16 @@ setup_epoll(barny_state_t *s)
 		}
 	}
 
+	/* Add D-Bus fd if connected */
+	if (s->dbus_fd >= 0) {
+		ev.data.fd = s->dbus_fd;
+		if (epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, ev.data.fd, &ev) < 0) {
+			fprintf(stderr,
+			        "barny: failed to add D-Bus fd to epoll\n");
+			return -1;
+		}
+	}
+
 	return 0;
 }
 
@@ -103,6 +113,7 @@ run_event_loop(barny_state_t *s)
 		/* Handle events */
 		bool wayland_readable       = false;
 		bool need_workspace_refresh = false;
+		bool dbus_readable          = false;
 
 		for (int i = 0; i < nfds; i++) {
 			if (events[i].data.fd == wayland_fd) {
@@ -114,6 +125,8 @@ run_event_loop(barny_state_t *s)
 					free(payload);
 					need_workspace_refresh = true;
 				}
+			} else if (events[i].data.fd == s->dbus_fd) {
+				dbus_readable = true;
 			}
 		}
 
@@ -130,13 +143,18 @@ run_event_loop(barny_state_t *s)
 		/* Dispatch events that were just read */
 		wl_display_dispatch_pending(s->display);
 
+		/* Process D-Bus messages */
+		if (dbus_readable) {
+			barny_dbus_dispatch(s);
+		}
+
 		/* Refresh workspace data when IPC events arrive */
 		if (need_workspace_refresh && workspace_mod) {
 			barny_workspace_refresh(workspace_mod);
 		}
 
-		/* Only update modules on timeout or IPC events - not on every Wayland event */
-		if (nfds == 0 || need_workspace_refresh) {
+		/* Only update modules on timeout or IPC/D-Bus events - not on every Wayland event */
+		if (nfds == 0 || need_workspace_refresh || dbus_readable) {
 			barny_modules_update(s);
 		}
 	}
@@ -230,12 +248,24 @@ main(int argc, char *argv[])
 	state.sway_ipc_fd = -1;
 	barny_sway_ipc_init(&state);
 
+	/* Initialize D-Bus (for system tray) */
+	state.dbus_fd = -1;
+	if (barny_dbus_init(&state) < 0) {
+		fprintf(stderr, "barny: D-Bus init failed, tray disabled\n");
+	}
+
 	/* Initialize modules */
 	barny_module_register(&state, barny_module_clock_create());
 	barny_module_register(&state, barny_module_workspace_create());
-	barny_module_register(&state, barny_module_weather_create());
-	barny_module_register(&state, barny_module_crypto_create());
 	barny_module_register(&state, barny_module_sysinfo_create());
+	barny_module_register(&state, barny_module_cpu_temp_create());
+	barny_module_register(&state, barny_module_weather_create());
+	barny_module_register(&state, barny_module_disk_create());
+	barny_module_register(&state, barny_module_ram_create());
+	barny_module_register(&state, barny_module_network_create());
+	barny_module_register(&state, barny_module_fileread_create());
+	barny_module_register(&state, barny_module_crypto_create());
+	barny_module_register(&state, barny_module_tray_create());
 	barny_modules_init(&state);
 
 	/* Setup signal handlers */
@@ -253,6 +283,7 @@ main(int argc, char *argv[])
 
 	/* Cleanup */
 	barny_modules_destroy(&state);
+	barny_dbus_cleanup(&state);
 	barny_sway_ipc_cleanup(&state);
 	barny_wayland_cleanup(&state);
 

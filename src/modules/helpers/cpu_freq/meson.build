@@ -1,9 +1,12 @@
-# Install cpu_freq script
-install_data(
-    'i3cpu_freq',
+cpu_freq_sources = files(
+    'main.c',
+)
+
+barny_cpu_freq = executable(
+    'barny-cpu-freq',
+    cpu_freq_sources,
+    install: true,
     install_dir: get_option('bindir'),
-    rename: 'barny-cpu-freq',
-    install_mode: 'rwxr-xr-x',
 )
 
 # Install systemd user service

@@ -7,10 +7,10 @@
 #include <math.h>
 #include <stdbool.h>
 
-static int _test_pass_count = 0;
-static int _test_fail_count = 0;
-static int _test_total_count = 0;
-static const char *_current_test_name = NULL;
+__attribute__((unused)) static int _test_pass_count = 0;
+__attribute__((unused)) static int _test_fail_count = 0;
+__attribute__((unused)) static int _test_total_count = 0;
+__attribute__((unused)) static const char *_current_test_name = NULL;
 
 #define COLOR_RED     "\x1b[31m"
 #define COLOR_GREEN   "\x1b[32m"

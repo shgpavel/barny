@@ -1,8 +1,5 @@
 weather_sources = files(
     'main.c',
-    'get_location.c',
-    'get_weather.c',
-    'write_callback.c',
 )
 
 weather_deps = [
