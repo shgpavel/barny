@@ -207,10 +207,20 @@ static void
 pointer_axis_discrete(void *data, struct wl_pointer *pointer, uint32_t axis,
                       int32_t discrete)
 {
-	(void)data;
+	barny_state_t *state = data;
 	(void)pointer;
-	(void)axis;
-	(void)discrete;
+
+	/* Only handle vertical scroll (axis 0) when pointer is over the bar */
+	if (axis != 0 || !state->pointer_output) {
+		return;
+	}
+
+	/* Switch workspaces: scroll up = prev, scroll down = next */
+	if (discrete < 0) {
+		barny_sway_ipc_send(state, 0, "workspace prev");
+	} else if (discrete > 0) {
+		barny_sway_ipc_send(state, 0, "workspace next");
+	}
 }
 
 static const struct wl_pointer_listener pointer_listener = {

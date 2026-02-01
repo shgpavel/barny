@@ -86,7 +86,10 @@ barny_config_defaults(barny_config_t *config)
 
 	/* Sysinfo module defaults */
 	config->sysinfo_freq_combined    = true;
+	config->sysinfo_freq_decimals    = 2;
 	config->sysinfo_power_decimals   = 0;
+	config->sysinfo_p_cores          = 0;  /* 0 = auto-detect */
+	config->sysinfo_e_cores          = 0;  /* 0 = auto-detect */
 
 	/* Tray module defaults */
 	config->tray_icon_size           = 24;
@@ -249,10 +252,20 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->workspace_spacing = atoi(value);
 	} else if (strcmp(key, "sysinfo_freq_combined") == 0) {
 		config->sysinfo_freq_combined = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
+	} else if (strcmp(key, "sysinfo_freq_decimals") == 0) {
+		config->sysinfo_freq_decimals = atoi(value);
+		if (config->sysinfo_freq_decimals < 0) config->sysinfo_freq_decimals = 0;
+		if (config->sysinfo_freq_decimals > 2) config->sysinfo_freq_decimals = 2;
 	} else if (strcmp(key, "sysinfo_power_decimals") == 0) {
 		config->sysinfo_power_decimals = atoi(value);
 		if (config->sysinfo_power_decimals < 0) config->sysinfo_power_decimals = 0;
 		if (config->sysinfo_power_decimals > 2) config->sysinfo_power_decimals = 2;
+	} else if (strcmp(key, "sysinfo_p_cores") == 0) {
+		config->sysinfo_p_cores = atoi(value);
+		if (config->sysinfo_p_cores < 0) config->sysinfo_p_cores = 0;
+	} else if (strcmp(key, "sysinfo_e_cores") == 0) {
+		config->sysinfo_e_cores = atoi(value);
+		if (config->sysinfo_e_cores < 0) config->sysinfo_e_cores = 0;
 	} else if (strcmp(key, "tray_icon_size") == 0) {
 		config->tray_icon_size = atoi(value);
 		if (config->tray_icon_size < 8) config->tray_icon_size = 8;

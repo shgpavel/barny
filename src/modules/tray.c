@@ -14,6 +14,7 @@ typedef struct {
 	int icon_size;
 	int icon_spacing;
 	int item_count;
+	int render_x;  /* X position where module was last rendered */
 } tray_data_t;
 
 static int
@@ -71,6 +72,9 @@ tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	tray_data_t *data = self->data;
 	(void)w;
 
+	/* Store render position for click handling */
+	data->render_x = x;
+
 	sni_item_t *items = barny_sni_host_get_items(data->state);
 	if (!items) {
 		return;
@@ -119,6 +123,9 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 		return;
 	}
 
+	/* Convert absolute x to position relative to module */
+	int rel_x = x - data->render_x;
+
 	/* Determine which icon was clicked */
 	int icon_x = 4;  /* Starting offset */
 
@@ -132,11 +139,12 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 
 		int icon_end = icon_x + data->icon_size;
 
-		if (x >= icon_x && x < icon_end) {
+		if (rel_x >= icon_x && rel_x < icon_end) {
 			/* Found the clicked icon */
-			if (button == 1) {  /* Left click */
+			/* Button codes are evdev: BTN_LEFT=272, BTN_RIGHT=273 */
+			if (button == 272) {  /* Left click */
 				barny_sni_item_activate(data->state, item, x, y);
-			} else if (button == 3) {  /* Right click */
+			} else if (button == 273) {  /* Right click */
 				barny_sni_item_secondary_activate(data->state, item, x, y);
 			}
 			return;

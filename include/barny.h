@@ -71,7 +71,10 @@ struct barny_config {
 
     /* Sysinfo module */
     bool sysinfo_freq_combined;    /* true = combined avg, false = "P: X.XX E: X.XX" */
+    int sysinfo_freq_decimals;     /* 0, 1, or 2 decimal places for frequency */
     int sysinfo_power_decimals;    /* 0, 1, or 2 decimal places for watts */
+    int sysinfo_p_cores;           /* P-core count (0 = auto-detect) */
+    int sysinfo_e_cores;           /* E-core count (0 = auto-detect) */
 
     /* Tray module */
     int tray_icon_size;            /* Icon size in pixels (default 24) */

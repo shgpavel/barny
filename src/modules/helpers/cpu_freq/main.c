@@ -9,6 +9,8 @@
 #define UPDATE_INTERVAL 2
 #define OUTPUT_PATH "/opt/barny/modules/cpu_freq"
 #define OUTPUT_TMP_PATH "/opt/barny/modules/cpu_freq.tmp"
+#define CONFIG_PATH "/etc/barny/barny.conf"
+#define CONFIG_PATH_USER "/.config/barny/barny.conf"
 #define MAX_CPUS 256
 
 static volatile int running = 1;
@@ -23,11 +25,82 @@ static int cpu_count = 0;
 static int p_core_count = 0;
 static int e_core_count = 0;
 
+/* Config values */
+static int cfg_p_cores = 0;      /* 0 = auto-detect */
+static int cfg_e_cores = 0;      /* 0 = auto-detect */
+static int cfg_freq_decimals = 2;
+
 static void
 signal_handler(int sig)
 {
 	(void)sig;
 	running = 0;
+}
+
+static char *
+trim(char *str)
+{
+	while (isspace(*str))
+		str++;
+	if (*str == 0)
+		return str;
+
+	char *end = str + strlen(str) - 1;
+	while (end > str && isspace(*end))
+		end--;
+	end[1] = '\0';
+
+	return str;
+}
+
+static void
+read_config(void)
+{
+	/* Try user config first, then system config */
+	char user_path[512];
+	const char *home = getenv("HOME");
+	FILE *f = NULL;
+
+	if (home) {
+		snprintf(user_path, sizeof(user_path), "%s/.config/barny/barny.conf", home);
+		f = fopen(user_path, "r");
+	}
+
+	if (!f)
+		f = fopen(CONFIG_PATH, "r");
+
+	if (!f)
+		return;
+
+	char line[256];
+	while (fgets(line, sizeof(line), f)) {
+		char *trimmed = trim(line);
+
+		if (*trimmed == '#' || *trimmed == '\0')
+			continue;
+
+		char *eq = strchr(trimmed, '=');
+		if (!eq)
+			continue;
+
+		*eq = '\0';
+		char *key = trim(trimmed);
+		char *value = trim(eq + 1);
+
+		if (strcmp(key, "sysinfo_p_cores") == 0) {
+			cfg_p_cores = atoi(value);
+			if (cfg_p_cores < 0) cfg_p_cores = 0;
+		} else if (strcmp(key, "sysinfo_e_cores") == 0) {
+			cfg_e_cores = atoi(value);
+			if (cfg_e_cores < 0) cfg_e_cores = 0;
+		} else if (strcmp(key, "sysinfo_freq_decimals") == 0) {
+			cfg_freq_decimals = atoi(value);
+			if (cfg_freq_decimals < 0) cfg_freq_decimals = 0;
+			if (cfg_freq_decimals > 2) cfg_freq_decimals = 2;
+		}
+	}
+
+	fclose(f);
 }
 
 static int
@@ -53,6 +126,7 @@ detect_cpus(void)
 		return;
 
 	int max_freqs[MAX_CPUS];
+	int cpu_ids[MAX_CPUS];
 	int highest_freq = 0;
 
 	/* First pass: collect all CPUs and their max frequencies */
@@ -81,7 +155,7 @@ detect_cpus(void)
 		         "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu_id);
 		int max_freq = read_int_file(path);
 
-		cpus[cpu_count].id = cpu_id;
+		cpu_ids[cpu_count] = cpu_id;
 		max_freqs[cpu_count] = max_freq;
 
 		if (max_freq > highest_freq)
@@ -92,15 +166,62 @@ detect_cpus(void)
 
 	closedir(dir);
 
-	/* Find lowest max frequency */
+	/* Sort CPUs by ID (readdir order is not guaranteed) */
+	for (int i = 0; i < cpu_count - 1; i++) {
+		for (int j = i + 1; j < cpu_count; j++) {
+			if (cpu_ids[j] < cpu_ids[i]) {
+				int tmp_id = cpu_ids[i];
+				cpu_ids[i] = cpu_ids[j];
+				cpu_ids[j] = tmp_id;
+
+				int tmp_freq = max_freqs[i];
+				max_freqs[i] = max_freqs[j];
+				max_freqs[j] = tmp_freq;
+			}
+		}
+	}
+
+	/* Copy sorted IDs to cpus array */
+	for (int i = 0; i < cpu_count; i++) {
+		cpus[i].id = cpu_ids[i];
+	}
+
+	/* Check if manual P/E core counts are configured */
+	if (cfg_p_cores > 0 || cfg_e_cores > 0) {
+		/* Use configured counts - P-cores are first N cores by ID */
+		int configured_p = (cfg_p_cores > 0) ? cfg_p_cores : 0;
+		int configured_e = (cfg_e_cores > 0) ? cfg_e_cores : 0;
+
+		/* Validate: don't exceed actual CPU count */
+		if (configured_p + configured_e > cpu_count) {
+			fprintf(stderr, "Warning: configured P+E cores (%d+%d) exceeds detected CPUs (%d)\n",
+			        configured_p, configured_e, cpu_count);
+			/* Fall back to auto-detect */
+			configured_p = 0;
+			configured_e = 0;
+		}
+
+		if (configured_p > 0 || configured_e > 0) {
+			/* Assign by CPU ID order: first cfg_p_cores are P, rest are E */
+			for (int i = 0; i < cpu_count; i++) {
+				cpus[i].is_p_core = (i < configured_p) ? 1 : 0;
+				if (cpus[i].is_p_core)
+					p_core_count++;
+				else
+					e_core_count++;
+			}
+			return;
+		}
+	}
+
+	/* Auto-detect: classify P vs E cores based on max frequency */
 	int lowest_freq = highest_freq;
 	for (int i = 0; i < cpu_count; i++) {
 		if (max_freqs[i] < lowest_freq)
 			lowest_freq = max_freqs[i];
 	}
 
-	/* Second pass: classify P vs E cores
-	 * If there's a meaningful gap (>100MHz), use midpoint as threshold
+	/* If there's a meaningful gap (>100MHz), use midpoint as threshold
 	 * Otherwise treat all as same type */
 	int gap = highest_freq - lowest_freq;
 	int threshold;
