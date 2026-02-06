@@ -278,16 +278,11 @@ main(int argc, char *argv[])
 	}
 
 	/* Initialize modules */
-	barny_module_register(&state, barny_module_clock_create());
-	barny_module_register(&state, barny_module_workspace_create());
-	barny_module_register(&state, barny_module_sysinfo_create());
-	barny_module_register(&state, barny_module_weather_create());
-	barny_module_register(&state, barny_module_disk_create());
-	barny_module_register(&state, barny_module_ram_create());
-	barny_module_register(&state, barny_module_network_create());
-	barny_module_register(&state, barny_module_fileread_create());
-	barny_module_register(&state, barny_module_crypto_create());
-	barny_module_register(&state, barny_module_tray_create());
+	barny_module_layout_t layout;
+	barny_module_layout_init(&layout);
+	barny_module_layout_load_from_config(&state.config, &layout);
+	barny_module_layout_apply_to_state(&layout, &state);
+	barny_module_layout_destroy(&layout);
 	barny_modules_init(&state);
 
 	/* Setup signal handlers */
@@ -325,6 +320,7 @@ main(int argc, char *argv[])
 		close(state.epoll_fd);
 	}
 
+	barny_config_cleanup(&state.config);
 	printf("barny: shutdown complete\n");
 	return 0;
 }

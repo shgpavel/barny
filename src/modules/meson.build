@@ -4,6 +4,8 @@ barny_sources += files(
     'crypto.c',
     'disk.c',
     'fileread.c',
+    'layout.c',
+    'layout_apply.c',
     'module.c',
     'network.c',
     'ram.c',

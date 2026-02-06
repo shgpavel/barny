@@ -75,6 +75,23 @@ barny = executable(
     install: true,
 )
 
+sdl3 = dependency('sdl3', required: false)
+if sdl3.found()
+    barny_layout_editor = executable(
+        'barny-layout-editor',
+        files(
+            'src/editor/main.c',
+            'src/config.c',
+            'src/modules/layout.c',
+        ),
+        dependencies: [sdl3, pangocairo, math],
+        include_directories: inc_dirs,
+        install: true,
+    )
+else
+    warning('SDL3 not found; barny-layout-editor will not be built')
+endif
+
 subdir('tests')
 subdir('src/modules/helpers/weather')
 subdir('src/modules/helpers/btc_price')

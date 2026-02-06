@@ -58,6 +58,9 @@ To run tests:
 meson test -C build
 ```
 
+If SDL3 is available, this also builds `barny-layout-editor` (graphical module
+placement editor).
+
 ## Installation
 
 Install barny and all modules:
@@ -122,6 +125,44 @@ Barny reads configuration from:
 |-----------|---------|-------------|
 | `workspace_indicator_size` | 24 | Diameter of workspace bubbles |
 | `workspace_spacing` | 6 | Space between bubbles |
+
+### Module Layout
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `modules_left` | `workspace` | CSV list of module IDs for left section |
+| `modules_center` | *(empty)* | CSV list of module IDs for center section |
+| `modules_right` | `clock, sysinfo, weather, disk, ram, network, fileread, crypto, tray` | CSV list of module IDs for right section |
+
+If all three `modules_*` keys are omitted, Barny uses the legacy built-in
+layout. If you set them explicitly (including empty values), Barny uses your
+exact selection/order and allows an empty bar.
+
+You can add proportional spacer tokens in these CSV lists:
+- `gap:N` adds extra spacing of `N * module_spacing`
+- Example: `modules_left = workspace, gap:3, clock`
+
+### Graphical Layout Editor
+
+Run:
+```bash
+barny-layout-editor
+```
+
+Optional config path:
+```bash
+barny-layout-editor ~/.config/barny/barny.conf
+```
+
+Controls:
+- Drag blocks between the contiguous bar lane and `MODULE POOL`
+- `S` saves contiguous placement into `modules_left` and emits `gap:N` tokens
+- `R` resets to legacy defaults
+- `C` clears all modules from the bar
+
+The editor and runtime now keep module placement bounded by bar width while
+considering each module's rendered width. If total content is too wide, gaps
+are compressed first.
 
 ### Liquid Glass Parameters
 

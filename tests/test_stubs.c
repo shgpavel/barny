@@ -53,3 +53,18 @@ barny_sway_ipc_cleanup(barny_state_t *state)
 {
 	(void)state;
 }
+
+barny_module_t *
+barny_module_tray_create(void)
+{
+	barny_module_t *mod = calloc(1, sizeof(barny_module_t));
+	if (!mod)
+		return NULL;
+
+	mod->name     = "tray";
+	mod->position = BARNY_POS_RIGHT;
+	mod->width    = 100;
+	mod->height   = 28;
+	mod->dirty    = true;
+	return mod;
+}

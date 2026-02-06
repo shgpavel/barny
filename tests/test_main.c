@@ -34,6 +34,16 @@ extern void
 test_module_positions(void);
 extern void
 test_module_data(void);
+extern void
+test_module_layout_basics(void);
+extern void
+test_module_layout_parsing_and_ops(void);
+extern void
+test_module_layout_runtime_apply(void);
+extern void
+test_module_layout_edge_cases(void);
+extern void
+test_module_layout_config_write(void);
 
 extern void
 test_clock_module_behavior(void);
@@ -79,6 +89,11 @@ RUN_SUITE(test_module_lifecycle);
 RUN_SUITE(test_module_factories);
 RUN_SUITE(test_module_positions);
 RUN_SUITE(test_module_data);
+RUN_SUITE(test_module_layout_basics);
+RUN_SUITE(test_module_layout_parsing_and_ops);
+RUN_SUITE(test_module_layout_runtime_apply);
+RUN_SUITE(test_module_layout_edge_cases);
+RUN_SUITE(test_module_layout_config_write);
 
 printf("\n--- New Module Behavior Tests ---\n");
 RUN_SUITE(test_clock_module_behavior);

@@ -75,6 +75,9 @@ struct barny_config {
 
     /* Module layout */
     int module_spacing;            /* Space between modules (default 16) */
+    char *modules_left;            /* CSV list of module IDs for left section */
+    char *modules_center;          /* CSV list of module IDs for center section */
+    char *modules_right;           /* CSV list of module IDs for right section */
 
     /* Sysinfo module */
     bool sysinfo_freq_combined;    /* true = combined avg, false = "P: X.XX E: X.XX" */
@@ -147,6 +150,15 @@ struct barny_config {
     char *fileread_title;
     int fileread_max_chars;
 };
+
+typedef struct barny_module_layout {
+    char *left[BARNY_MAX_MODULES];
+    int left_count;
+    char *center[BARNY_MAX_MODULES];
+    int center_count;
+    char *right[BARNY_MAX_MODULES];
+    int right_count;
+} barny_module_layout_t;
 
 /* Per-output state (for multi-monitor support) */
 struct barny_output {
@@ -274,6 +286,25 @@ barny_module_t *barny_module_ram_create(void);
 barny_module_t *barny_module_network_create(void);
 barny_module_t *barny_module_fileread_create(void);
 
+/* Module layout */
+void barny_module_layout_init(barny_module_layout_t *layout);
+void barny_module_layout_destroy(barny_module_layout_t *layout);
+void barny_module_layout_set_defaults(barny_module_layout_t *layout);
+int barny_module_layout_load_from_config(const barny_config_t *config,
+                                         barny_module_layout_t *layout);
+bool barny_module_layout_contains(const barny_module_layout_t *layout,
+                                  const char *name);
+bool barny_module_catalog_has(const char *name);
+int barny_module_catalog_names(const char **names, int max_names);
+int barny_module_layout_gap_units(const char *name);
+int barny_module_layout_insert(barny_module_layout_t *layout,
+                               barny_position_t position,
+                               const char *name, int index);
+bool barny_module_layout_remove(barny_module_layout_t *layout, const char *name);
+char *barny_module_layout_serialize_csv(const char *const *names, int count);
+int barny_module_layout_apply_to_state(const barny_module_layout_t *layout,
+                                       barny_state_t *state);
+
 /* D-Bus (system tray support) */
 int barny_dbus_init(barny_state_t *state);
 void barny_dbus_cleanup(barny_state_t *state);
@@ -315,6 +346,11 @@ char *barny_sway_ipc_recv_sync(barny_state_t *state, uint32_t *type, int timeout
 /* Configuration */
 int barny_config_load(barny_config_t *config, const char *path);
 void barny_config_defaults(barny_config_t *config);
+void barny_config_cleanup(barny_config_t *config);
 void barny_config_validate_font(const barny_config_t *config);
+int barny_config_write_module_layout(const char *path,
+                                     const char *modules_left,
+                                     const char *modules_center,
+                                     const char *modules_right);
 
 #endif /* BARNY_H */

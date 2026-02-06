@@ -3,6 +3,7 @@ test_sources = files(
     'test_liquid_glass.c',
     'test_main.c',
     'test_modules.c',
+    'test_module_layout.c',
     'test_new_modules.c',
     'test_stubs.c',
 )
@@ -13,6 +14,8 @@ test_support_sources = files(
     '../src/modules/crypto.c',
     '../src/modules/disk.c',
     '../src/modules/fileread.c',
+    '../src/modules/layout.c',
+    '../src/modules/layout_apply.c',
     '../src/modules/module.c',
     '../src/modules/network.c',
     '../src/modules/ram.c',
