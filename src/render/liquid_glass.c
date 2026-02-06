@@ -629,13 +629,13 @@ build_glass_bg(barny_state_t *state, int width, int height)
 
 	/* Layer 1: Outer border */
 	create_rounded_rect(cr, x + 0.5, y + 0.5, w - 1, h - 1, r);
-	cairo_set_source_rgba(cr, 1, 1, 1, 0.25);
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.12);
 	cairo_set_line_width(cr, 1);
 	cairo_stroke(cr);
 
 	/* Layer 2: Inner glow */
 	create_rounded_rect(cr, x + 1.5, y + 1.5, w - 3, h - 3, r - 1);
-	cairo_set_source_rgba(cr, 1, 1, 1, 0.12);
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.06);
 	cairo_set_line_width(cr, 2);
 	cairo_stroke(cr);
 
@@ -645,8 +645,8 @@ build_glass_bg(barny_state_t *state, int width, int height)
 
 	cairo_pattern_t *highlight
 	        = cairo_pattern_create_linear(0, 0, width * 0.7, height * 0.7);
-	cairo_pattern_add_color_stop_rgba(highlight, 0.0, 1, 1, 1, 0.35);
-	cairo_pattern_add_color_stop_rgba(highlight, 0.3, 1, 1, 1, 0.08);
+	cairo_pattern_add_color_stop_rgba(highlight, 0.0, 1, 1, 1, 0.15);
+	cairo_pattern_add_color_stop_rgba(highlight, 0.3, 1, 1, 1, 0.04);
 	cairo_pattern_add_color_stop_rgba(highlight, 1.0, 1, 1, 1, 0);
 	cairo_set_source(cr, highlight);
 	cairo_paint(cr);
@@ -668,7 +668,7 @@ build_glass_bg(barny_state_t *state, int width, int height)
 	cairo_clip(cr);
 
 	cairo_pattern_t *top_refract = cairo_pattern_create_linear(0, 0, 0, 8);
-	cairo_pattern_add_color_stop_rgba(top_refract, 0.0, 1, 1, 1, 0.2);
+	cairo_pattern_add_color_stop_rgba(top_refract, 0.0, 1, 1, 1, 0.08);
 	cairo_pattern_add_color_stop_rgba(top_refract, 1.0, 1, 1, 1, 0);
 	cairo_set_source(cr, top_refract);
 	cairo_rectangle(cr, 0, 0, width, 8);
@@ -676,7 +676,7 @@ build_glass_bg(barny_state_t *state, int width, int height)
 	cairo_pattern_destroy(top_refract);
 
 	cairo_pattern_t *left_refract = cairo_pattern_create_linear(0, 0, 8, 0);
-	cairo_pattern_add_color_stop_rgba(left_refract, 0.0, 1, 1, 1, 0.15);
+	cairo_pattern_add_color_stop_rgba(left_refract, 0.0, 1, 1, 1, 0.06);
 	cairo_pattern_add_color_stop_rgba(left_refract, 1.0, 1, 1, 1, 0);
 	cairo_set_source(cr, left_refract);
 	cairo_rectangle(cr, 0, 0, 8, height);
