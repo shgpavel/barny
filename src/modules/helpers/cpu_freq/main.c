@@ -10,7 +10,6 @@
 #define OUTPUT_PATH "/opt/barny/modules/cpu_freq"
 #define OUTPUT_TMP_PATH "/opt/barny/modules/cpu_freq.tmp"
 #define CONFIG_PATH "/etc/barny/barny.conf"
-#define CONFIG_PATH_USER "/.config/barny/barny.conf"
 #define MAX_CPUS 256
 
 static volatile int running = 1;
@@ -28,7 +27,6 @@ static int e_core_count = 0;
 /* Config values */
 static int cfg_p_cores = 0;      /* 0 = auto-detect */
 static int cfg_e_cores = 0;      /* 0 = auto-detect */
-static int cfg_freq_decimals = 2;
 
 static void
 signal_handler(int sig)
@@ -40,13 +38,13 @@ signal_handler(int sig)
 static char *
 trim(char *str)
 {
-	while (isspace(*str))
+	while (isspace((unsigned char)*str))
 		str++;
 	if (*str == 0)
 		return str;
 
 	char *end = str + strlen(str) - 1;
-	while (end > str && isspace(*end))
+	while (end > str && isspace((unsigned char)*end))
 		end--;
 	end[1] = '\0';
 
@@ -56,7 +54,6 @@ trim(char *str)
 static void
 read_config(void)
 {
-	/* Try user config first, then system config */
 	char user_path[512];
 	const char *home = getenv("HOME");
 	FILE *f = NULL;
@@ -93,10 +90,6 @@ read_config(void)
 		} else if (strcmp(key, "sysinfo_e_cores") == 0) {
 			cfg_e_cores = atoi(value);
 			if (cfg_e_cores < 0) cfg_e_cores = 0;
-		} else if (strcmp(key, "sysinfo_freq_decimals") == 0) {
-			cfg_freq_decimals = atoi(value);
-			if (cfg_freq_decimals < 0) cfg_freq_decimals = 0;
-			if (cfg_freq_decimals > 2) cfg_freq_decimals = 2;
 		}
 	}
 
@@ -289,6 +282,7 @@ main(void)
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
 
+	read_config();
 	detect_cpus();
 
 	if (cpu_count == 0) {

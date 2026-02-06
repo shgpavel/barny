@@ -1,0 +1,10 @@
+CompileFlags:
+  CompilationDatabase: build/
+
+Diagnostics:
+  ClangTidy:
+    Add:
+      - bugprone-*
+      - performance-*
+      - portability-*
+  UnusedIncludes: Strict

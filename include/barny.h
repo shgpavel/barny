@@ -68,6 +68,13 @@ struct barny_config {
     /* Workspace module */
     int workspace_indicator_size;  /* Diameter of workspace bubbles (default 24) */
     int workspace_spacing;         /* Space between bubbles (default 6) */
+    char **workspace_names;        /* Custom workspace names (NULL-terminated array) */
+    int workspace_name_count;      /* Number of configured workspace names */
+    char *workspace_shape;         /* "circle" (default) or "square" */
+    int workspace_corner_radius;   /* Corner radius for square shape (default 4) */
+
+    /* Module layout */
+    int module_spacing;            /* Space between modules (default 16) */
 
     /* Sysinfo module */
     bool sysinfo_freq_combined;    /* true = combined avg, false = "P: X.XX E: X.XX" */
@@ -75,10 +82,22 @@ struct barny_config {
     int sysinfo_power_decimals;    /* 0, 1, or 2 decimal places for watts */
     int sysinfo_p_cores;           /* P-core count (0 = auto-detect) */
     int sysinfo_e_cores;           /* E-core count (0 = auto-detect) */
+    int sysinfo_item_spacing;      /* Space between freq/power/temp (default 8) */
+    bool sysinfo_freq_show_unit;   /* Show "GHz" after frequency */
+    bool sysinfo_freq_label_space; /* Space after P:/E: labels: "P: 4.5" vs "P:4.5" */
+    bool sysinfo_freq_unit_space;  /* Space before GHz: "4.5 GHz" vs "4.5GHz" */
+    bool sysinfo_power_unit_space; /* Space before W: "12 W" vs "12W" */
+    bool sysinfo_temp_unit_space;  /* Space before C: "52 C" vs "52C" */
 
     /* Tray module */
     int tray_icon_size;            /* Icon size in pixels (default 24) */
     int tray_icon_spacing;         /* Space between icons (default 4) */
+    char *tray_icon_shape;         /* "circle" (default) or "square" */
+    int tray_icon_corner_radius;   /* Corner radius for square shape (default 4) */
+    double tray_icon_bg_r;         /* Background color RGB (0.0-1.0) */
+    double tray_icon_bg_g;
+    double tray_icon_bg_b;
+    double tray_icon_bg_opacity;   /* Background opacity (0.0-1.0, default 0.3) */
 
     /* Liquid glass effect parameters */
     barny_refraction_mode_t refraction_mode;  /* Type of displacement */
@@ -102,18 +121,20 @@ struct barny_config {
 
     /* Disk module */
     char *disk_path;
-    bool disk_show_percentage;
+    char *disk_mode;              /* "percentage", "used_total", "free" */
     int disk_decimals;
+    bool disk_unit_space;         /* "55 G" vs "55G", "55 %" vs "55%" */
 
-    /* CPU temperature module */
-    char *cpu_temp_path;
-    int cpu_temp_zone;
-    bool cpu_temp_show_unit;
+    /* Sysinfo temperature settings */
+    char *sysinfo_temp_path;
+    int sysinfo_temp_zone;
+    bool sysinfo_temp_show_unit;
 
     /* RAM module */
-    bool ram_show_percentage;
+    char *ram_mode;               /* "percentage", "used_total", "used", "free" */
     int ram_decimals;
     char *ram_used_method;        /* "available" or "free" */
+    bool ram_unit_space;          /* "55 G" vs "55G", "55 %" vs "55%" */
 
     /* Network module */
     char *network_interface;      /* interface name or "auto" */
@@ -145,10 +166,14 @@ struct barny_output {
     int32_t height;
     int32_t scale;
     char *name;
+    uint32_t registry_name;  /* For matching during removal */
 
     /* State */
     bool configured;
     bool frame_pending;
+
+    /* Cached liquid glass background (invalidated on resize) */
+    cairo_surface_t *bg_cache;
 
     barny_state_t *state;
     struct barny_output *next;
@@ -245,7 +270,6 @@ barny_module_t *barny_module_crypto_create(void);
 barny_module_t *barny_module_sysinfo_create(void);
 barny_module_t *barny_module_tray_create(void);
 barny_module_t *barny_module_disk_create(void);
-barny_module_t *barny_module_cpu_temp_create(void);
 barny_module_t *barny_module_ram_create(void);
 barny_module_t *barny_module_network_create(void);
 barny_module_t *barny_module_fileread_create(void);

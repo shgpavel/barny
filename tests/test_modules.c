@@ -276,27 +276,25 @@ test_module_factories(void)
 		free(mod);
 	}
 
-	/* CPU temp module */
-	TEST("cpu_temp module created with correct name")
+	/* Sysinfo module (includes freq, power, temp) */
+	TEST("sysinfo module created with correct name")
 	{
-		barny_module_t *mod = barny_module_cpu_temp_create();
+		barny_module_t *mod = barny_module_sysinfo_create();
 		ASSERT_NOT_NULL(mod);
-		ASSERT_EQ_STR("cpu_temp", mod->name);
+		ASSERT_EQ_STR("sysinfo", mod->name);
 		ASSERT_NOT_NULL(mod->init);
 		ASSERT_NOT_NULL(mod->update);
 		ASSERT_NOT_NULL(mod->render);
 		if (mod->destroy)
 			mod->destroy(mod);
-		free(mod);
 	}
 
-	TEST("cpu_temp module has right position")
+	TEST("sysinfo module has right position")
 	{
-		barny_module_t *mod = barny_module_cpu_temp_create();
+		barny_module_t *mod = barny_module_sysinfo_create();
 		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
-		free(mod);
 	}
 
 	/* RAM module */

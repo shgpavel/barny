@@ -119,9 +119,13 @@ run_event_loop(barny_state_t *s)
 			if (events[i].data.fd == wayland_fd) {
 				wayland_readable = true;
 			} else if (events[i].data.fd == s->sway_ipc_fd) {
-				uint32_t type;
-				char    *payload = barny_sway_ipc_recv(s, &type);
-				if (payload) {
+				/* Drain all pending IPC messages to avoid
+				 * multiple refreshes during rapid switching */
+				for (;;) {
+					uint32_t type;
+					char *payload = barny_sway_ipc_recv(s, &type);
+					if (!payload)
+						break;
 					free(payload);
 					need_workspace_refresh = true;
 				}
@@ -153,9 +157,28 @@ run_event_loop(barny_state_t *s)
 			barny_workspace_refresh(workspace_mod);
 		}
 
-		/* Only update modules on timeout or IPC/D-Bus events - not on every Wayland event */
-		if (nfds == 0 || need_workspace_refresh || dbus_readable) {
+		/* Full module I/O update only on 500ms timeout — avoids
+		 * expensive file reads (sysinfo, ram, disk, network) during
+		 * latency-sensitive workspace switches and tray events */
+		if (nfds == 0) {
 			barny_modules_update(s);
+		} else {
+			/* For workspace/dbus events, just render dirty modules
+			 * without polling all modules for data changes */
+			bool needs_redraw = false;
+			for (int i = 0; i < s->module_count; i++) {
+				if (s->modules[i] && s->modules[i]->dirty) {
+					needs_redraw = true;
+					break;
+				}
+			}
+			if (needs_redraw) {
+				for (barny_output_t *out = s->outputs; out;
+				     out = out->next) {
+					if (out->configured)
+						barny_render_frame(out);
+				}
+			}
 		}
 	}
 }
@@ -258,7 +281,6 @@ main(int argc, char *argv[])
 	barny_module_register(&state, barny_module_clock_create());
 	barny_module_register(&state, barny_module_workspace_create());
 	barny_module_register(&state, barny_module_sysinfo_create());
-	barny_module_register(&state, barny_module_cpu_temp_create());
 	barny_module_register(&state, barny_module_weather_create());
 	barny_module_register(&state, barny_module_disk_create());
 	barny_module_register(&state, barny_module_ram_create());

@@ -74,8 +74,17 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 			continue;
 		}
 
+		/* Validate dimensions - reject bogus data from misbehaving apps */
+		if (width <= 0 || height <= 0 || width > 1024 || height > 1024) {
+			sd_bus_message_exit_container(m);
+			continue;
+		}
+
+		/* Check for integer overflow in pixel count */
+		size_t expected = (size_t)width * (size_t)height * 4;
+
 		r = sd_bus_message_read_array(m, 'y', &pixels, &pixel_len);
-		if (r < 0 || pixel_len != (size_t)(width * height * 4)) {
+		if (r < 0 || pixel_len != expected) {
 			sd_bus_message_exit_container(m);
 			continue;
 		}
@@ -91,6 +100,7 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 			/* Create Cairo surface and convert from network byte order ARGB */
 			best = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
 			if (cairo_surface_status(best) != CAIRO_STATUS_SUCCESS) {
+				cairo_surface_destroy(best);
 				best = NULL;
 				sd_bus_message_exit_container(m);
 				continue;
@@ -117,12 +127,29 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 	if (best && best_size != target_size) {
 		int w = cairo_image_surface_get_width(best);
 		int h = cairo_image_surface_get_height(best);
+
+		if (w <= 0 || h <= 0 || best_size <= 0) {
+			cairo_surface_destroy(best);
+			return NULL;
+		}
+
 		double scale = (double)target_size / best_size;
 		int new_w = (int)(w * scale);
 		int new_h = (int)(h * scale);
 
+		if (new_w <= 0 || new_h <= 0) {
+			cairo_surface_destroy(best);
+			return NULL;
+		}
+
 		cairo_surface_t *scaled = cairo_image_surface_create(
 		        CAIRO_FORMAT_ARGB32, new_w, new_h);
+		if (cairo_surface_status(scaled) != CAIRO_STATUS_SUCCESS) {
+			cairo_surface_destroy(scaled);
+			cairo_surface_destroy(best);
+			return NULL;
+		}
+
 		cairo_t *cr = cairo_create(scaled);
 		cairo_scale(cr, scale, scale);
 		cairo_set_source_surface(cr, best, 0, 0);
@@ -142,8 +169,15 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 static cairo_surface_t *
 create_placeholder_icon(const char *id, int size)
 {
+	if (size <= 0 || size > 256)
+		size = 24;
+
 	cairo_surface_t *surface = cairo_image_surface_create(
 	        CAIRO_FORMAT_ARGB32, size, size);
+	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
 	cairo_t *cr = cairo_create(surface);
 
 	/* Draw colored circle based on id hash */
@@ -315,13 +349,13 @@ fetch_item_properties(sni_item_t *item, int icon_size)
 static sni_item_t *
 add_item(const char *service_string, int icon_size)
 {
-	if (!host) {
+	if (!host || !service_string || !service_string[0]) {
 		return NULL;
 	}
 
 	/* Check for duplicates */
 	for (sni_item_t *item = host->items; item; item = item->next) {
-		if (strcmp(item->service, service_string) == 0) {
+		if (item->service && strcmp(item->service, service_string) == 0) {
 			return item;
 		}
 	}
@@ -410,16 +444,28 @@ handle_new_icon(sd_bus_message *m, void *userdata, sd_bus_error *error)
 	}
 
 	const char *sender = sd_bus_message_get_sender(m);
+	if (!sender)
+		return 0;
+
 	int icon_size = host->state->config.tray_icon_size;
 
 	/* Find the item and refresh its icon */
 	for (sni_item_t *item = host->items; item; item = item->next) {
-		if (strstr(item->service, sender)) {
+		if (item->service && strstr(item->service, sender)) {
 			if (item->icon) {
 				cairo_surface_destroy(item->icon);
 				item->icon = NULL;
 			}
 			fetch_item_icon(item, icon_size);
+
+			/* Invalidate the tray module so the new icon gets rendered */
+			for (int i = 0; i < host->state->module_count; i++) {
+				barny_module_t *mod = host->state->modules[i];
+				if (mod && mod->name && strcmp(mod->name, "tray") == 0) {
+					mod->dirty = true;
+					break;
+				}
+			}
 			break;
 		}
 	}
@@ -690,7 +736,28 @@ barny_sni_item_secondary_activate(barny_state_t *state, sni_item_t *item, int x,
 	}
 
 	sd_bus_error error = SD_BUS_ERROR_NULL;
+
+	/* Try ContextMenu first - most apps implement this for right-click */
 	int r = sd_bus_call_method(
+	        state->dbus,
+	        item->service,
+	        item->object_path,
+	        SNI_ITEM_INTERFACE,
+	        "ContextMenu",
+	        &error,
+	        NULL,
+	        "ii", x, y);
+
+	if (r >= 0) {
+		sd_bus_error_free(&error);
+		return;
+	}
+
+	/* Fall back to SecondaryActivate */
+	sd_bus_error_free(&error);
+	error = SD_BUS_ERROR_NULL;
+
+	sd_bus_call_method(
 	        state->dbus,
 	        item->service,
 	        item->object_path,
@@ -700,8 +767,5 @@ barny_sni_item_secondary_activate(barny_state_t *state, sni_item_t *item, int x,
 	        NULL,
 	        "ii", x, y);
 
-	if (r < 0) {
-		sd_bus_error_free(&error);
-	}
 	sd_bus_error_free(&error);
 }

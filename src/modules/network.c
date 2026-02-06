@@ -191,9 +191,15 @@ static void
 network_destroy(barny_module_t *self)
 {
 	network_data_t *data = self->data;
+	if (!data)
+		return;
+
 	if (data->font_desc) {
 		pango_font_description_free(data->font_desc);
 	}
+
+	free(data);
+	self->data = NULL;
 }
 
 static void
@@ -229,14 +235,9 @@ network_update(barny_module_t *self)
 	}
 
 	/* Check if anything changed */
-	bool changed = false;
-	if (online != data->is_online) {
-		changed = true;
-	} else if (strcmp(iface, data->current_iface) != 0) {
-		changed = true;
-	} else if (strcmp(ip, data->current_ip) != 0) {
-		changed = true;
-	}
+	bool changed = (online != data->is_online) ||
+	               strcmp(iface, data->current_iface) != 0 ||
+	               strcmp(ip, data->current_ip) != 0;
 
 	if (!changed)
 		return;
@@ -312,6 +313,12 @@ barny_module_network_create(void)
 {
 	barny_module_t *mod  = calloc(1, sizeof(barny_module_t));
 	network_data_t *data = calloc(1, sizeof(network_data_t));
+
+	if (!mod || !data) {
+		free(mod);
+		free(data);
+		return NULL;
+	}
 
 	mod->name            = "network";
 	mod->position        = BARNY_POS_RIGHT;

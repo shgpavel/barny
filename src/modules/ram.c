@@ -13,22 +13,24 @@ typedef struct {
 } ram_data_t;
 
 static void
-format_size(char *buf, size_t buflen, unsigned long kb, int decimals)
+format_size(char *buf, size_t buflen, unsigned long kb,
+            int decimals, bool unit_space)
 {
+	const char *sp = unit_space ? " " : "";
 	double gb = kb / 1048576.0;
 
 	if (gb >= 1.0) {
 		switch (decimals) {
-		case 0:  snprintf(buf, buflen, "%.0fG", gb); break;
-		case 2:  snprintf(buf, buflen, "%.2fG", gb); break;
-		default: snprintf(buf, buflen, "%.1fG", gb); break;
+		case 0:  snprintf(buf, buflen, "%.0f%sG", gb, sp); break;
+		case 2:  snprintf(buf, buflen, "%.2f%sG", gb, sp); break;
+		default: snprintf(buf, buflen, "%.1f%sG", gb, sp); break;
 		}
 	} else {
 		double mb = kb / 1024.0;
 		switch (decimals) {
-		case 0:  snprintf(buf, buflen, "%.0fM", mb); break;
-		case 2:  snprintf(buf, buflen, "%.2fM", mb); break;
-		default: snprintf(buf, buflen, "%.1fM", mb); break;
+		case 0:  snprintf(buf, buflen, "%.0f%sM", mb, sp); break;
+		case 2:  snprintf(buf, buflen, "%.2f%sM", mb, sp); break;
+		default: snprintf(buf, buflen, "%.1f%sM", mb, sp); break;
 		}
 	}
 }
@@ -53,9 +55,15 @@ static void
 ram_destroy(barny_module_t *self)
 {
 	ram_data_t *data = self->data;
+	if (!data)
+		return;
+
 	if (data->font_desc) {
 		pango_font_description_free(data->font_desc);
 	}
+
+	free(data);
+	self->data = NULL;
 }
 
 static void
@@ -114,15 +122,28 @@ ram_update(barny_module_t *self)
 		data->used_kb  = used;
 		data->total_kb = mem_total;
 
-		if (cfg->ram_show_percentage) {
+		unsigned long free_kb = mem_total - used;
+		const char *mode = cfg->ram_mode ? cfg->ram_mode : "used_total";
+
+		if (strcmp(mode, "percentage") == 0) {
 			int percent = (int)((used * 100) / mem_total);
+			const char *fmt = cfg->ram_unit_space ? "%d %%" : "%d%%";
 			snprintf(data->display_str, sizeof(data->display_str),
-			         "%d%%", percent);
+			         fmt, percent);
+		} else if (strcmp(mode, "used") == 0) {
+			format_size(data->display_str, sizeof(data->display_str),
+			            used, cfg->ram_decimals, cfg->ram_unit_space);
+		} else if (strcmp(mode, "free") == 0) {
+			format_size(data->display_str, sizeof(data->display_str),
+			            free_kb, cfg->ram_decimals, cfg->ram_unit_space);
 		} else {
+			/* "used_total" (default) */
 			char used_str[16];
 			char total_str[16];
-			format_size(used_str, sizeof(used_str), used, cfg->ram_decimals);
-			format_size(total_str, sizeof(total_str), mem_total, cfg->ram_decimals);
+			format_size(used_str, sizeof(used_str), used,
+			            cfg->ram_decimals, cfg->ram_unit_space);
+			format_size(total_str, sizeof(total_str), mem_total,
+			            cfg->ram_decimals, cfg->ram_unit_space);
 			snprintf(data->display_str, sizeof(data->display_str),
 			         "%s/%s", used_str, total_str);
 		}
@@ -167,6 +188,12 @@ barny_module_ram_create(void)
 {
 	barny_module_t *mod  = calloc(1, sizeof(barny_module_t));
 	ram_data_t     *data = calloc(1, sizeof(ram_data_t));
+
+	if (!mod || !data) {
+		free(mod);
+		free(data);
+		return NULL;
+	}
 
 	mod->name            = "ram";
 	mod->position        = BARNY_POS_RIGHT;

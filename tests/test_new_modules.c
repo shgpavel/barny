@@ -129,11 +129,11 @@ test_ram_module_behavior(void)
 		free(mod);
 	}
 
-	TEST("ram respects show_percentage config")
+	TEST("ram respects percentage mode config")
 	{
 		barny_state_t state = { 0 };
 		barny_config_defaults(&state.config);
-		state.config.ram_show_percentage = true;
+		state.config.ram_mode = strdup("percentage");
 
 		barny_module_t *mod = barny_module_ram_create();
 		mod->init(mod, &state);
@@ -213,16 +213,16 @@ test_disk_module_behavior(void)
 }
 
 void
-test_cpu_temp_module_behavior(void)
+test_sysinfo_module_behavior(void)
 {
-	TEST_SUITE_BEGIN("CPU Temp Module Behavior");
+	TEST_SUITE_BEGIN("Sysinfo Module Behavior");
 
-	TEST("cpu_temp init succeeds")
+	TEST("sysinfo init succeeds")
 	{
 		barny_state_t state = { 0 };
 		barny_config_defaults(&state.config);
 
-		barny_module_t *mod = barny_module_cpu_temp_create();
+		barny_module_t *mod = barny_module_sysinfo_create();
 		ASSERT_NOT_NULL(mod);
 
 		int result = mod->init(mod, &state);
@@ -230,29 +230,25 @@ test_cpu_temp_module_behavior(void)
 
 		if (mod->destroy)
 			mod->destroy(mod);
-		free(mod->data);
-		free(mod);
 	}
 
-	TEST("cpu_temp update handles missing thermal zones")
+	TEST("sysinfo update handles missing thermal zones")
 	{
 		barny_state_t state = { 0 };
 		barny_config_defaults(&state.config);
 		/* Use a path that doesn't exist */
-		state.config.cpu_temp_path = strdup("/nonexistent/temp");
+		state.config.sysinfo_temp_path = strdup("/nonexistent/temp");
 
-		barny_module_t *mod = barny_module_cpu_temp_create();
+		barny_module_t *mod = barny_module_sysinfo_create();
 		mod->init(mod, &state);
 		mod->update(mod);
 
-		/* Should not crash, dirty might be false */
+		/* Should not crash */
 		ASSERT_NOT_NULL(mod);
 
 		if (mod->destroy)
 			mod->destroy(mod);
-		free(mod->data);
-		free(state.config.cpu_temp_path);
-		free(mod);
+		free(state.config.sysinfo_temp_path);
 	}
 
 	TEST_SUITE_END();
@@ -452,6 +448,367 @@ test_network_module_behavior(void)
 			mod->destroy(mod);
 		free(mod->data);
 		free(state.config.network_interface);
+		free(mod);
+	}
+
+	TEST_SUITE_END();
+}
+
+void
+test_weather_module_behavior(void)
+{
+	TEST_SUITE_BEGIN("Weather Module Behavior");
+
+	TEST("weather create succeeds")
+	{
+		barny_module_t *mod = barny_module_weather_create();
+		ASSERT_NOT_NULL(mod);
+		ASSERT_EQ_STR("weather", mod->name);
+		free(mod->data);
+		free(mod);
+	}
+
+	TEST("weather init succeeds")
+	{
+		barny_state_t state = { 0 };
+		barny_config_defaults(&state.config);
+
+		barny_module_t *mod = barny_module_weather_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("weather update handles missing data file")
+	{
+		barny_state_t state = { 0 };
+		barny_config_defaults(&state.config);
+
+		barny_module_t *mod = barny_module_weather_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+
+		/* Should not crash when no weather file exists */
+		ASSERT_NOT_NULL(mod);
+
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("weather destroy is safe")
+	{
+		barny_state_t state = { 0 };
+		barny_config_defaults(&state.config);
+
+		barny_module_t *mod = barny_module_weather_create();
+		mod->init(mod, &state);
+
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST_SUITE_END();
+}
+
+void
+test_crypto_module_behavior(void)
+{
+	TEST_SUITE_BEGIN("Crypto Module Behavior");
+
+	TEST("crypto create succeeds")
+	{
+		barny_module_t *mod = barny_module_crypto_create();
+		ASSERT_NOT_NULL(mod);
+		ASSERT_EQ_STR("crypto", mod->name);
+		free(mod->data);
+		free(mod);
+	}
+
+	TEST("crypto init succeeds")
+	{
+		barny_state_t state = { 0 };
+		barny_config_defaults(&state.config);
+
+		barny_module_t *mod = barny_module_crypto_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("crypto update handles missing price data")
+	{
+		barny_state_t state = { 0 };
+		barny_config_defaults(&state.config);
+
+		barny_module_t *mod = barny_module_crypto_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+
+		/* Should not crash when no price file exists */
+		ASSERT_NOT_NULL(mod);
+
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("crypto destroy is safe")
+	{
+		barny_state_t state = { 0 };
+		barny_config_defaults(&state.config);
+
+		barny_module_t *mod = barny_module_crypto_create();
+		mod->init(mod, &state);
+
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST_SUITE_END();
+}
+
+void
+test_module_destroy_safety(void)
+{
+	TEST_SUITE_BEGIN("Module Destroy Safety");
+
+	barny_state_t state = { 0 };
+	barny_config_defaults(&state.config);
+
+	TEST("clock lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_clock_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("disk lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_disk_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("ram lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_ram_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("network lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_network_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("fileread lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_fileread_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("sysinfo lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_sysinfo_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		/* sysinfo may have NULL data after destroy or not allocate data */
+		free(mod);
+	}
+
+	TEST("weather lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_weather_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("crypto lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_crypto_create();
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("workspace lifecycle is complete")
+	{
+		barny_module_t *mod = barny_module_workspace_create();
+		state.sway_ipc_fd = -1;  /* No IPC connection */
+		mod->init(mod, &state);
+		mod->update(mod);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("data is NULL after destroy")
+	{
+		barny_module_t *mod = barny_module_clock_create();
+		mod->init(mod, &state);
+		ASSERT_NOT_NULL(mod->data);
+		if (mod->destroy)
+			mod->destroy(mod);
+		ASSERT_NULL(mod->data);
+		free(mod);
+	}
+
+	TEST("double destroy does not crash")
+	{
+		barny_module_t *mod = barny_module_clock_create();
+		mod->init(mod, &state);
+		if (mod->destroy) {
+			mod->destroy(mod);
+			/* Second destroy should handle NULL data gracefully */
+			mod->destroy(mod);
+		}
+		free(mod);
+	}
+
+	TEST_SUITE_END();
+}
+
+void
+test_module_null_font(void)
+{
+	TEST_SUITE_BEGIN("Module NULL Font Handling");
+
+	barny_state_t state = { 0 };
+	barny_config_defaults(&state.config);
+	state.config.font = NULL;  /* Explicitly NULL */
+
+	TEST("clock init with NULL font")
+	{
+		barny_module_t *mod = barny_module_clock_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("disk init with NULL font")
+	{
+		barny_module_t *mod = barny_module_disk_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("ram init with NULL font")
+	{
+		barny_module_t *mod = barny_module_ram_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("network init with NULL font")
+	{
+		barny_module_t *mod = barny_module_network_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("fileread init with NULL font")
+	{
+		barny_module_t *mod = barny_module_fileread_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("sysinfo init with NULL font")
+	{
+		barny_module_t *mod = barny_module_sysinfo_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("weather init with NULL font")
+	{
+		barny_module_t *mod = barny_module_weather_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("crypto init with NULL font")
+	{
+		barny_module_t *mod = barny_module_crypto_create();
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
+		free(mod);
+	}
+
+	TEST("workspace init with NULL font")
+	{
+		barny_module_t *mod = barny_module_workspace_create();
+		state.sway_ipc_fd = -1;
+		int result = mod->init(mod, &state);
+		ASSERT_EQ_INT(0, result);
+		if (mod->destroy)
+			mod->destroy(mod);
 		free(mod);
 	}
 

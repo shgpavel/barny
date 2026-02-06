@@ -130,6 +130,9 @@ barny_blur_surface(cairo_surface_t *surface, int radius)
 
 	int      width  = cairo_image_surface_get_width(surface);
 	int      height = cairo_image_surface_get_height(surface);
+
+	if (width <= 0 || height <= 0)
+		return;
 	int      stride = cairo_image_surface_get_stride(surface);
 	uint8_t *data   = cairo_image_surface_get_data(surface);
 
@@ -378,10 +381,9 @@ barny_create_displacement_map(int width, int height, barny_refraction_mode_t mod
 				         * 0.5;
 
 				/* Fade out near edges for smooth blending */
-				double edge_x = fmin(x, width - x)
-				                / (double)border_radius;
-				double edge_y = fmin(y, height - y)
-				                / (double)border_radius;
+				double br     = border_radius > 0 ? (double)border_radius : 1.0;
+				double edge_x = fmin(x, width - x) / br;
+				double edge_y = fmin(y, height - y) / br;
 				double edge_fade = fmin(1.0, fmin(edge_x, edge_y));
 				disp_x *= edge_fade;
 				disp_y *= edge_fade;
@@ -572,20 +574,15 @@ create_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double 
 	cairo_close_path(cr);
 }
 
-/* Render the liquid glass background */
-void
-barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
+/* Build the glass background into an offscreen surface */
+static cairo_surface_t *
+build_glass_bg(barny_state_t *state, int width, int height)
 {
-	barny_state_t *state  = output->state;
-	int            width  = output->width;
-	int            height = output->height;
-	int            radius = state->config.border_radius;
+	int radius = state->config.border_radius;
 
-	/* Clear to transparent */
-	cairo_save(cr);
-	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-	cairo_paint(cr);
-	cairo_restore(cr);
+	cairo_surface_t *cache = cairo_image_surface_create(
+	        CAIRO_FORMAT_ARGB32, width, height);
+	cairo_t *cr = cairo_create(cache);
 
 	double x = 0, y = 0, w = width, h = height;
 	double r = radius;
@@ -603,7 +600,6 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 		int    wp_width  = cairo_image_surface_get_width(bg_surface);
 		int    wp_height = cairo_image_surface_get_height(bg_surface);
 
-		/* Scale to fit */
 		double scale_x   = (double)wp_width / width;
 		double scale_y   = (double)wp_height / height;
 		double scale     = scale_x < scale_y ? scale_x : scale_y;
@@ -618,7 +614,6 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 		cairo_paint(cr);
 		cairo_restore(cr);
 	} else {
-		/* Fallback: semi-transparent dark background with subtle gradient */
 		cairo_pattern_t *bg_grad
 		        = cairo_pattern_create_linear(0, 0, 0, height);
 		cairo_pattern_add_color_stop_rgba(bg_grad, 0, 0.15, 0.15, 0.18,
@@ -632,27 +627,19 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 
 	cairo_reset_clip(cr);
 
-	/*
-	 * Liquid glass edge effects - multiple layers for depth:
-	 * 1. Outer thin border (subtle)
-	 * 2. Inner glow (diffuse white)
-	 * 3. Top-left specular highlight
-	 * 4. Bottom-right subtle shadow
-	 */
-
-	/* Layer 1: Outer border - thin white line with low opacity */
+	/* Layer 1: Outer border */
 	create_rounded_rect(cr, x + 0.5, y + 0.5, w - 1, h - 1, r);
 	cairo_set_source_rgba(cr, 1, 1, 1, 0.25);
 	cairo_set_line_width(cr, 1);
 	cairo_stroke(cr);
 
-	/* Layer 2: Inner glow - slightly inset, diffuse */
+	/* Layer 2: Inner glow */
 	create_rounded_rect(cr, x + 1.5, y + 1.5, w - 3, h - 3, r - 1);
 	cairo_set_source_rgba(cr, 1, 1, 1, 0.12);
 	cairo_set_line_width(cr, 2);
 	cairo_stroke(cr);
 
-	/* Layer 3: Top-left specular highlight (simulates light source) */
+	/* Layer 3: Top-left specular highlight */
 	create_rounded_rect(cr, x, y, w, h, r);
 	cairo_clip(cr);
 
@@ -665,7 +652,7 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 	cairo_paint(cr);
 	cairo_pattern_destroy(highlight);
 
-	/* Layer 4: Bottom-right shadow for depth */
+	/* Layer 4: Bottom-right shadow */
 	cairo_pattern_t *shadow = cairo_pattern_create_linear(
 	        width * 0.3, height * 0.3, width, height);
 	cairo_pattern_add_color_stop_rgba(shadow, 0.0, 0, 0, 0, 0);
@@ -675,12 +662,11 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 	cairo_paint(cr);
 	cairo_pattern_destroy(shadow);
 
-	/* Layer 5: Edge refraction highlight - mimics light bending at glass edges */
+	/* Layer 5: Edge refraction highlights */
 	cairo_reset_clip(cr);
 	create_rounded_rect(cr, x, y, w, h, r);
 	cairo_clip(cr);
 
-	/* Top edge highlight */
 	cairo_pattern_t *top_refract = cairo_pattern_create_linear(0, 0, 0, 8);
 	cairo_pattern_add_color_stop_rgba(top_refract, 0.0, 1, 1, 1, 0.2);
 	cairo_pattern_add_color_stop_rgba(top_refract, 1.0, 1, 1, 1, 0);
@@ -689,7 +675,6 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 	cairo_fill(cr);
 	cairo_pattern_destroy(top_refract);
 
-	/* Left edge highlight */
 	cairo_pattern_t *left_refract = cairo_pattern_create_linear(0, 0, 8, 0);
 	cairo_pattern_add_color_stop_rgba(left_refract, 0.0, 1, 1, 1, 0.15);
 	cairo_pattern_add_color_stop_rgba(left_refract, 1.0, 1, 1, 1, 0);
@@ -699,6 +684,34 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 	cairo_pattern_destroy(left_refract);
 
 	cairo_reset_clip(cr);
+	cairo_destroy(cr);
+
+	return cache;
+}
+
+/* Render the liquid glass background (cached) */
+void
+barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
+{
+	int width  = output->width;
+	int height = output->height;
+
+	/* Clear to transparent */
+	cairo_save(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+	cairo_paint(cr);
+	cairo_restore(cr);
+
+	/* Build cache on first frame or after resize */
+	if (!output->bg_cache) {
+		output->bg_cache = build_glass_bg(output->state, width, height);
+	}
+
+	/* Blit cached background */
+	if (output->bg_cache) {
+		cairo_set_source_surface(cr, output->bg_cache, 0, 0);
+		cairo_paint(cr);
+	}
 }
 
 /* JPEG error handling */

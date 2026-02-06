@@ -158,6 +158,10 @@ barny_output_create_surface(barny_output_t *output)
 void
 barny_output_destroy_surface(barny_output_t *output)
 {
+	if (output->bg_cache) {
+		cairo_surface_destroy(output->bg_cache);
+		output->bg_cache = NULL;
+	}
 	if (output->cr) {
 		cairo_destroy(output->cr);
 		output->cr = NULL;
@@ -206,6 +210,11 @@ barny_output_create_buffer(barny_output_t *output)
 	}
 	if (output->shm_data) {
 		munmap(output->shm_data, output->shm_size);
+	}
+	/* Invalidate glass background cache on resize */
+	if (output->bg_cache) {
+		cairo_surface_destroy(output->bg_cache);
+		output->bg_cache = NULL;
 	}
 
 	/* Create shared memory buffer */

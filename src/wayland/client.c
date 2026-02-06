@@ -291,6 +291,7 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 		output->wl_output      = wl_output;
 		output->state          = state;
 		output->scale          = 1;
+		output->registry_name  = name;
 
 		wl_output_add_listener(wl_output, &output_listener, output);
 
@@ -303,10 +304,34 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 static void
 registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
 {
-	(void)data;
+	barny_state_t *state = data;
 	(void)registry;
-	(void)name;
-	/* TODO: Handle output removal */
+
+	/* Find and remove output with matching registry name */
+	barny_output_t **prev = &state->outputs;
+	for (barny_output_t *out = state->outputs; out; out = out->next) {
+		if (out->registry_name == name) {
+			/* Clear pointer_output if it's being removed */
+			if (state->pointer_output == out) {
+				state->pointer_output = NULL;
+			}
+
+			/* Remove from linked list */
+			*prev = out->next;
+
+			/* Destroy surface and resources */
+			barny_output_destroy_surface(out);
+			if (out->wl_output) {
+				wl_output_destroy(out->wl_output);
+			}
+			free(out->name);
+			free(out);
+
+			fprintf(stderr, "barny: output removed (registry name %u)\n", name);
+			return;
+		}
+		prev = &out->next;
+	}
 }
 
 int

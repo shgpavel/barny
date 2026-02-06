@@ -4,6 +4,8 @@ extern void
 test_config_defaults(void);
 extern void
 test_config_load(void);
+extern void
+test_config_edge_cases(void);
 
 extern void
 test_perlin_math(void);
@@ -40,17 +42,26 @@ test_ram_module_behavior(void);
 extern void
 test_disk_module_behavior(void);
 extern void
-test_cpu_temp_module_behavior(void);
+test_sysinfo_module_behavior(void);
 extern void
 test_fileread_module_behavior(void);
 extern void
 test_network_module_behavior(void);
+extern void
+test_weather_module_behavior(void);
+extern void
+test_crypto_module_behavior(void);
+extern void
+test_module_destroy_safety(void);
+extern void
+test_module_null_font(void);
 
 TEST_MAIN_BEGIN()
 
 printf("\n--- Configuration Tests ---\n");
 RUN_SUITE(test_config_defaults);
 RUN_SUITE(test_config_load);
+RUN_SUITE(test_config_edge_cases);
 
 printf("\n--- Liquid Glass Effect Tests ---\n");
 RUN_SUITE(test_perlin_math);
@@ -73,8 +84,14 @@ printf("\n--- New Module Behavior Tests ---\n");
 RUN_SUITE(test_clock_module_behavior);
 RUN_SUITE(test_ram_module_behavior);
 RUN_SUITE(test_disk_module_behavior);
-RUN_SUITE(test_cpu_temp_module_behavior);
+RUN_SUITE(test_sysinfo_module_behavior);
 RUN_SUITE(test_fileread_module_behavior);
 RUN_SUITE(test_network_module_behavior);
+RUN_SUITE(test_weather_module_behavior);
+RUN_SUITE(test_crypto_module_behavior);
+
+printf("\n--- Module Safety Tests ---\n");
+RUN_SUITE(test_module_destroy_safety);
+RUN_SUITE(test_module_null_font);
 
 TEST_MAIN_END()

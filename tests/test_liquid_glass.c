@@ -193,6 +193,15 @@ test_displacement_map(void)
 		cairo_surface_destroy(map);
 	}
 
+	TEST("liquid mode handles zero border radius")
+	{
+		cairo_surface_t *map = barny_create_displacement_map(
+		        64, 32, BARNY_REFRACT_LIQUID, 0, 1.0, 0.02, 2);
+		ASSERT_NOT_NULL(map);
+		ASSERT_EQ_INT(CAIRO_STATUS_SUCCESS, cairo_surface_status(map));
+		cairo_surface_destroy(map);
+	}
+
 	TEST("lens mode center has neutral displacement")
 	{
 		cairo_surface_t *map = barny_create_displacement_map(

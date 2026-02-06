@@ -1,0 +1,26 @@
+---
+Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-integer-division,
+  -bugprone-macro-parentheses,
+  -bugprone-narrowing-conversions,
+  -clang-analyzer-optin.performance.Padding,
+  -clang-analyzer-security.ArrayBound,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -misc-include-cleaner,
+  -misc-header-include-cycle,
+  -portability-avoid-pragma-once,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -modernize-*
+
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/.*\.h$'

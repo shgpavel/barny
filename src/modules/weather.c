@@ -31,7 +31,7 @@ weather_init(barny_module_t *self, barny_state_t *state)
 		}
 		fclose(f);
 	} else {
-		strcpy(data->weather_str, "--");
+		snprintf(data->weather_str, sizeof(data->weather_str), "--");
 	}
 
 	return 0;
@@ -41,9 +41,15 @@ static void
 weather_destroy(barny_module_t *self)
 {
 	weather_data_t *data = self->data;
+	if (!data)
+		return;
+
 	if (data->font_desc) {
 		pango_font_description_free(data->font_desc);
 	}
+
+	free(data);
+	self->data = NULL;
 }
 
 static void
@@ -51,7 +57,7 @@ weather_update(barny_module_t *self)
 {
 	weather_data_t *data = self->data;
 	char            old_weather[128];
-	strcpy(old_weather, data->weather_str);
+	memcpy(old_weather, data->weather_str, sizeof(old_weather));
 
 	FILE *f = fopen("/opt/barny/modules/weather", "r");
 	if (f) {
@@ -105,6 +111,12 @@ barny_module_weather_create(void)
 {
 	barny_module_t *mod  = calloc(1, sizeof(barny_module_t));
 	weather_data_t *data = calloc(1, sizeof(weather_data_t));
+
+	if (!mod || !data) {
+		free(mod);
+		free(data);
+		return NULL;
+	}
 
 	mod->name            = "weather";
 	mod->position        = BARNY_POS_RIGHT;

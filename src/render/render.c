@@ -26,9 +26,14 @@ barny_render_frame(barny_output_t *output)
 	/* Commit surface */
 	cairo_surface_flush(output->cairo_surface);
 	wl_surface_attach(output->surface, output->buffer, 0, 0);
-	wl_surface_damage_buffer(output->surface, 0, 0, output->width,
-	                         output->height);
+	wl_surface_damage_buffer(output->surface, 0, 0,
+	                         output->width * output->scale,
+	                         output->height * output->scale);
 	wl_surface_commit(output->surface);
+
+	/* Request frame callback for vsync pacing — frame_done will
+	 * trigger the next render only if a module is dirty */
+	barny_output_request_frame(output);
 }
 
 void
@@ -66,8 +71,8 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 		}
 	}
 
-	/* Module spacing */
-	int spacing = 16;
+	/* Module spacing from config */
+	int spacing = state->config.module_spacing;
 
 	/* Calculate center total width for positioning */
 	int center_total_width = 0;

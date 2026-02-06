@@ -14,29 +14,31 @@ typedef struct {
 } disk_data_t;
 
 static void
-format_bytes(char *buf, size_t buflen, unsigned long long bytes, int decimals)
+format_bytes(char *buf, size_t buflen, unsigned long long bytes,
+             int decimals, bool unit_space)
 {
+	const char *sp = unit_space ? " " : "";
 	double gb = bytes / (1024.0 * 1024.0 * 1024.0);
 
 	if (gb >= 1000.0) {
 		double tb = gb / 1024.0;
 		switch (decimals) {
-		case 0:  snprintf(buf, buflen, "%.0fT", tb); break;
-		case 2:  snprintf(buf, buflen, "%.2fT", tb); break;
-		default: snprintf(buf, buflen, "%.1fT", tb); break;
+		case 0:  snprintf(buf, buflen, "%.0f%sT", tb, sp); break;
+		case 2:  snprintf(buf, buflen, "%.2f%sT", tb, sp); break;
+		default: snprintf(buf, buflen, "%.1f%sT", tb, sp); break;
 		}
 	} else if (gb >= 1.0) {
 		switch (decimals) {
-		case 0:  snprintf(buf, buflen, "%.0fG", gb); break;
-		case 2:  snprintf(buf, buflen, "%.2fG", gb); break;
-		default: snprintf(buf, buflen, "%.1fG", gb); break;
+		case 0:  snprintf(buf, buflen, "%.0f%sG", gb, sp); break;
+		case 2:  snprintf(buf, buflen, "%.2f%sG", gb, sp); break;
+		default: snprintf(buf, buflen, "%.1f%sG", gb, sp); break;
 		}
 	} else {
 		double mb = bytes / (1024.0 * 1024.0);
 		switch (decimals) {
-		case 0:  snprintf(buf, buflen, "%.0fM", mb); break;
-		case 2:  snprintf(buf, buflen, "%.2fM", mb); break;
-		default: snprintf(buf, buflen, "%.1fM", mb); break;
+		case 0:  snprintf(buf, buflen, "%.0f%sM", mb, sp); break;
+		case 2:  snprintf(buf, buflen, "%.2f%sM", mb, sp); break;
+		default: snprintf(buf, buflen, "%.1f%sM", mb, sp); break;
 		}
 	}
 }
@@ -61,9 +63,15 @@ static void
 disk_destroy(barny_module_t *self)
 {
 	disk_data_t *data = self->data;
+	if (!data)
+		return;
+
 	if (data->font_desc) {
 		pango_font_description_free(data->font_desc);
 	}
+
+	free(data);
+	self->data = NULL;
 }
 
 static void
@@ -87,18 +95,26 @@ disk_update(barny_module_t *self)
 		data->used_bytes  = used;
 		data->total_bytes = total;
 
-		if (cfg->disk_show_percentage) {
+		const char *mode = cfg->disk_mode ? cfg->disk_mode : "used_total";
+
+		if (strcmp(mode, "percentage") == 0) {
 			int percent = 0;
-			if (total > 0) {
+			if (total > 0)
 				percent = (int)((used * 100) / total);
-			}
+			const char *fmt = cfg->disk_unit_space ? "%d %%" : "%d%%";
 			snprintf(data->display_str, sizeof(data->display_str),
-			         "%d%%", percent);
+			         fmt, percent);
+		} else if (strcmp(mode, "free") == 0) {
+			format_bytes(data->display_str, sizeof(data->display_str),
+			             avail, cfg->disk_decimals, cfg->disk_unit_space);
 		} else {
+			/* "used_total" (default) */
 			char used_str[16];
 			char total_str[16];
-			format_bytes(used_str, sizeof(used_str), used, cfg->disk_decimals);
-			format_bytes(total_str, sizeof(total_str), total, cfg->disk_decimals);
+			format_bytes(used_str, sizeof(used_str), used,
+			             cfg->disk_decimals, cfg->disk_unit_space);
+			format_bytes(total_str, sizeof(total_str), total,
+			             cfg->disk_decimals, cfg->disk_unit_space);
 			snprintf(data->display_str, sizeof(data->display_str),
 			         "%s/%s", used_str, total_str);
 		}
@@ -143,6 +159,12 @@ barny_module_disk_create(void)
 {
 	barny_module_t *mod  = calloc(1, sizeof(barny_module_t));
 	disk_data_t    *data = calloc(1, sizeof(disk_data_t));
+
+	if (!mod || !data) {
+		free(mod);
+		free(data);
+		return NULL;
+	}
 
 	mod->name            = "disk";
 	mod->position        = BARNY_POS_RIGHT;

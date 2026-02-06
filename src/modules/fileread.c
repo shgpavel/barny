@@ -33,9 +33,15 @@ static void
 fileread_destroy(barny_module_t *self)
 {
 	fileread_data_t *data = self->data;
+	if (!data)
+		return;
+
 	if (data->font_desc) {
 		pango_font_description_free(data->font_desc);
 	}
+
+	free(data);
+	self->data = NULL;
 }
 
 static void
@@ -149,6 +155,12 @@ barny_module_fileread_create(void)
 {
 	barny_module_t  *mod  = calloc(1, sizeof(barny_module_t));
 	fileread_data_t *data = calloc(1, sizeof(fileread_data_t));
+
+	if (!mod || !data) {
+		free(mod);
+		free(data);
+		return NULL;
+	}
 
 	mod->name             = "fileread";
 	mod->position         = BARNY_POS_RIGHT;

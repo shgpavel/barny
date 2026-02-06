@@ -4,10 +4,15 @@
  * Displays StatusNotifierItem icons from applications
  */
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "barny.h"
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 typedef struct {
 	barny_state_t *state;
@@ -32,7 +37,12 @@ tray_init(barny_module_t *self, barny_state_t *state)
 static void
 tray_destroy(barny_module_t *self)
 {
-	(void)self;
+	tray_data_t *data = self->data;
+	if (!data)
+		return;
+
+	free(data);
+	self->data = NULL;
 }
 
 static void
@@ -67,9 +77,52 @@ tray_update(barny_module_t *self)
 }
 
 static void
+draw_icon_bg(cairo_t *cr, double cx, double cy, double size,
+             bool square, int corner_radius,
+             double r, double g, double b, double a)
+{
+	double half = size / 2.0 - 1;
+	if (half < 1)
+		half = 1;
+
+	cairo_set_source_rgba(cr, r, g, b, a);
+
+	if (square) {
+		double left = cx - half;
+		double top = cy - half;
+		double w = half * 2;
+		double h = half * 2;
+
+		if (corner_radius > 0) {
+			double cr_r = corner_radius;
+			if (cr_r > w / 2.0) cr_r = w / 2.0;
+			if (cr_r > h / 2.0) cr_r = h / 2.0;
+
+			cairo_new_path(cr);
+			cairo_arc(cr, left + cr_r, top + cr_r, cr_r,
+			          M_PI, 3 * M_PI / 2);
+			cairo_arc(cr, left + w - cr_r, top + cr_r, cr_r,
+			          3 * M_PI / 2, 0);
+			cairo_arc(cr, left + w - cr_r, top + h - cr_r, cr_r,
+			          0, M_PI / 2);
+			cairo_arc(cr, left + cr_r, top + h - cr_r, cr_r,
+			          M_PI / 2, M_PI);
+			cairo_close_path(cr);
+		} else {
+			cairo_rectangle(cr, left, top, w, h);
+		}
+		cairo_fill(cr);
+	} else {
+		cairo_arc(cr, cx, cy, half, 0, 2 * M_PI);
+		cairo_fill(cr);
+	}
+}
+
+static void
 tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
 	tray_data_t *data = self->data;
+	barny_config_t *cfg = &data->state->config;
 	(void)w;
 
 	/* Store render position for click handling */
@@ -79,6 +132,10 @@ tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	if (!items) {
 		return;
 	}
+
+	bool square = cfg->tray_icon_shape &&
+	              strcmp(cfg->tray_icon_shape, "square") == 0;
+	int corner_radius = cfg->tray_icon_corner_radius;
 
 	int icon_x = x + 4;
 	int icon_y = y + (h - data->icon_size) / 2;
@@ -91,23 +148,47 @@ tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 			continue;
 		}
 
-		if (item->icon) {
-			/* Draw icon with slight transparency */
-			cairo_save(cr);
+		double cx = icon_x + data->icon_size / 2.0;
+		double cy = icon_y + data->icon_size / 2.0;
 
-			/* Draw subtle shadow */
-			cairo_set_source_rgba(cr, 0, 0, 0, 0.2);
-			cairo_arc(cr, icon_x + data->icon_size / 2.0 + 1,
-			          icon_y + data->icon_size / 2.0 + 1,
-			          data->icon_size / 2.0 - 1, 0, 2 * 3.14159);
-			cairo_fill(cr);
+		cairo_save(cr);
 
-			/* Draw the icon */
-			cairo_set_source_surface(cr, item->icon, icon_x, icon_y);
-			cairo_paint_with_alpha(cr, 0.95);
+		/* Draw background shape */
+		draw_icon_bg(cr, cx + 1, cy + 1, data->icon_size,
+		             square, corner_radius,
+		             0, 0, 0, cfg->tray_icon_bg_opacity * 0.5);
+		draw_icon_bg(cr, cx, cy, data->icon_size,
+		             square, corner_radius,
+		             cfg->tray_icon_bg_r,
+		             cfg->tray_icon_bg_g,
+		             cfg->tray_icon_bg_b,
+		             cfg->tray_icon_bg_opacity);
 
-			cairo_restore(cr);
+		/* Draw the icon (or fallback) */
+		if (item->icon &&
+		    cairo_surface_status(item->icon) == CAIRO_STATUS_SUCCESS) {
+			int iw = cairo_image_surface_get_width(item->icon);
+			int ih = cairo_image_surface_get_height(item->icon);
+			if (iw > 0 && ih > 0) {
+				/* Scale icon to fit inside the background with padding */
+				int pad = 4;
+				int target = data->icon_size - pad * 2;
+				if (target < 1) target = 1;
+				double scale = (double)target / (iw > ih ? iw : ih);
+
+				double dx = icon_x + pad + (target - iw * scale) / 2.0;
+				double dy = icon_y + pad + (target - ih * scale) / 2.0;
+
+				cairo_save(cr);
+				cairo_translate(cr, dx, dy);
+				cairo_scale(cr, scale, scale);
+				cairo_set_source_surface(cr, item->icon, 0, 0);
+				cairo_paint_with_alpha(cr, 0.95);
+				cairo_restore(cr);
+			}
 		}
+
+		cairo_restore(cr);
 
 		icon_x += data->icon_size + data->icon_spacing;
 	}
@@ -159,6 +240,12 @@ barny_module_tray_create(void)
 {
 	barny_module_t *mod = calloc(1, sizeof(barny_module_t));
 	tray_data_t *data = calloc(1, sizeof(tray_data_t));
+
+	if (!mod || !data) {
+		free(mod);
+		free(data);
+		return NULL;
+	}
 
 	mod->name = "tray";
 	mod->position = BARNY_POS_RIGHT;

@@ -25,6 +25,7 @@ typedef struct {
 	workspace_info_t      workspaces[MAX_WORKSPACES];
 	int                   workspace_count;
 	PangoFontDescription *font_desc;
+	int                   render_x;
 } workspace_data_t;
 
 static void
@@ -98,6 +99,8 @@ static void
 workspace_destroy(barny_module_t *self)
 {
 	workspace_data_t *data = self->data;
+	if (!data)
+		return;
 
 	for (int i = 0; i < data->workspace_count; i++) {
 		free(data->workspaces[i].name);
@@ -106,6 +109,9 @@ workspace_destroy(barny_module_t *self)
 	if (data->font_desc) {
 		pango_font_description_free(data->font_desc);
 	}
+
+	free(data);
+	self->data = NULL;
 }
 
 static void
@@ -115,15 +121,80 @@ workspace_update(barny_module_t *self)
 	(void)self;
 }
 
+/* Helper to get display label for a workspace */
+static const char *
+get_workspace_label(workspace_data_t *data, workspace_info_t *ws, char *buf, size_t buf_size)
+{
+	barny_config_t *config = &data->state->config;
+
+	/* If we have configured names and workspace number is within range */
+	if (config->workspace_names && ws->num >= 1 && ws->num <= config->workspace_name_count) {
+		return config->workspace_names[ws->num - 1];
+	}
+
+	/* Fallback to workspace number */
+	snprintf(buf, buf_size, "%d", ws->num);
+	return buf;
+}
+
+/* Helper to check if shape is square */
+static bool
+is_square_shape(barny_config_t *config)
+{
+	return config->workspace_shape && strcmp(config->workspace_shape, "square") == 0;
+}
+
+/* Helper to draw shape (circle or square) */
+static void
+draw_shape(cairo_t *cr, int cx, int cy, int size, bool square, int corner_radius, bool fill)
+{
+	int half = size / 2 - 2;
+	if (half < 1)
+		half = 1;
+
+	if (square) {
+		int left = cx - half;
+		int top = cy - half;
+		int w = half * 2;
+		int h = half * 2;
+
+		if (corner_radius > 0) {
+			double r = corner_radius;
+			if (r > w / 2.0) r = w / 2.0;
+			if (r > h / 2.0) r = h / 2.0;
+
+			cairo_new_path(cr);
+			cairo_arc(cr, left + r, top + r, r, M_PI, 3 * M_PI / 2);
+			cairo_arc(cr, left + w - r, top + r, r, 3 * M_PI / 2, 0);
+			cairo_arc(cr, left + w - r, top + h - r, r, 0, M_PI / 2);
+			cairo_arc(cr, left + r, top + h - r, r, M_PI / 2, M_PI);
+			cairo_close_path(cr);
+		} else {
+			cairo_rectangle(cr, left, top, w, h);
+		}
+	} else {
+		cairo_arc(cr, cx, cy, half, 0, 2 * M_PI);
+	}
+
+	if (fill)
+		cairo_fill(cr);
+	else
+		cairo_stroke(cr);
+}
+
 static void
 workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
 	workspace_data_t *data = self->data;
 	(void)w;
 
+	data->render_x = x;
+
 	int          indicator_size = data->state->config.workspace_indicator_size;
 	int          spacing        = data->state->config.workspace_spacing;
 	int          total_width    = 0;
+	bool         square         = is_square_shape(&data->state->config);
+	int          corner_radius  = square ? data->state->config.workspace_corner_radius : 0;
 
 	PangoLayout *layout         = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, data->font_desc);
@@ -133,65 +204,42 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 		int               cx = x + total_width + indicator_size / 2;
 		int               cy = y + h / 2;
 
-		/* Draw indicator background */
+		/* Get workspace label (custom name or number) */
+		char label_buf[16];
+		const char *label = get_workspace_label(data, ws, label_buf, sizeof(label_buf));
+
+		/* Determine colors and style based on workspace state */
+		double bg_r, bg_g, bg_b, bg_a;
+		double fg_r, fg_g, fg_b, fg_a;
+		bool fill = true;
+
 		if (ws->focused) {
-			/* Focused: bright filled circle */
-			cairo_set_source_rgba(cr, 1, 1, 1, 0.9);
-			cairo_arc(cr, cx, cy, indicator_size / 2 - 2, 0, 2 * M_PI);
-			cairo_fill(cr);
-
-			/* Draw number in dark color */
-			char num_str[8];
-			snprintf(num_str, sizeof(num_str), "%d", ws->num);
-			pango_layout_set_text(layout, num_str, -1);
-
-			int tw, th;
-			pango_layout_get_pixel_size(layout, &tw, &th);
-
-			cairo_set_source_rgba(cr, 0.1, 0.1, 0.1, 1);
-			cairo_move_to(cr, cx - tw / 2, cy - th / 2);
-			pango_cairo_show_layout(cr, layout);
-		} else if (ws->visible) {
-			/* Visible but not focused: outlined circle */
-			cairo_set_source_rgba(cr, 1, 1, 1, 0.6);
-			cairo_set_line_width(cr, 2);
-			cairo_arc(cr, cx, cy, indicator_size / 2 - 2, 0, 2 * M_PI);
-			cairo_stroke(cr);
-
-			/* Draw number */
-			char num_str[8];
-			snprintf(num_str, sizeof(num_str), "%d", ws->num);
-			pango_layout_set_text(layout, num_str, -1);
-
-			int tw, th;
-			pango_layout_get_pixel_size(layout, &tw, &th);
-
-			cairo_set_source_rgba(cr, 1, 1, 1, 0.8);
-			cairo_move_to(cr, cx - tw / 2, cy - th / 2);
-			pango_cairo_show_layout(cr, layout);
+			bg_r = bg_g = bg_b = 1.0; bg_a = 0.95;
+			fg_r = fg_g = fg_b = 0.1; fg_a = 1.0;
 		} else if (ws->urgent) {
-			/* Urgent: red filled circle */
-			cairo_set_source_rgba(cr, 0.9, 0.2, 0.2, 0.9);
-			cairo_arc(cr, cx, cy, indicator_size / 2 - 2, 0, 2 * M_PI);
-			cairo_fill(cr);
-
-			/* Draw number */
-			char num_str[8];
-			snprintf(num_str, sizeof(num_str), "%d", ws->num);
-			pango_layout_set_text(layout, num_str, -1);
-
-			int tw, th;
-			pango_layout_get_pixel_size(layout, &tw, &th);
-
-			cairo_set_source_rgba(cr, 1, 1, 1, 1);
-			cairo_move_to(cr, cx - tw / 2, cy - th / 2);
-			pango_cairo_show_layout(cr, layout);
+			bg_r = 0.9; bg_g = 0.2; bg_b = 0.2; bg_a = 0.95;
+			fg_r = fg_g = fg_b = 1.0; fg_a = 1.0;
+		} else if (ws->visible) {
+			bg_r = bg_g = bg_b = 1.0; bg_a = 0.75;
+			fg_r = fg_g = fg_b = 1.0; fg_a = 0.9;
+			fill = false;
+			cairo_set_line_width(cr, 2);
 		} else {
-			/* Normal: small dot */
-			cairo_set_source_rgba(cr, 1, 1, 1, 0.4);
-			cairo_arc(cr, cx, cy, 4, 0, 2 * M_PI);
-			cairo_fill(cr);
+			bg_r = bg_g = bg_b = 1.0; bg_a = 0.5;
+			fg_r = fg_g = fg_b = 0.2; fg_a = 0.9;
 		}
+
+		/* Draw shape */
+		cairo_set_source_rgba(cr, bg_r, bg_g, bg_b, bg_a);
+		draw_shape(cr, cx, cy, indicator_size, square, corner_radius, fill);
+
+		/* Draw label */
+		pango_layout_set_text(layout, label, -1);
+		int tw, th;
+		pango_layout_get_pixel_size(layout, &tw, &th);
+		cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, fg_a);
+		cairo_move_to(cr, cx - tw / 2.0, cy - th / 2.0);
+		pango_cairo_show_layout(cr, layout);
 
 		total_width += indicator_size + spacing;
 	}
@@ -214,11 +262,14 @@ workspace_click(barny_module_t *self, int button, int click_x, int click_y)
 	int indicator_size = data->state->config.workspace_indicator_size;
 	int spacing        = data->state->config.workspace_spacing;
 
+	/* Convert absolute click_x to position relative to module */
+	int rel_x          = click_x - data->render_x;
+
 	/* Find which workspace was clicked */
 	int x              = 0;
 	for (int i = 0; i < data->workspace_count; i++) {
 		int cx   = x + indicator_size / 2;
-		int dist = abs(click_x - cx);
+		int dist = abs(rel_x - cx);
 
 		if (dist < indicator_size / 2) {
 			/* Switch to this workspace */
@@ -242,6 +293,12 @@ barny_module_workspace_create(void)
 {
 	barny_module_t   *mod  = calloc(1, sizeof(barny_module_t));
 	workspace_data_t *data = calloc(1, sizeof(workspace_data_t));
+
+	if (!mod || !data) {
+		free(mod);
+		free(data);
+		return NULL;
+	}
 
 	mod->name              = "workspace";
 	mod->position          = BARNY_POS_LEFT;

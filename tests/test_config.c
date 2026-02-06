@@ -153,11 +153,18 @@ test_config_defaults(void)
 		ASSERT_NULL(config.disk_path);
 	}
 
-	TEST("disk default show_percentage is false")
+	TEST("disk default mode is NULL (used_total)")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		ASSERT_FALSE(config.disk_show_percentage);
+		ASSERT_NULL(config.disk_mode);
+	}
+
+	TEST("disk default unit_space is false")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		ASSERT_FALSE(config.disk_unit_space);
 	}
 
 	TEST("disk default decimals is 0")
@@ -167,34 +174,41 @@ test_config_defaults(void)
 		ASSERT_EQ_INT(0, config.disk_decimals);
 	}
 
-	/* CPU temp module defaults */
-	TEST("cpu_temp default path is NULL")
+	/* Sysinfo temp defaults */
+	TEST("sysinfo_temp default path is NULL")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		ASSERT_NULL(config.cpu_temp_path);
+		ASSERT_NULL(config.sysinfo_temp_path);
 	}
 
-	TEST("cpu_temp default zone is 0")
+	TEST("sysinfo_temp default zone is 0")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		ASSERT_EQ_INT(0, config.cpu_temp_zone);
+		ASSERT_EQ_INT(-1, config.sysinfo_temp_zone);
 	}
 
-	TEST("cpu_temp default show_unit is true")
+	TEST("sysinfo_temp default show_unit is true")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		ASSERT_TRUE(config.cpu_temp_show_unit);
+		ASSERT_TRUE(config.sysinfo_temp_show_unit);
 	}
 
 	/* RAM module defaults */
-	TEST("ram default show_percentage is false")
+	TEST("ram default mode is NULL (used_total)")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		ASSERT_FALSE(config.ram_show_percentage);
+		ASSERT_NULL(config.ram_mode);
+	}
+
+	TEST("ram default unit_space is false")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		ASSERT_FALSE(config.ram_unit_space);
 	}
 
 	TEST("ram default decimals is 1")
@@ -579,13 +593,25 @@ test_config_load(void)
 		cleanup_temp_config(path);
 	}
 
-	TEST("parses disk_show_percentage")
+	TEST("parses disk_mode")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("disk_show_percentage = true\n");
+		const char *path = create_temp_config("disk_mode = free\n");
 		barny_config_load(&config, path);
-		ASSERT_TRUE(config.disk_show_percentage);
+		ASSERT_NOT_NULL(config.disk_mode);
+		ASSERT_EQ_STR("free", config.disk_mode);
+		free(config.disk_mode);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses disk_unit_space")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("disk_unit_space = true\n");
+		barny_config_load(&config, path);
+		ASSERT_TRUE(config.disk_unit_space);
 		cleanup_temp_config(path);
 	}
 
@@ -599,49 +625,61 @@ test_config_load(void)
 		cleanup_temp_config(path);
 	}
 
-	/* CPU temp module parsing */
-	TEST("parses cpu_temp_path")
+	/* Sysinfo temp parsing */
+	TEST("parses sysinfo_temp_path")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
 		const char *path = create_temp_config(
-		        "cpu_temp_path = \"/sys/class/thermal/thermal_zone0/temp\"\n");
+		        "sysinfo_temp_path = \"/sys/class/thermal/thermal_zone0/temp\"\n");
 		barny_config_load(&config, path);
-		ASSERT_NOT_NULL(config.cpu_temp_path);
+		ASSERT_NOT_NULL(config.sysinfo_temp_path);
 		ASSERT_EQ_STR("/sys/class/thermal/thermal_zone0/temp",
-		              config.cpu_temp_path);
-		free(config.cpu_temp_path);
+		              config.sysinfo_temp_path);
+		free(config.sysinfo_temp_path);
 		cleanup_temp_config(path);
 	}
 
-	TEST("parses cpu_temp_zone")
+	TEST("parses sysinfo_temp_zone")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("cpu_temp_zone = 3\n");
+		const char *path = create_temp_config("sysinfo_temp_zone = 3\n");
 		barny_config_load(&config, path);
-		ASSERT_EQ_INT(3, config.cpu_temp_zone);
+		ASSERT_EQ_INT(3, config.sysinfo_temp_zone);
 		cleanup_temp_config(path);
 	}
 
-	TEST("parses cpu_temp_show_unit")
+	TEST("parses sysinfo_temp_show_unit")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("cpu_temp_show_unit = false\n");
+		const char *path = create_temp_config("sysinfo_temp_show_unit = false\n");
 		barny_config_load(&config, path);
-		ASSERT_FALSE(config.cpu_temp_show_unit);
+		ASSERT_FALSE(config.sysinfo_temp_show_unit);
 		cleanup_temp_config(path);
 	}
 
 	/* RAM module parsing */
-	TEST("parses ram_show_percentage")
+	TEST("parses ram_mode")
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("ram_show_percentage = true\n");
+		const char *path = create_temp_config("ram_mode = used\n");
 		barny_config_load(&config, path);
-		ASSERT_TRUE(config.ram_show_percentage);
+		ASSERT_NOT_NULL(config.ram_mode);
+		ASSERT_EQ_STR("used", config.ram_mode);
+		free(config.ram_mode);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses ram_unit_space")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("ram_unit_space = true\n");
+		barny_config_load(&config, path);
+		ASSERT_TRUE(config.ram_unit_space);
 		cleanup_temp_config(path);
 	}
 
@@ -756,6 +794,195 @@ test_config_load(void)
 		const char *path = create_temp_config("fileread_max_chars = 500\n");
 		barny_config_load(&config, path);
 		ASSERT_EQ_INT(256, config.fileread_max_chars);
+		cleanup_temp_config(path);
+	}
+
+	TEST_SUITE_END();
+}
+
+void
+test_config_edge_cases(void)
+{
+	TEST_SUITE_BEGIN("Config Edge Cases");
+
+	TEST("parses hex color via config load")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("text_color = \"#FF5500\"\n");
+		barny_config_load(&config, path);
+		ASSERT_TRUE(config.text_color_set);
+		ASSERT_EQ_DBL(1.0, config.text_color_r, 0.01);
+		ASSERT_EQ_DBL(85.0 / 255.0, config.text_color_g, 0.01);
+		ASSERT_EQ_DBL(0.0, config.text_color_b, 0.01);
+		free(config.text_color);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses named color 'white'")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("text_color = white\n");
+		barny_config_load(&config, path);
+		ASSERT_TRUE(config.text_color_set);
+		ASSERT_EQ_DBL(1.0, config.text_color_r, 0.01);
+		ASSERT_EQ_DBL(1.0, config.text_color_g, 0.01);
+		ASSERT_EQ_DBL(1.0, config.text_color_b, 0.01);
+		free(config.text_color);
+		cleanup_temp_config(path);
+	}
+
+	TEST("invalid color leaves text_color_set false")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("text_color = invalid\n");
+		barny_config_load(&config, path);
+		ASSERT_FALSE(config.text_color_set);
+		free(config.text_color);
+		cleanup_temp_config(path);
+	}
+
+	TEST("'default' resets text_color")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		/* First set a color */
+		const char *path1 = create_temp_config("text_color = white\n");
+		barny_config_load(&config, path1);
+		ASSERT_TRUE(config.text_color_set);
+		free(config.text_color);
+		cleanup_temp_config(path1);
+
+		/* Then reset to default */
+		barny_config_defaults(&config);
+		const char *path2 = create_temp_config("text_color = default\n");
+		barny_config_load(&config, path2);
+		ASSERT_FALSE(config.text_color_set);
+		ASSERT_NULL(config.text_color);
+		cleanup_temp_config(path2);
+	}
+
+	TEST("parses workspace_names CSV")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("workspace_names = term, code, web, music\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(4, config.workspace_name_count);
+		ASSERT_EQ_STR("term", config.workspace_names[0]);
+		ASSERT_EQ_STR("code", config.workspace_names[1]);
+		ASSERT_EQ_STR("web", config.workspace_names[2]);
+		ASSERT_EQ_STR("music", config.workspace_names[3]);
+		for (int i = 0; i < config.workspace_name_count; i++)
+			free(config.workspace_names[i]);
+		free((void *)config.workspace_names);
+		cleanup_temp_config(path);
+	}
+
+	TEST("workspace_names handles empty entries")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		/* Empty entries between commas should be skipped */
+		const char *path = create_temp_config("workspace_names = one, , three\n");
+		barny_config_load(&config, path);
+		/* Empty entry is skipped */
+		ASSERT_EQ_INT(2, config.workspace_name_count);
+		ASSERT_EQ_STR("one", config.workspace_names[0]);
+		ASSERT_EQ_STR("three", config.workspace_names[1]);
+		for (int i = 0; i < config.workspace_name_count; i++)
+			free(config.workspace_names[i]);
+		free((void *)config.workspace_names);
+		cleanup_temp_config(path);
+	}
+
+	TEST("workspace_names single name")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("workspace_names = single\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(1, config.workspace_name_count);
+		ASSERT_EQ_STR("single", config.workspace_names[0]);
+		free(config.workspace_names[0]);
+		free((void *)config.workspace_names);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses workspace_shape")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("workspace_shape = square\n");
+		barny_config_load(&config, path);
+		ASSERT_NOT_NULL(config.workspace_shape);
+		ASSERT_EQ_STR("square", config.workspace_shape);
+		free(config.workspace_shape);
+		cleanup_temp_config(path);
+	}
+
+	TEST("duplicate key uses last value")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config(
+			"height = 30\n"
+			"height = 50\n"
+		);
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(50, config.height);
+		cleanup_temp_config(path);
+	}
+
+	TEST("handles inline comment")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("height = 42 # this is a comment\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(42, config.height);
+		cleanup_temp_config(path);
+	}
+
+	TEST("config reload replaces values")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+
+		const char *path1 = create_temp_config("height = 30\n");
+		barny_config_load(&config, path1);
+		ASSERT_EQ_INT(30, config.height);
+		cleanup_temp_config(path1);
+
+		const char *path2 = create_temp_config("height = 60\n");
+		barny_config_load(&config, path2);
+		ASSERT_EQ_INT(60, config.height);
+		cleanup_temp_config(path2);
+	}
+
+	TEST("negative value for margin")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("margin_top = -10\n");
+		barny_config_load(&config, path);
+		/* Negative values are allowed (atoi handles them) */
+		ASSERT_EQ_INT(-10, config.margin_top);
+		cleanup_temp_config(path);
+	}
+
+	TEST("empty value for string field")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config("disk_mode = \"\"\n");
+		barny_config_load(&config, path);
+		/* Empty string is stored */
+		ASSERT_NOT_NULL(config.disk_mode);
+		ASSERT_EQ_STR("", config.disk_mode);
+		free(config.disk_mode);
 		cleanup_temp_config(path);
 	}
 

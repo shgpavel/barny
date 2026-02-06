@@ -1,7 +1,6 @@
 # Module sources
 barny_sources += files(
     'clock.c',
-    'cpu_temp.c',
     'crypto.c',
     'disk.c',
     'fileread.c',

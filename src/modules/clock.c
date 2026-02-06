@@ -75,28 +75,38 @@ build_date_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 
 	/* Build date based on order preference */
 	char date_part[64] = "";
+	size_t dp_off = 0;
+	const char *parts[3] = { NULL, NULL, NULL };
+
 	switch (cfg->clock_date_order) {
 	case 0:  /* dd/mm/yyyy */
-		if (cfg->clock_show_day) strcat(date_part, day);
-		if (cfg->clock_show_day && cfg->clock_show_month) strcat(date_part, sep);
-		if (cfg->clock_show_month) strcat(date_part, month);
-		if ((cfg->clock_show_day || cfg->clock_show_month) && cfg->clock_show_year) strcat(date_part, sep);
-		if (cfg->clock_show_year) strcat(date_part, year);
+		if (cfg->clock_show_day)   parts[0] = day;
+		if (cfg->clock_show_month) parts[1] = month;
+		if (cfg->clock_show_year)  parts[2] = year;
 		break;
 	case 1:  /* mm/dd/yyyy */
-		if (cfg->clock_show_month) strcat(date_part, month);
-		if (cfg->clock_show_month && cfg->clock_show_day) strcat(date_part, sep);
-		if (cfg->clock_show_day) strcat(date_part, day);
-		if ((cfg->clock_show_month || cfg->clock_show_day) && cfg->clock_show_year) strcat(date_part, sep);
-		if (cfg->clock_show_year) strcat(date_part, year);
+		if (cfg->clock_show_month) parts[0] = month;
+		if (cfg->clock_show_day)   parts[1] = day;
+		if (cfg->clock_show_year)  parts[2] = year;
 		break;
 	case 2:  /* yyyy/mm/dd */
-		if (cfg->clock_show_year) strcat(date_part, year);
-		if (cfg->clock_show_year && cfg->clock_show_month) strcat(date_part, sep);
-		if (cfg->clock_show_month) strcat(date_part, month);
-		if ((cfg->clock_show_year || cfg->clock_show_month) && cfg->clock_show_day) strcat(date_part, sep);
-		if (cfg->clock_show_day) strcat(date_part, day);
+		if (cfg->clock_show_year)  parts[0] = year;
+		if (cfg->clock_show_month) parts[1] = month;
+		if (cfg->clock_show_day)   parts[2] = day;
 		break;
+	default:
+		break;
+	}
+
+	for (int i = 0; i < 3; i++) {
+		if (!parts[i] || !parts[i][0])
+			continue;
+		if (dp_off > 0) {
+			dp_off += snprintf(date_part + dp_off,
+			                   sizeof(date_part) - dp_off, "%s", sep);
+		}
+		dp_off += snprintf(date_part + dp_off,
+		                   sizeof(date_part) - dp_off, "%s", parts[i]);
 	}
 
 	snprintf(buf, buflen, "%s%s", weekday, date_part);
@@ -120,9 +130,15 @@ static void
 clock_destroy(barny_module_t *self)
 {
 	clock_data_t *data = self->data;
+	if (!data)
+		return;
+
 	if (data->font_desc) {
 		pango_font_description_free(data->font_desc);
 	}
+
+	free(data);
+	self->data = NULL;
 }
 
 static void
@@ -206,6 +222,12 @@ barny_module_clock_create(void)
 {
 	barny_module_t *mod  = calloc(1, sizeof(barny_module_t));
 	clock_data_t   *data = calloc(1, sizeof(clock_data_t));
+
+	if (!mod || !data) {
+		free(mod);
+		free(data);
+		return NULL;
+	}
 
 	mod->name            = "clock";
 	mod->position        = BARNY_POS_RIGHT;

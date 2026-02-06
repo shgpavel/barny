@@ -72,7 +72,7 @@ add_item(const char *service)
 	/* Expand capacity if needed */
 	if (watcher->item_count >= watcher->item_capacity) {
 		int new_cap = watcher->item_capacity ? watcher->item_capacity * 2 : 8;
-		char **new_items = realloc(watcher->items, new_cap * sizeof(char *));
+		char **new_items = (char **)realloc((void *)watcher->items, new_cap * sizeof(char *));
 		if (!new_items) {
 			return;
 		}
@@ -361,7 +361,7 @@ barny_sni_watcher_cleanup(barny_state_t *state)
 	for (int i = 0; i < watcher->item_count; i++) {
 		free(watcher->items[i]);
 	}
-	free(watcher->items);
+	free((void *)watcher->items);
 	free(watcher);
 	watcher = NULL;
 }
