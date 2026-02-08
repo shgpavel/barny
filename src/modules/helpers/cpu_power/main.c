@@ -8,23 +8,23 @@
 #include <stdint.h>
 #include <time.h>
 
-#define UPDATE_INTERVAL 2
-#define OUTPUT_PATH "/opt/barny/modules/cpu_power"
-#define OUTPUT_TMP_PATH "/opt/barny/modules/cpu_power.tmp"
+#define UPDATE_INTERVAL  2
+#define OUTPUT_PATH      "/opt/barny/modules/cpu_power"
+#define OUTPUT_TMP_PATH  "/opt/barny/modules/cpu_power.tmp"
 #define MAX_RAPL_DOMAINS 16
 
 static volatile int running = 1;
 
 struct rapl_domain {
-	char energy_path[512];
-	char name[256];
-	uint64_t max_energy;
-	uint64_t last_energy;
+	char            energy_path[512];
+	char            name[256];
+	uint64_t        max_energy;
+	uint64_t        last_energy;
 	struct timespec last_time;
 };
 
 static struct rapl_domain domains[MAX_RAPL_DOMAINS];
-static int domain_count = 0;
+static int                domain_count = 0;
 
 static void
 signal_handler(int sig)
@@ -83,14 +83,15 @@ detect_rapl_domains(void)
 	struct dirent *entry;
 	while ((entry = readdir(dir)) != NULL && domain_count < MAX_RAPL_DOMAINS) {
 		/* Look for intel-rapl:X or amd_rapl:X (top-level package domains) */
-		if (strncmp(entry->d_name, "intel-rapl:", 11) != 0 &&
-		    strncmp(entry->d_name, "amd_rapl:", 9) != 0)
+		if (strncmp(entry->d_name, "intel-rapl:", 11) != 0
+		    && strncmp(entry->d_name, "amd_rapl:", 9) != 0)
 			continue;
 
 		/* Skip sub-domains (intel-rapl:0:1, etc.) - we want package power */
 		int colons = 0;
 		for (char *p = entry->d_name; *p; p++)
-			if (*p == ':') colons++;
+			if (*p == ':')
+				colons++;
 		if (colons > 1)
 			continue;
 
@@ -101,26 +102,30 @@ detect_rapl_domains(void)
 		/* Check if readable without sudo */
 		FILE *f = fopen(energy_path, "r");
 		if (!f) {
-			fprintf(stderr, "Warning: %s not readable (try: sudo chmod o+r %s)\n",
+			fprintf(stderr,
+			        "Warning: %s not readable (try: sudo chmod o+r %s)\n",
 			        energy_path, energy_path);
 			continue;
 		}
 		fclose(f);
 
 		struct rapl_domain *dom = &domains[domain_count];
-		snprintf(dom->energy_path, sizeof(dom->energy_path), "%s", energy_path);
+		snprintf(dom->energy_path, sizeof(dom->energy_path), "%s",
+		         energy_path);
 
 		/* Read domain name */
 		char name_path[512];
 		snprintf(name_path, sizeof(name_path),
 		         "/sys/class/powercap/%s/name", entry->d_name);
 		if (read_string_file(name_path, dom->name, sizeof(dom->name)) != 0)
-			snprintf(dom->name, sizeof(dom->name), "%s", entry->d_name);
+			snprintf(dom->name, sizeof(dom->name), "%s",
+			         entry->d_name);
 
 		/* Read max energy for wraparound handling */
 		char max_path[512];
 		snprintf(max_path, sizeof(max_path),
-		         "/sys/class/powercap/%s/max_energy_range_uj", entry->d_name);
+		         "/sys/class/powercap/%s/max_energy_range_uj",
+		         entry->d_name);
 		if (read_uint64_file(max_path, &dom->max_energy) != 0)
 			dom->max_energy = UINT64_MAX;
 
@@ -138,7 +143,7 @@ detect_rapl_domains(void)
 static double
 read_power(struct rapl_domain *dom)
 {
-	uint64_t energy;
+	uint64_t        energy;
 	struct timespec now;
 
 	if (read_uint64_file(dom->energy_path, &energy) != 0)
@@ -146,8 +151,8 @@ read_power(struct rapl_domain *dom)
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
 	/* Calculate time delta in seconds */
-	double dt = (now.tv_sec - dom->last_time.tv_sec) +
-	            (now.tv_nsec - dom->last_time.tv_nsec) / 1e9;
+	double dt = (now.tv_sec - dom->last_time.tv_sec)
+	            + (now.tv_nsec - dom->last_time.tv_nsec) / 1e9;
 
 	if (dt < 0.001)
 		return -1.0; /* Too short interval */
@@ -163,7 +168,7 @@ read_power(struct rapl_domain *dom)
 
 	/* Update last values */
 	dom->last_energy = energy;
-	dom->last_time = now;
+	dom->last_time   = now;
 
 	/* Convert uJ to Watts: W = uJ / (us) = uJ / (s * 1e6) */
 	return de / (dt * 1e6);
@@ -196,7 +201,8 @@ main(void)
 
 	if (domain_count == 0) {
 		fprintf(stderr, "No readable RAPL domains found\n");
-		fprintf(stderr, "To fix: sudo chmod o+r /sys/class/powercap/intel-rapl:*/energy_uj\n");
+		fprintf(stderr,
+		        "To fix: sudo chmod o+r /sys/class/powercap/intel-rapl:*/energy_uj\n");
 		return 1;
 	}
 

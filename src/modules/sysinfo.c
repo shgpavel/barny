@@ -43,10 +43,10 @@ detect_core_counts(sysinfo_data_t *data)
 	if (!dir)
 		return;
 
-	int max_freqs[256];
-	int cpu_count = 0;
-	int highest_freq = 0;
-	int lowest_freq = 0;
+	int            max_freqs[256];
+	int            cpu_count    = 0;
+	int            highest_freq = 0;
+	int            lowest_freq  = 0;
 
 	struct dirent *entry;
 	while ((entry = readdir(dir)) != NULL && cpu_count < 256) {
@@ -55,11 +55,12 @@ detect_core_counts(sysinfo_data_t *data)
 		if (!isdigit(entry->d_name[3]))
 			continue;
 
-		int cpu_id = atoi(entry->d_name + 3);
+		int  cpu_id = atoi(entry->d_name + 3);
 		char path[256];
 
 		snprintf(path, sizeof(path),
-		         "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu_id);
+		         "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq",
+		         cpu_id);
 		int max_freq = read_int_file(path);
 		if (max_freq < 0)
 			continue;
@@ -76,7 +77,7 @@ detect_core_counts(sysinfo_data_t *data)
 	closedir(dir);
 
 	/* Classify P vs E cores based on max frequency gap */
-	int gap = highest_freq - lowest_freq;
+	int gap       = highest_freq - lowest_freq;
 	int threshold = (gap > 100000) ? lowest_freq + 100000 : 0;
 
 	for (int i = 0; i < cpu_count; i++) {
@@ -106,11 +107,14 @@ try_thermal_zone(char *path, size_t pathlen, int zone)
 	fclose(f);
 
 	/* Look for common CPU thermal zone names */
-	if (strstr(type, "cpu") || strstr(type, "CPU") ||
-	    strstr(type, "x86_pkg") || strstr(type, "coretemp") ||
-	    strstr(type, "k10temp") || strstr(type, "acpitz")) {
-		snprintf(path, pathlen,
-		         "/sys/class/thermal/thermal_zone%d/temp", zone);
+	if (strstr(type, "cpu")
+	    || strstr(type, "CPU")
+	    || strstr(type, "x86_pkg")
+	    || strstr(type, "coretemp")
+	    || strstr(type, "k10temp")
+	    || strstr(type, "acpitz")) {
+		snprintf(path, pathlen, "/sys/class/thermal/thermal_zone%d/temp",
+		         zone);
 		return true;
 	}
 
@@ -133,8 +137,8 @@ try_hwmon(char *path, size_t pathlen)
 			continue;
 
 		char name_path[256];
-		snprintf(name_path, sizeof(name_path),
-		         "/sys/class/hwmon/%s/name", ent->d_name);
+		snprintf(name_path, sizeof(name_path), "/sys/class/hwmon/%s/name",
+		         ent->d_name);
 
 		FILE *f = fopen(name_path, "r");
 		if (!f)
@@ -147,10 +151,12 @@ try_hwmon(char *path, size_t pathlen)
 		fclose(f);
 
 		/* Look for CPU-related hwmon devices */
-		if (strstr(name, "coretemp") || strstr(name, "k10temp") ||
-		    strstr(name, "cpu") || strstr(name, "zenpower")) {
-			snprintf(path, pathlen,
-			         "/sys/class/hwmon/%s/temp1_input", ent->d_name);
+		if (strstr(name, "coretemp")
+		    || strstr(name, "k10temp")
+		    || strstr(name, "cpu")
+		    || strstr(name, "zenpower")) {
+			snprintf(path, pathlen, "/sys/class/hwmon/%s/temp1_input",
+			         ent->d_name);
 
 			f = fopen(path, "r");
 			if (f) {
@@ -172,9 +178,10 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 
 	/* Priority 1: User-specified path */
 	if (cfg->sysinfo_temp_path && cfg->sysinfo_temp_path[0]) {
-		strncpy(data->temp_path, cfg->sysinfo_temp_path, sizeof(data->temp_path) - 1);
+		strncpy(data->temp_path, cfg->sysinfo_temp_path,
+		        sizeof(data->temp_path) - 1);
 		data->temp_path[sizeof(data->temp_path) - 1] = '\0';
-		data->temp_path_found = true;
+		data->temp_path_found                        = true;
 		return;
 	}
 
@@ -189,7 +196,8 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 
 	/* Priority 3: Auto-detect thermal zones */
 	for (int i = 0; i < 16; i++) {
-		if (try_thermal_zone(data->temp_path, sizeof(data->temp_path), i)) {
+		if (try_thermal_zone(data->temp_path, sizeof(data->temp_path),
+		                     i)) {
 			data->temp_path_found = true;
 			return;
 		}
@@ -255,39 +263,66 @@ sysinfo_update(barny_module_t *self)
 		if (fgets(line, sizeof(line), f)) {
 			double p_freq = 0, e_freq = 0;
 			if (sscanf(line, "P: %lf E: %lf", &p_freq, &e_freq) == 2) {
-				if (p_freq != data->p_freq || e_freq != data->e_freq) {
+				if (p_freq != data->p_freq
+				    || e_freq != data->e_freq) {
 					data->p_freq = p_freq;
 					data->e_freq = e_freq;
 
 					if (cfg->sysinfo_freq_combined) {
-						int total = data->p_core_count + data->e_core_count;
-						double avg = (total > 0)
-						    ? (p_freq * data->p_core_count + e_freq * data->e_core_count) / total
-						    : 0.0;
+						int total = data->p_core_count
+						            + data->e_core_count;
+						double avg
+						        = (total > 0) ?
+						                  (p_freq * data->p_core_count
+						                   + e_freq * data->e_core_count)
+						                          / total :
+						                  0.0;
 						if (cfg->sysinfo_freq_show_unit) {
-							const char *fmt = cfg->sysinfo_freq_unit_space
-							    ? "%.2f GHz" : "%.2fGHz";
-							snprintf(data->freq_str, sizeof(data->freq_str),
-							         fmt, avg);
+							const char *fmt
+							        = cfg->sysinfo_freq_unit_space ?
+							                  "%.2f GHz" :
+							                  "%.2fGHz";
+							snprintf(
+							        data->freq_str,
+							        sizeof(data->freq_str),
+							        fmt, avg);
 						} else {
-							snprintf(data->freq_str, sizeof(data->freq_str),
-							         "%.2f", avg);
+							snprintf(
+							        data->freq_str,
+							        sizeof(data->freq_str),
+							        "%.2f", avg);
 						}
 					} else {
 						/* Build format based on label_space and show_unit */
-						const char *label_sep = cfg->sysinfo_freq_label_space ? " " : "";
-						const char *unit_sep = cfg->sysinfo_freq_unit_space ? " " : "";
-						const char *unit = cfg->sysinfo_freq_show_unit ? "GHz" : "";
+						const char *label_sep
+						        = cfg->sysinfo_freq_label_space ?
+						                  " " :
+						                  "";
+						const char *unit_sep
+						        = cfg->sysinfo_freq_unit_space ?
+						                  " " :
+						                  "";
+						const char *unit
+						        = cfg->sysinfo_freq_show_unit ?
+						                  "GHz" :
+						                  "";
 
 						if (cfg->sysinfo_freq_show_unit) {
-							snprintf(data->freq_str, sizeof(data->freq_str),
-							         "P:%s%.2f%s%s E:%s%.2f%s%s",
-							         label_sep, p_freq, unit_sep, unit,
-							         label_sep, e_freq, unit_sep, unit);
+							snprintf(
+							        data->freq_str,
+							        sizeof(data->freq_str),
+							        "P:%s%.2f%s%s E:%s%.2f%s%s",
+							        label_sep, p_freq,
+							        unit_sep, unit,
+							        label_sep, e_freq,
+							        unit_sep, unit);
 						} else {
-							snprintf(data->freq_str, sizeof(data->freq_str),
-							         "P:%s%.2f E:%s%.2f",
-							         label_sep, p_freq, label_sep, e_freq);
+							snprintf(
+							        data->freq_str,
+							        sizeof(data->freq_str),
+							        "P:%s%.2f E:%s%.2f",
+							        label_sep, p_freq,
+							        label_sep, e_freq);
 						}
 					}
 					self->dirty = true;
@@ -310,15 +345,27 @@ sysinfo_update(barny_module_t *self)
 					const char *fmt;
 					if (cfg->sysinfo_power_unit_space) {
 						switch (cfg->sysinfo_power_decimals) {
-						case 1:  fmt = "%.1f W"; break;
-						case 2:  fmt = "%.2f W"; break;
-						default: fmt = "%.0f W"; break;
+						case 1:
+							fmt = "%.1f W";
+							break;
+						case 2:
+							fmt = "%.2f W";
+							break;
+						default:
+							fmt = "%.0f W";
+							break;
 						}
 					} else {
 						switch (cfg->sysinfo_power_decimals) {
-						case 1:  fmt = "%.1fW"; break;
-						case 2:  fmt = "%.2fW"; break;
-						default: fmt = "%.0fW"; break;
+						case 1:
+							fmt = "%.1fW";
+							break;
+						case 2:
+							fmt = "%.2fW";
+							break;
+						default:
+							fmt = "%.0fW";
+							break;
 						}
 					}
 					snprintf(data->power_str,
@@ -344,11 +391,16 @@ sysinfo_update(barny_module_t *self)
 					data->current_temp = celsius;
 
 					if (cfg->sysinfo_temp_show_unit) {
-						const char *fmt = cfg->sysinfo_temp_unit_space ? "%d C" : "%dC";
-						snprintf(data->temp_str, sizeof(data->temp_str),
+						const char *fmt
+						        = cfg->sysinfo_temp_unit_space ?
+						                  "%d C" :
+						                  "%dC";
+						snprintf(data->temp_str,
+						         sizeof(data->temp_str),
 						         fmt, celsius);
 					} else {
-						snprintf(data->temp_str, sizeof(data->temp_str),
+						snprintf(data->temp_str,
+						         sizeof(data->temp_str),
 						         "%d", celsius);
 					}
 					self->dirty = true;
@@ -361,8 +413,8 @@ sysinfo_update(barny_module_t *self)
 
 /* Helper to render text with shadow */
 static int
-render_text(cairo_t *cr, PangoLayout *layout, const char *text,
-            int x, int y, int h, double r, double g, double b)
+render_text(cairo_t *cr, PangoLayout *layout, const char *text, int x, int y,
+            int h, double r, double g, double b)
 {
 	pango_layout_set_text(layout, text, -1);
 
@@ -394,40 +446,59 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	PangoLayout *layout = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, data->font_desc);
 
-	int total_width = 0;
-	int item_spacing = cfg->sysinfo_item_spacing;
+	int    total_width  = 0;
+	int    item_spacing = cfg->sysinfo_item_spacing;
 	double r, g, b;
 
 	/* Render frequency */
 	if (cfg->text_color_set) {
-		r = cfg->text_color_r; g = cfg->text_color_g; b = cfg->text_color_b;
+		r = cfg->text_color_r;
+		g = cfg->text_color_g;
+		b = cfg->text_color_b;
 	} else {
-		r = 0.7; g = 0.9; b = 1.0;
+		r = 0.7;
+		g = 0.9;
+		b = 1.0;
 	}
-	total_width += render_text(cr, layout, data->freq_str, x + total_width, y, h, r, g, b);
+	total_width += render_text(cr, layout, data->freq_str, x + total_width, y,
+	                           h, r, g, b);
 	total_width += item_spacing;
 
 	/* Render power */
 	if (cfg->text_color_set) {
-		r = cfg->text_color_r; g = cfg->text_color_g; b = cfg->text_color_b;
+		r = cfg->text_color_r;
+		g = cfg->text_color_g;
+		b = cfg->text_color_b;
 	} else {
-		r = 1.0; g = 0.9; b = 0.7;
+		r = 1.0;
+		g = 0.9;
+		b = 0.7;
 	}
-	total_width += render_text(cr, layout, data->power_str, x + total_width, y, h, r, g, b);
+	total_width += render_text(cr, layout, data->power_str, x + total_width, y,
+	                           h, r, g, b);
 	total_width += item_spacing;
 
 	/* Render temperature with color coding */
 	if (cfg->text_color_set) {
-		r = cfg->text_color_r; g = cfg->text_color_g; b = cfg->text_color_b;
+		r = cfg->text_color_r;
+		g = cfg->text_color_g;
+		b = cfg->text_color_b;
 	} else {
-		r = 0.9; g = 0.9; b = 0.7;
+		r = 0.9;
+		g = 0.9;
+		b = 0.7;
 		if (data->current_temp >= 80) {
-			r = 1.0; g = 0.4; b = 0.4;  /* Hot - red */
+			r = 1.0;
+			g = 0.4;
+			b = 0.4; /* Hot - red */
 		} else if (data->current_temp >= 60) {
-			r = 1.0; g = 0.7; b = 0.4;  /* Warm - orange */
+			r = 1.0;
+			g = 0.7;
+			b = 0.4; /* Warm - orange */
 		}
 	}
-	total_width += render_text(cr, layout, data->temp_str, x + total_width, y, h, r, g, b);
+	total_width += render_text(cr, layout, data->temp_str, x + total_width, y,
+	                           h, r, g, b);
 
 	g_object_unref(layout);
 
@@ -446,15 +517,15 @@ barny_module_sysinfo_create(void)
 		return NULL;
 	}
 
-	mod->name            = "sysinfo";
-	mod->position        = BARNY_POS_RIGHT;
-	mod->init            = sysinfo_init;
-	mod->destroy         = sysinfo_destroy;
-	mod->update          = sysinfo_update;
-	mod->render          = sysinfo_render;
-	mod->data            = data;
-	mod->width           = 180;
-	mod->dirty           = true;
+	mod->name     = "sysinfo";
+	mod->position = BARNY_POS_RIGHT;
+	mod->init     = sysinfo_init;
+	mod->destroy  = sysinfo_destroy;
+	mod->update   = sysinfo_update;
+	mod->render   = sysinfo_render;
+	mod->data     = data;
+	mod->width    = 180;
+	mod->dirty    = true;
 
 	return mod;
 }

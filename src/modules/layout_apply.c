@@ -12,16 +12,17 @@ typedef struct {
 } module_factory_entry_t;
 
 static const module_factory_entry_t module_factories[] = {
-	{ "clock", barny_module_clock_create },
+	{ "clock",     barny_module_clock_create     },
 	{ "workspace", barny_module_workspace_create },
-	{ "sysinfo", barny_module_sysinfo_create },
-	{ "weather", barny_module_weather_create },
-	{ "disk", barny_module_disk_create },
-	{ "ram", barny_module_ram_create },
-	{ "network", barny_module_network_create },
-	{ "fileread", barny_module_fileread_create },
-	{ "crypto", barny_module_crypto_create },
-	{ "tray", barny_module_tray_create },
+	{ "sysinfo",   barny_module_sysinfo_create   },
+	{ "weather",   barny_module_weather_create   },
+	{ "disk",      barny_module_disk_create      },
+	{ "ram",       barny_module_ram_create       },
+	{ "network",   barny_module_network_create   },
+	{ "fileread",  barny_module_fileread_create  },
+	{ "crypto",    barny_module_crypto_create    },
+	{ "tray",      barny_module_tray_create      },
+	{ "battery",   barny_module_battery_create   },
 };
 
 static barny_module_t *
@@ -54,19 +55,19 @@ create_gap_module(barny_state_t *state, barny_position_t position, int units)
 		return NULL;
 	}
 
-	spacing = (state && state->config.module_spacing > 0)
-	                  ? state->config.module_spacing
-	                  : 16;
-	width = (units - 1) * spacing;
+	spacing = (state && state->config.module_spacing > 0) ?
+	                  state->config.module_spacing :
+	                  16;
+	width   = (units - 1) * spacing;
 	if (width < 0) {
 		width = 0;
 	}
 
-	mod->name = "gap";
+	mod->name     = "gap";
 	mod->position = position;
-	mod->width = width;
-	mod->height = 0;
-	mod->dirty = false;
+	mod->width    = width;
+	mod->height   = 0;
+	mod->dirty    = false;
 	return mod;
 }
 
@@ -81,7 +82,7 @@ register_slot_modules(barny_state_t *state, barny_position_t position,
 			continue;
 		}
 
-		int gap_units = barny_module_layout_gap_units(names[i]);
+		int gap_units       = barny_module_layout_gap_units(names[i]);
 		barny_module_t *mod = NULL;
 		if (gap_units > 0) {
 			mod = create_gap_module(state, position, gap_units);
@@ -89,7 +90,8 @@ register_slot_modules(barny_state_t *state, barny_position_t position,
 			mod = create_module_by_name(names[i]);
 		}
 		if (!mod) {
-			fprintf(stderr, "barny: failed to create module '%s'\n", names[i]);
+			fprintf(stderr, "barny: failed to create module '%s'\n",
+			        names[i]);
 			continue;
 		}
 
@@ -122,10 +124,10 @@ validate_catalog_vs_factories(void)
 	if (validated) {
 		return;
 	}
-	validated = true;
+	validated                            = true;
 
 	const char *names[BARNY_MAX_MODULES] = { 0 };
-	int total = barny_module_catalog_names(names, BARNY_MAX_MODULES);
+	int         total = barny_module_catalog_names(names, BARNY_MAX_MODULES);
 
 	for (int i = 0; i < total; i++) {
 		if (!has_factory(names[i])) {
@@ -138,7 +140,7 @@ validate_catalog_vs_factories(void)
 
 int
 barny_module_layout_apply_to_state(const barny_module_layout_t *layout,
-                                   barny_state_t *state)
+                                   barny_state_t               *state)
 {
 	int registered = 0;
 
@@ -148,12 +150,12 @@ barny_module_layout_apply_to_state(const barny_module_layout_t *layout,
 
 	validate_catalog_vs_factories();
 
-	registered += register_slot_modules(state, BARNY_POS_LEFT,
-	                                    layout->left, layout->left_count);
+	registered += register_slot_modules(state, BARNY_POS_LEFT, layout->left,
+	                                    layout->left_count);
 	registered += register_slot_modules(state, BARNY_POS_CENTER,
 	                                    layout->center, layout->center_count);
-	registered += register_slot_modules(state, BARNY_POS_RIGHT,
-	                                    layout->right, layout->right_count);
+	registered += register_slot_modules(state, BARNY_POS_RIGHT, layout->right,
+	                                    layout->right_count);
 
 	return registered;
 }

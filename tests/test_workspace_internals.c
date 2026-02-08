@@ -9,15 +9,15 @@
 #include <string.h>
 #include <stdlib.h>
 
-static int test_ipc_send_called = 0;
-static uint32_t test_ipc_last_type = 0;
-static char test_ipc_last_payload[256];
+static int      test_ipc_send_called = 0;
+static uint32_t test_ipc_last_type   = 0;
+static char     test_ipc_last_payload[256];
 
 static void
 reset_ipc_state(void)
 {
-	test_ipc_send_called = 0;
-	test_ipc_last_type = 0;
+	test_ipc_send_called     = 0;
+	test_ipc_last_type       = 0;
 	test_ipc_last_payload[0] = '\0';
 }
 
@@ -28,7 +28,9 @@ test_sway_ipc_send(barny_state_t *state, uint32_t type, const char *payload)
 	test_ipc_send_called++;
 	test_ipc_last_type = type;
 	if (payload) {
-		strncpy(test_ipc_last_payload, payload, sizeof(test_ipc_last_payload) - 1);
+		strncpy(test_ipc_last_payload,
+		        payload,
+		        sizeof(test_ipc_last_payload) - 1);
 		test_ipc_last_payload[sizeof(test_ipc_last_payload) - 1] = '\0';
 	} else {
 		test_ipc_last_payload[0] = '\0';
@@ -61,8 +63,8 @@ test_sway_ipc_subscribe(barny_state_t *state, const char *events)
 	return 0;
 }
 
-#define barny_sway_ipc_send test_sway_ipc_send
-#define barny_sway_ipc_recv test_sway_ipc_recv
+#define barny_sway_ipc_send      test_sway_ipc_send
+#define barny_sway_ipc_recv      test_sway_ipc_recv
 #define barny_sway_ipc_recv_sync test_sway_ipc_recv_sync
 #define barny_sway_ipc_subscribe test_sway_ipc_subscribe
 
@@ -90,8 +92,9 @@ test_parse_workspaces(void)
 
 	TEST("parses single workspace")
 	{
-		parse_workspaces(&data,
-			"[{\"num\": 1, \"name\": \"1\", \"focused\": true, \"visible\": true, \"urgent\": false}]");
+		parse_workspaces(
+		        &data,
+		        "[{\"num\": 1, \"name\": \"1\", \"focused\": true, \"visible\": true, \"urgent\": false}]");
 		ASSERT_EQ_INT(1, data.workspace_count);
 		ASSERT_EQ_INT(1, data.workspaces[0].num);
 		ASSERT_EQ_STR("1", data.workspaces[0].name);
@@ -102,12 +105,13 @@ test_parse_workspaces(void)
 
 	TEST("parses multiple workspaces")
 	{
-		parse_workspaces(&data,
-			"["
-			"{\"num\": 1, \"name\": \"code\", \"focused\": false, \"visible\": false, \"urgent\": false},"
-			"{\"num\": 2, \"name\": \"web\", \"focused\": true, \"visible\": true, \"urgent\": false},"
-			"{\"num\": 3, \"name\": \"chat\", \"focused\": false, \"visible\": false, \"urgent\": true}"
-			"]");
+		parse_workspaces(
+		        &data,
+		        "["
+		        "{\"num\": 1, \"name\": \"code\", \"focused\": false, \"visible\": false, \"urgent\": false},"
+		        "{\"num\": 2, \"name\": \"web\", \"focused\": true, \"visible\": true, \"urgent\": false},"
+		        "{\"num\": 3, \"name\": \"chat\", \"focused\": false, \"visible\": false, \"urgent\": true}"
+		        "]");
 		ASSERT_EQ_INT(3, data.workspace_count);
 		ASSERT_EQ_INT(1, data.workspaces[0].num);
 		ASSERT_EQ_INT(2, data.workspaces[1].num);
@@ -129,21 +133,20 @@ test_parse_workspaces(void)
 	TEST("respects MAX_WORKSPACES limit")
 	{
 		/* Create JSON with 12 workspaces - should only parse MAX_WORKSPACES (10) */
-		const char *json =
-			"["
-			"{\"num\": 1, \"name\": \"1\"},"
-			"{\"num\": 2, \"name\": \"2\"},"
-			"{\"num\": 3, \"name\": \"3\"},"
-			"{\"num\": 4, \"name\": \"4\"},"
-			"{\"num\": 5, \"name\": \"5\"},"
-			"{\"num\": 6, \"name\": \"6\"},"
-			"{\"num\": 7, \"name\": \"7\"},"
-			"{\"num\": 8, \"name\": \"8\"},"
-			"{\"num\": 9, \"name\": \"9\"},"
-			"{\"num\": 10, \"name\": \"10\"},"
-			"{\"num\": 11, \"name\": \"11\"},"
-			"{\"num\": 12, \"name\": \"12\"}"
-			"]";
+		const char *json = "["
+		                   "{\"num\": 1, \"name\": \"1\"},"
+		                   "{\"num\": 2, \"name\": \"2\"},"
+		                   "{\"num\": 3, \"name\": \"3\"},"
+		                   "{\"num\": 4, \"name\": \"4\"},"
+		                   "{\"num\": 5, \"name\": \"5\"},"
+		                   "{\"num\": 6, \"name\": \"6\"},"
+		                   "{\"num\": 7, \"name\": \"7\"},"
+		                   "{\"num\": 8, \"name\": \"8\"},"
+		                   "{\"num\": 9, \"name\": \"9\"},"
+		                   "{\"num\": 10, \"name\": \"10\"},"
+		                   "{\"num\": 11, \"name\": \"11\"},"
+		                   "{\"num\": 12, \"name\": \"12\"}"
+		                   "]";
 		parse_workspaces(&data, json);
 		ASSERT_EQ_INT(10, data.workspace_count);
 	}
@@ -186,26 +189,27 @@ test_get_workspace_label(void)
 	TEST_SUITE_BEGIN("get_workspace_label");
 
 	workspace_data_t data;
-	barny_state_t state;
+	barny_state_t    state;
 	memset(&data, 0, sizeof(data));
 	memset(&state, 0, sizeof(state));
 	barny_config_defaults(&state.config);
 	data.state = &state;
 
 	workspace_info_t ws;
-	char buf[16];
+	char             buf[16];
 
 	TEST("returns configured name when available")
 	{
 		/* Set up workspace names */
-		char *names[] = { "term", "code", "web" };
-		state.config.workspace_names = names;
+		char *names[]                     = { "term", "code", "web" };
+		state.config.workspace_names      = names;
 		state.config.workspace_name_count = 3;
 
-		ws.num = 2;
-		ws.name = strdup("2");
+		ws.num                            = 2;
+		ws.name                           = strdup("2");
 
-		const char *label = get_workspace_label(&data, &ws, buf, sizeof(buf));
+		const char *label
+		        = get_workspace_label(&data, &ws, buf, sizeof(buf));
 		ASSERT_EQ_STR("code", label);
 
 		free(ws.name);
@@ -213,13 +217,14 @@ test_get_workspace_label(void)
 
 	TEST("falls back to number when no configured name")
 	{
-		state.config.workspace_names = NULL;
+		state.config.workspace_names      = NULL;
 		state.config.workspace_name_count = 0;
 
-		ws.num = 5;
-		ws.name = strdup("5");
+		ws.num                            = 5;
+		ws.name                           = strdup("5");
 
-		const char *label = get_workspace_label(&data, &ws, buf, sizeof(buf));
+		const char *label
+		        = get_workspace_label(&data, &ws, buf, sizeof(buf));
 		ASSERT_EQ_STR("5", label);
 
 		free(ws.name);
@@ -227,14 +232,15 @@ test_get_workspace_label(void)
 
 	TEST("falls back to number for out-of-range workspace")
 	{
-		char *names[] = { "term", "code" };
-		state.config.workspace_names = names;
+		char *names[]                     = { "term", "code" };
+		state.config.workspace_names      = names;
 		state.config.workspace_name_count = 2;
 
-		ws.num = 5;  /* Beyond configured names */
+		ws.num  = 5; /* Beyond configured names */
 		ws.name = strdup("5");
 
-		const char *label = get_workspace_label(&data, &ws, buf, sizeof(buf));
+		const char *label
+		        = get_workspace_label(&data, &ws, buf, sizeof(buf));
 		ASSERT_EQ_STR("5", label);
 
 		free(ws.name);
@@ -242,13 +248,14 @@ test_get_workspace_label(void)
 
 	TEST("handles workspace num=0")
 	{
-		state.config.workspace_names = NULL;
+		state.config.workspace_names      = NULL;
 		state.config.workspace_name_count = 0;
 
-		ws.num = 0;
-		ws.name = strdup("scratch");
+		ws.num                            = 0;
+		ws.name                           = strdup("scratch");
 
-		const char *label = get_workspace_label(&data, &ws, buf, sizeof(buf));
+		const char *label
+		        = get_workspace_label(&data, &ws, buf, sizeof(buf));
 		ASSERT_EQ_STR("0", label);
 
 		free(ws.name);
@@ -301,15 +308,15 @@ test_workspace_click_uses_render_x(void)
 	memset(&state, 0, sizeof(state));
 	barny_config_defaults(&state.config);
 	state.config.workspace_indicator_size = 20;
-	state.config.workspace_spacing = 5;
+	state.config.workspace_spacing        = 5;
 
 	workspace_data_t data;
 	memset(&data, 0, sizeof(data));
-	data.state = &state;
-	data.workspace_count = 2;
+	data.state             = &state;
+	data.workspace_count   = 2;
 	data.workspaces[0].num = 1;
 	data.workspaces[1].num = 2;
-	data.render_x = 100;
+	data.render_x          = 100;
 
 	barny_module_t mod;
 	memset(&mod, 0, sizeof(mod));

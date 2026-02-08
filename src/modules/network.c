@@ -63,8 +63,8 @@ find_active_interface(char *iface, size_t iface_len)
 		return false;
 
 	/* Priority order: ethernet first, then wifi */
-	char eth_iface[32] = "";
-	char wifi_iface[32] = "";
+	char           eth_iface[32]  = "";
+	char           wifi_iface[32] = "";
 
 	struct dirent *ent;
 	while ((ent = readdir(dir)) != NULL) {
@@ -80,11 +80,11 @@ find_active_interface(char *iface, size_t iface_len)
 			continue;
 
 		/* Categorize by name */
-		if (strncmp(ent->d_name, "eth", 3) == 0 ||
-		    strncmp(ent->d_name, "en", 2) == 0) {
+		if (strncmp(ent->d_name, "eth", 3) == 0
+		    || strncmp(ent->d_name, "en", 2) == 0) {
 			memcpy(eth_iface, ent->d_name, namelen + 1);
-		} else if (strncmp(ent->d_name, "wlan", 4) == 0 ||
-		           strncmp(ent->d_name, "wl", 2) == 0) {
+		} else if (strncmp(ent->d_name, "wlan", 4) == 0
+		           || strncmp(ent->d_name, "wl", 2) == 0) {
 			memcpy(wifi_iface, ent->d_name, namelen + 1);
 		}
 	}
@@ -117,7 +117,7 @@ get_interface_ip(const char *iface, char *ip, size_t ip_len, bool prefer_ipv4)
 	if (getifaddrs(&ifaddr) == -1)
 		return false;
 
-	char ipv4[INET_ADDRSTRLEN] = "";
+	char ipv4[INET_ADDRSTRLEN]  = "";
 	char ipv6[INET6_ADDRSTRLEN] = "";
 
 	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
@@ -129,13 +129,16 @@ get_interface_ip(const char *iface, char *ip, size_t ip_len, bool prefer_ipv4)
 		int family = ifa->ifa_addr->sa_family;
 
 		if (family == AF_INET) {
-			struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+			struct sockaddr_in *addr
+			        = (struct sockaddr_in *)ifa->ifa_addr;
 			inet_ntop(AF_INET, &addr->sin_addr, ipv4, sizeof(ipv4));
 		} else if (family == AF_INET6) {
-			struct sockaddr_in6 *addr = (struct sockaddr_in6 *)ifa->ifa_addr;
+			struct sockaddr_in6 *addr
+			        = (struct sockaddr_in6 *)ifa->ifa_addr;
 			/* Skip link-local addresses */
 			if (!IN6_IS_ADDR_LINKLOCAL(&addr->sin6_addr)) {
-				inet_ntop(AF_INET6, &addr->sin6_addr, ipv6, sizeof(ipv6));
+				inet_ntop(AF_INET6, &addr->sin6_addr, ipv6,
+				          sizeof(ipv6));
 			}
 		}
 	}
@@ -173,13 +176,13 @@ get_interface_ip(const char *iface, char *ip, size_t ip_len, bool prefer_ipv4)
 static int
 network_init(barny_module_t *self, barny_state_t *state)
 {
-	network_data_t *data = self->data;
-	data->state          = state;
-	data->is_online      = false;
+	network_data_t *data   = self->data;
+	data->state            = state;
+	data->is_online        = false;
 	data->current_iface[0] = '\0';
 	data->current_ip[0]    = '\0';
 
-	data->font_desc      = pango_font_description_from_string(
+	data->font_desc        = pango_font_description_from_string(
                 state->config.font ? state->config.font : "Sans 10");
 
 	strcpy(data->display_str, "offline");
@@ -205,15 +208,15 @@ network_destroy(barny_module_t *self)
 static void
 network_update(barny_module_t *self)
 {
-	network_data_t *data = self->data;
-	barny_config_t *cfg  = &data->state->config;
+	network_data_t *data      = self->data;
+	barny_config_t *cfg       = &data->state->config;
 
-	char iface[32] = "";
-	char ip[64]    = "";
-	bool online    = false;
+	char            iface[32] = "";
+	char            ip[64]    = "";
+	bool            online    = false;
 
 	/* Determine which interface to use */
-	const char *cfg_iface = cfg->network_interface;
+	const char     *cfg_iface = cfg->network_interface;
 	if (cfg_iface && cfg_iface[0] && strcmp(cfg_iface, "auto") != 0) {
 		/* User-specified interface */
 		strncpy(iface, cfg_iface, sizeof(iface) - 1);
@@ -235,16 +238,16 @@ network_update(barny_module_t *self)
 	}
 
 	/* Check if anything changed */
-	bool changed = (online != data->is_online) ||
-	               strcmp(iface, data->current_iface) != 0 ||
-	               strcmp(ip, data->current_ip) != 0;
+	bool changed = (online != data->is_online)
+	               || strcmp(iface, data->current_iface) != 0
+	               || strcmp(ip, data->current_ip) != 0;
 
 	if (!changed)
 		return;
 
-	data->is_online = online;
+	data->is_online  = online;
 	size_t iface_len = strlen(iface);
-	size_t ip_len = strlen(ip);
+	size_t ip_len    = strlen(ip);
 	if (iface_len < sizeof(data->current_iface)) {
 		memcpy(data->current_iface, iface, iface_len + 1);
 	}
@@ -264,8 +267,8 @@ network_update(barny_module_t *self)
 			         "%s", ip);
 		}
 	} else if (cfg->network_show_interface) {
-		snprintf(data->display_str, sizeof(data->display_str),
-		         "%s", iface);
+		snprintf(data->display_str, sizeof(data->display_str), "%s",
+		         iface);
 	} else {
 		strcpy(data->display_str, "online");
 	}
@@ -294,7 +297,8 @@ network_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	/* Color based on status (or custom if set) */
 	barny_config_t *cfg = &data->state->config;
 	if (cfg->text_color_set) {
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 0.9);
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
+		                      cfg->text_color_b, 0.9);
 	} else if (data->is_online) {
 		cairo_set_source_rgba(cr, 0.7, 1, 0.7, 0.9);
 	} else {
@@ -320,15 +324,15 @@ barny_module_network_create(void)
 		return NULL;
 	}
 
-	mod->name            = "network";
-	mod->position        = BARNY_POS_RIGHT;
-	mod->init            = network_init;
-	mod->destroy         = network_destroy;
-	mod->update          = network_update;
-	mod->render          = network_render;
-	mod->data            = data;
-	mod->width           = 120;
-	mod->dirty           = true;
+	mod->name     = "network";
+	mod->position = BARNY_POS_RIGHT;
+	mod->init     = network_init;
+	mod->destroy  = network_destroy;
+	mod->update   = network_update;
+	mod->render   = network_render;
+	mod->data     = data;
+	mod->width    = 120;
+	mod->dirty    = true;
 
 	return mod;
 }

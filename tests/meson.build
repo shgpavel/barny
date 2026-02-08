@@ -10,6 +10,7 @@ test_sources = files(
 
 test_support_sources = files(
     '../src/config.c',
+    '../src/modules/battery.c',
     '../src/modules/clock.c',
     '../src/modules/crypto.c',
     '../src/modules/disk.c',

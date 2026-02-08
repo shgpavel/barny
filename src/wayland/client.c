@@ -327,7 +327,9 @@ registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
 			free(out->name);
 			free(out);
 
-			fprintf(stderr, "barny: output removed (registry name %u)\n", name);
+			fprintf(stderr,
+			        "barny: output removed (registry name %u)\n",
+			        name);
 			return;
 		}
 		prev = &out->next;
@@ -407,10 +409,4 @@ barny_wayland_cleanup(barny_state_t *state)
 	if (state->display) {
 		wl_display_disconnect(state->display);
 	}
-}
-
-int
-barny_wayland_dispatch(barny_state_t *state)
-{
-	return wl_display_dispatch(state->display);
 }

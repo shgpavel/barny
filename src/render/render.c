@@ -5,7 +5,9 @@
 static bool
 is_gap_placeholder(const barny_module_t *mod)
 {
-	return mod && mod->name && strcmp(mod->name, "gap") == 0
+	return mod
+	       && mod->name
+	       && strcmp(mod->name, "gap") == 0
 	       && mod->render == NULL;
 }
 
@@ -33,9 +35,9 @@ compute_gap_scale(barny_state_t *state, const int *module_indices, int count,
 	int gap_width   = 0;
 
 	for (int i = 0; i < count; i++) {
-		barny_module_t *mod = state->modules[module_indices[i]];
-		int             w   = (mod && mod->width > 0) ? mod->width : 0;
-		total_width += w;
+		barny_module_t *mod  = state->modules[module_indices[i]];
+		int             w    = (mod && mod->width > 0) ? mod->width : 0;
+		total_width         += w;
 		if (i < count - 1) {
 			total_width += spacing;
 		}
@@ -129,14 +131,14 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 	}
 
 	/* Module spacing from config */
-	int spacing = state->config.module_spacing;
-	int available_width = right_x - left_x;
-	double left_gap_scale = compute_gap_scale(state, left_modules, left_count,
-	                                          available_width, spacing);
-	double center_gap_scale = compute_gap_scale(state, center_modules, center_count,
-	                                            available_width, spacing);
-	double right_gap_scale = compute_gap_scale(state, right_modules, right_count,
+	int    spacing         = state->config.module_spacing;
+	int    available_width = right_x - left_x;
+	double left_gap_scale  = compute_gap_scale(state, left_modules, left_count,
 	                                           available_width, spacing);
+	double center_gap_scale = compute_gap_scale(
+	        state, center_modules, center_count, available_width, spacing);
+	double right_gap_scale = compute_gap_scale(
+	        state, right_modules, right_count, available_width, spacing);
 
 	/* Calculate center total width for positioning */
 	int center_total_width = 0;
@@ -178,9 +180,9 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 	}
 	for (int i = 0; i < center_count; i++) {
 		barny_module_t *mod = state->modules[center_modules[i]];
-		int mod_width       = effective_module_width(mod, center_gap_scale);
-		int mod_height      = mod->height > 0 ? mod->height : height;
-		int y               = (height - mod_height) / 2;
+		int mod_width  = effective_module_width(mod, center_gap_scale);
+		int mod_height = mod->height > 0 ? mod->height : height;
+		int y          = (height - mod_height) / 2;
 
 		if (x >= right_x) {
 			break;
@@ -201,10 +203,10 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 	/* Render right modules (right-to-left) */
 	x = right_x;
 	for (int i = right_count - 1; i >= 0; i--) {
-		barny_module_t *mod  = state->modules[right_modules[i]];
-		int mod_width        = effective_module_width(mod, right_gap_scale);
-		int mod_height       = mod->height > 0 ? mod->height : height;
-		int y                = (height - mod_height) / 2;
+		barny_module_t *mod = state->modules[right_modules[i]];
+		int mod_width       = effective_module_width(mod, right_gap_scale);
+		int mod_height      = mod->height > 0 ? mod->height : height;
+		int y               = (height - mod_height) / 2;
 
 		if (x <= left_x) {
 			break;
@@ -213,7 +215,7 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 			break;
 		}
 
-		x                   -= mod_width;
+		x -= mod_width;
 
 		cairo_save(cr);
 		if (mod->render) {

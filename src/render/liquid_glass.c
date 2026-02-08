@@ -128,8 +128,8 @@ barny_blur_surface(cairo_surface_t *surface, int radius)
 
 	cairo_surface_flush(surface);
 
-	int      width  = cairo_image_surface_get_width(surface);
-	int      height = cairo_image_surface_get_height(surface);
+	int width  = cairo_image_surface_get_width(surface);
+	int height = cairo_image_surface_get_height(surface);
 
 	if (width <= 0 || height <= 0)
 		return;
@@ -381,9 +381,11 @@ barny_create_displacement_map(int width, int height, barny_refraction_mode_t mod
 				         * 0.5;
 
 				/* Fade out near edges for smooth blending */
-				double br     = border_radius > 0 ? (double)border_radius : 1.0;
-				double edge_x = fmin(x, width - x) / br;
-				double edge_y = fmin(y, height - y) / br;
+				double br        = border_radius > 0 ?
+				                           (double)border_radius :
+				                           1.0;
+				double edge_x    = fmin(x, width - x) / br;
+				double edge_y    = fmin(y, height - y) / br;
 				double edge_fade = fmin(1.0, fmin(edge_x, edge_y));
 				disp_x *= edge_fade;
 				disp_y *= edge_fade;
@@ -578,14 +580,14 @@ create_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double 
 static cairo_surface_t *
 build_glass_bg(barny_state_t *state, int width, int height)
 {
-	int radius = state->config.border_radius;
+	int              radius = state->config.border_radius;
 
-	cairo_surface_t *cache = cairo_image_surface_create(
-	        CAIRO_FORMAT_ARGB32, width, height);
+	cairo_surface_t *cache
+	        = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
 	cairo_t *cr = cairo_create(cache);
 
-	double x = 0, y = 0, w = width, h = height;
-	double r = radius;
+	double   x = 0, y = 0, w = width, h = height;
+	double   r = radius;
 
 	/* Create rounded rectangle clip */
 	create_rounded_rect(cr, x, y, w, h, r);

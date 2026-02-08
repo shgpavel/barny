@@ -119,49 +119,49 @@ test_trim(void)
 
 	TEST("trims leading whitespace")
 	{
-		char str[] = "   hello";
+		char  str[]  = "   hello";
 		char *result = trim(str);
 		ASSERT_EQ_STR("hello", result);
 	}
 
 	TEST("trims trailing whitespace")
 	{
-		char str[] = "hello   ";
+		char  str[]  = "hello   ";
 		char *result = trim(str);
 		ASSERT_EQ_STR("hello", result);
 	}
 
 	TEST("trims both sides")
 	{
-		char str[] = "   hello   ";
+		char  str[]  = "   hello   ";
 		char *result = trim(str);
 		ASSERT_EQ_STR("hello", result);
 	}
 
 	TEST("trims tabs and newlines")
 	{
-		char str[] = "\t\n hello \t\n";
+		char  str[]  = "\t\n hello \t\n";
 		char *result = trim(str);
 		ASSERT_EQ_STR("hello", result);
 	}
 
 	TEST("handles empty string")
 	{
-		char str[] = "";
+		char  str[]  = "";
 		char *result = trim(str);
 		ASSERT_EQ_STR("", result);
 	}
 
 	TEST("handles all whitespace")
 	{
-		char str[] = "   \t\n  ";
+		char  str[]  = "   \t\n  ";
 		char *result = trim(str);
 		ASSERT_EQ_STR("", result);
 	}
 
 	TEST("preserves string without whitespace")
 	{
-		char str[] = "hello";
+		char  str[]  = "hello";
 		char *result = trim(str);
 		ASSERT_EQ_STR("hello", result);
 	}

@@ -72,13 +72,13 @@ test_module_layout_basics(void)
 
 	TEST("explicit empty layout is preserved")
 	{
-		barny_config_t config;
+		barny_config_t        config;
 		barny_module_layout_t layout;
 
 		barny_config_defaults(&config);
-		config.modules_left = strdup("");
+		config.modules_left   = strdup("");
 		config.modules_center = strdup("");
-		config.modules_right = strdup("");
+		config.modules_right  = strdup("");
 
 		barny_module_layout_init(&layout);
 		barny_module_layout_load_from_config(&config, &layout);
@@ -103,13 +103,13 @@ test_module_layout_parsing_and_ops(void)
 
 	TEST("loads configured slots and filters duplicates/unknowns")
 	{
-		barny_config_t config;
+		barny_config_t        config;
 		barny_module_layout_t layout;
 
 		barny_config_defaults(&config);
 		config.modules_left = strdup("clock, workspace, nope, workspace");
 		config.modules_center = strdup("ram");
-		config.modules_right = strdup("tray, disk");
+		config.modules_right  = strdup("tray, disk");
 
 		barny_module_layout_init(&layout);
 		barny_module_layout_load_from_config(&config, &layout);
@@ -131,7 +131,7 @@ test_module_layout_parsing_and_ops(void)
 
 	TEST("loads gap tokens and allows repeated gaps")
 	{
-		barny_config_t config;
+		barny_config_t        config;
 		barny_module_layout_t layout;
 
 		barny_config_defaults(&config);
@@ -156,12 +156,13 @@ test_module_layout_parsing_and_ops(void)
 		char                 *csv;
 
 		barny_module_layout_init(&layout);
-		ASSERT_EQ_INT(0, barny_module_layout_insert(&layout, BARNY_POS_LEFT,
-		                                            "workspace", -1));
-		ASSERT_EQ_INT(0, barny_module_layout_insert(&layout, BARNY_POS_LEFT,
-		                                            "clock", 0));
-		ASSERT_EQ_INT(-1, barny_module_layout_insert(&layout, BARNY_POS_LEFT,
-		                                             "clock", -1));
+		ASSERT_EQ_INT(0,
+		              barny_module_layout_insert(&layout, BARNY_POS_LEFT,
+		                                         "workspace", -1));
+		ASSERT_EQ_INT(0, barny_module_layout_insert(
+		                         &layout, BARNY_POS_LEFT, "clock", 0));
+		ASSERT_EQ_INT(-1, barny_module_layout_insert(
+		                          &layout, BARNY_POS_LEFT, "clock", -1));
 		ASSERT_TRUE(barny_module_layout_contains(&layout, "workspace"));
 		ASSERT_TRUE(barny_module_layout_remove(&layout, "workspace"));
 		ASSERT_FALSE(barny_module_layout_contains(&layout, "workspace"));
@@ -185,18 +186,20 @@ test_module_layout_runtime_apply(void)
 
 	TEST("apply registers selected modules in requested slots")
 	{
-		barny_state_t         state  = { 0 };
+		barny_state_t         state = { 0 };
 		barny_module_layout_t layout;
 
 		barny_module_layout_init(&layout);
-		ASSERT_EQ_INT(0, barny_module_layout_insert(&layout, BARNY_POS_LEFT,
-		                                            "workspace", -1));
-		ASSERT_EQ_INT(0, barny_module_layout_insert(&layout, BARNY_POS_CENTER,
-		                                            "clock", -1));
-		ASSERT_EQ_INT(0, barny_module_layout_insert(&layout, BARNY_POS_RIGHT,
-		                                            "ram", -1));
+		ASSERT_EQ_INT(0,
+		              barny_module_layout_insert(&layout, BARNY_POS_LEFT,
+		                                         "workspace", -1));
+		ASSERT_EQ_INT(0, barny_module_layout_insert(
+		                         &layout, BARNY_POS_CENTER, "clock", -1));
+		ASSERT_EQ_INT(0, barny_module_layout_insert(
+		                         &layout, BARNY_POS_RIGHT, "ram", -1));
 
-		ASSERT_EQ_INT(3, barny_module_layout_apply_to_state(&layout, &state));
+		ASSERT_EQ_INT(3,
+		              barny_module_layout_apply_to_state(&layout, &state));
 		ASSERT_EQ_INT(3, state.module_count);
 		ASSERT_EQ_STR("workspace", state.modules[0]->name);
 		ASSERT_EQ_INT(BARNY_POS_LEFT, state.modules[0]->position);
@@ -211,21 +214,23 @@ test_module_layout_runtime_apply(void)
 
 	TEST("apply converts gap token to spacer module width")
 	{
-		barny_state_t         state  = { 0 };
+		barny_state_t         state = { 0 };
 		barny_module_layout_t layout;
 
 		barny_config_defaults(&state.config);
 		state.config.module_spacing = 20;
 
 		barny_module_layout_init(&layout);
-		ASSERT_EQ_INT(0, barny_module_layout_insert(&layout, BARNY_POS_LEFT,
-		                                            "workspace", -1));
-		ASSERT_EQ_INT(0, barny_module_layout_insert(&layout, BARNY_POS_LEFT,
-		                                            "gap:3", -1));
-		ASSERT_EQ_INT(0, barny_module_layout_insert(&layout, BARNY_POS_LEFT,
-		                                            "clock", -1));
+		ASSERT_EQ_INT(0,
+		              barny_module_layout_insert(&layout, BARNY_POS_LEFT,
+		                                         "workspace", -1));
+		ASSERT_EQ_INT(0, barny_module_layout_insert(
+		                         &layout, BARNY_POS_LEFT, "gap:3", -1));
+		ASSERT_EQ_INT(0, barny_module_layout_insert(
+		                         &layout, BARNY_POS_LEFT, "clock", -1));
 
-		ASSERT_EQ_INT(3, barny_module_layout_apply_to_state(&layout, &state));
+		ASSERT_EQ_INT(3,
+		              barny_module_layout_apply_to_state(&layout, &state));
 		ASSERT_EQ_INT(3, state.module_count);
 		ASSERT_EQ_STR("workspace", state.modules[0]->name);
 		ASSERT_EQ_STR("gap", state.modules[1]->name);
@@ -246,7 +251,7 @@ test_module_layout_edge_cases(void)
 
 	TEST("partial config keys use explicit layout not defaults")
 	{
-		barny_config_t config;
+		barny_config_t        config;
 		barny_module_layout_t layout;
 
 		barny_config_defaults(&config);
@@ -275,15 +280,16 @@ test_module_layout_edge_cases(void)
 		int total = barny_module_catalog_names(names, BARNY_MAX_MODULES);
 
 		for (int i = 0; i < total && i < BARNY_MAX_MODULES; i++) {
-			barny_module_layout_insert(&layout, BARNY_POS_LEFT, names[i], -1);
+			barny_module_layout_insert(&layout, BARNY_POS_LEFT,
+			                           names[i], -1);
 		}
 
 		/* the slot should have `total` modules (10), which is < BARNY_MAX_MODULES
 		 * so we can't truly overflow with only catalog entries. Instead verify
 		 * the count matches and duplicate insert is rejected. */
 		ASSERT_EQ_INT(total, layout.left_count);
-		ASSERT_EQ_INT(-1, barny_module_layout_insert(&layout, BARNY_POS_LEFT,
-		                                              "clock", -1));
+		ASSERT_EQ_INT(-1, barny_module_layout_insert(
+		                          &layout, BARNY_POS_LEFT, "clock", -1));
 
 		barny_module_layout_destroy(&layout);
 	}
@@ -291,7 +297,7 @@ test_module_layout_edge_cases(void)
 	TEST("serialize_csv with NULL entries in the middle")
 	{
 		const char *arr[4] = { "clock", NULL, "ram", NULL };
-		char *csv = barny_module_layout_serialize_csv(arr, 4);
+		char       *csv    = barny_module_layout_serialize_csv(arr, 4);
 
 		ASSERT_NOT_NULL(csv);
 		ASSERT_EQ_STR("clock, ram", csv);
@@ -301,7 +307,7 @@ test_module_layout_edge_cases(void)
 	TEST("serialize_csv with count 0 returns empty string")
 	{
 		const char *arr[1] = { "clock" };
-		char *csv = barny_module_layout_serialize_csv(arr, 0);
+		char       *csv    = barny_module_layout_serialize_csv(arr, 0);
 
 		ASSERT_NOT_NULL(csv);
 		ASSERT_EQ_STR("", csv);
@@ -318,16 +324,16 @@ test_module_layout_config_write(void)
 
 	TEST("writer updates only module layout keys")
 	{
-		const char *path = create_temp_config_file(
-		        "height = 42\n"
-		        "modules_left = old_left\n"
-		        "modules_center = old_center\n"
-		        "modules_right = old_right\n");
+		const char *path
+		        = create_temp_config_file("height = 42\n"
+		                                  "modules_left = old_left\n"
+		                                  "modules_center = old_center\n"
+		                                  "modules_right = old_right\n");
 		barny_config_t cfg;
 
 		ASSERT_NOT_NULL(path);
 		ASSERT_EQ_INT(0, barny_config_write_module_layout(
-		                      path, "workspace", "", "clock, tray"));
+		                         path, "workspace", "", "clock, tray"));
 
 		barny_config_defaults(&cfg);
 		ASSERT_EQ_INT(0, barny_config_load(&cfg, path));

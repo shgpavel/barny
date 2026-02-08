@@ -60,10 +60,10 @@ test_ipc_send_framing(void)
 
 		barny_state_t state;
 		memset(&state, 0, sizeof(state));
-		state.sway_ipc_fd = fds[0];
+		state.sway_ipc_fd   = fds[0];
 
 		const char *payload = "hello";
-		uint32_t type = 42;
+		uint32_t    type    = 42;
 
 		ASSERT_EQ_INT(0, barny_sway_ipc_send(&state, type, payload));
 
@@ -72,7 +72,7 @@ test_ipc_send_framing(void)
 
 		ASSERT_TRUE(memcmp(header, SWAY_IPC_MAGIC, 6) == 0);
 
-		uint32_t len = 0;
+		uint32_t len      = 0;
 		uint32_t got_type = 0;
 		memcpy(&len, header + 6, 4);
 		memcpy(&got_type, header + 10, 4);
@@ -80,7 +80,7 @@ test_ipc_send_framing(void)
 		ASSERT_EQ_INT((int)strlen(payload), (int)len);
 		ASSERT_EQ_INT((int)type, (int)got_type);
 
-		char buf[16] = {0};
+		char buf[16] = { 0 };
 		ASSERT_EQ_INT(0, read_full(fds[1], buf, len));
 		ASSERT_EQ_STR(payload, buf);
 
@@ -102,13 +102,13 @@ test_ipc_recv_framing(void)
 
 		barny_state_t state;
 		memset(&state, 0, sizeof(state));
-		state.sway_ipc_fd = fds[0];
+		state.sway_ipc_fd   = fds[0];
 
 		const char *payload = "world";
-		uint32_t type = 7;
-		uint32_t len = (uint32_t)strlen(payload);
+		uint32_t    type    = 7;
+		uint32_t    len     = (uint32_t)strlen(payload);
 
-		uint8_t header[SWAY_IPC_HEADER_SIZE];
+		uint8_t     header[SWAY_IPC_HEADER_SIZE];
 		memcpy(header, SWAY_IPC_MAGIC, 6);
 		memcpy(header + 6, &len, 4);
 		memcpy(header + 10, &type, 4);
@@ -117,7 +117,7 @@ test_ipc_recv_framing(void)
 		ASSERT_EQ_INT(0, write_full(fds[1], payload, len));
 
 		uint32_t out_type = 0;
-		char *out = barny_sway_ipc_recv(&state, &out_type);
+		char    *out      = barny_sway_ipc_recv(&state, &out_type);
 		ASSERT_NOT_NULL(out);
 		ASSERT_EQ_INT((int)type, (int)out_type);
 		ASSERT_EQ_STR(payload, out);
@@ -135,10 +135,10 @@ test_ipc_recv_framing(void)
 		memset(&state, 0, sizeof(state));
 		state.sway_ipc_fd = fds[0];
 
-		uint32_t type = 9;
-		uint32_t len = 0;
+		uint32_t type     = 9;
+		uint32_t len      = 0;
 
-		uint8_t header[SWAY_IPC_HEADER_SIZE];
+		uint8_t  header[SWAY_IPC_HEADER_SIZE];
 		memcpy(header, SWAY_IPC_MAGIC, 6);
 		memcpy(header + 6, &len, 4);
 		memcpy(header + 10, &type, 4);
@@ -146,7 +146,7 @@ test_ipc_recv_framing(void)
 		ASSERT_EQ_INT(0, write_full(fds[1], header, sizeof(header)));
 
 		uint32_t out_type = 0;
-		char *out = barny_sway_ipc_recv(&state, &out_type);
+		char    *out      = barny_sway_ipc_recv(&state, &out_type);
 		ASSERT_NOT_NULL(out);
 		ASSERT_EQ_INT((int)type, (int)out_type);
 		ASSERT_EQ_STR("", out);
@@ -162,14 +162,14 @@ test_ipc_recv_framing(void)
 
 		barny_state_t state;
 		memset(&state, 0, sizeof(state));
-		state.sway_ipc_fd = fds[0];
+		state.sway_ipc_fd                    = fds[0];
 
-		uint8_t header[SWAY_IPC_HEADER_SIZE] = {0};
+		uint8_t header[SWAY_IPC_HEADER_SIZE] = { 0 };
 		memcpy(header, "badmgc", 6);
 		ASSERT_EQ_INT(0, write_full(fds[1], header, sizeof(header)));
 
 		uint32_t out_type = 0;
-		char *out = barny_sway_ipc_recv(&state, &out_type);
+		char    *out      = barny_sway_ipc_recv(&state, &out_type);
 		ASSERT_NULL(out);
 
 		close_pair(fds);

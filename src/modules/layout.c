@@ -6,21 +6,22 @@
 #include "barny.h"
 
 typedef struct {
-	const char       *name;
-	barny_position_t  default_position;
+	const char      *name;
+	barny_position_t default_position;
 } module_catalog_entry_t;
 
 static const module_catalog_entry_t module_catalog[] = {
-	{ "clock", BARNY_POS_RIGHT },
-	{ "workspace", BARNY_POS_LEFT },
-	{ "sysinfo", BARNY_POS_RIGHT },
-	{ "weather", BARNY_POS_RIGHT },
-	{ "disk", BARNY_POS_RIGHT },
-	{ "ram", BARNY_POS_RIGHT },
-	{ "network", BARNY_POS_RIGHT },
-	{ "fileread", BARNY_POS_RIGHT },
-	{ "crypto", BARNY_POS_RIGHT },
-	{ "tray", BARNY_POS_RIGHT },
+	{ "clock",     BARNY_POS_RIGHT },
+	{ "workspace", BARNY_POS_LEFT  },
+	{ "sysinfo",   BARNY_POS_RIGHT },
+	{ "weather",   BARNY_POS_RIGHT },
+	{ "disk",      BARNY_POS_RIGHT },
+	{ "ram",       BARNY_POS_RIGHT },
+	{ "network",   BARNY_POS_RIGHT },
+	{ "fileread",  BARNY_POS_RIGHT },
+	{ "crypto",    BARNY_POS_RIGHT },
+	{ "tray",      BARNY_POS_RIGHT },
+	{ "battery",   BARNY_POS_RIGHT },
 };
 
 static int
@@ -254,15 +255,16 @@ barny_module_layout_insert(barny_module_layout_t *layout,
 bool
 barny_module_layout_remove(barny_module_layout_t *layout, const char *name)
 {
-	int  *count = NULL;
-	char **slot = NULL;
+	int   *count = NULL;
+	char **slot  = NULL;
 
 	if (!layout || !name) {
 		return false;
 	}
 
 	for (int pos = BARNY_POS_LEFT; pos <= BARNY_POS_RIGHT; pos++) {
-		slot = slot_array_for_position(layout, (barny_position_t)pos, &count);
+		slot = slot_array_for_position(layout, (barny_position_t)pos,
+		                               &count);
 		if (!slot || !count) {
 			continue;
 		}
@@ -306,9 +308,11 @@ parse_csv_slot(barny_module_layout_t *layout, barny_position_t position,
 		if (*name) {
 			is_gap = barny_module_layout_gap_units(name) > 0;
 			if (!barny_module_catalog_has(name)) {
-				fprintf(stderr, "barny: ignoring unknown module in layout: %s\n",
+				fprintf(stderr,
+				        "barny: ignoring unknown module in layout: %s\n",
 				        name);
-			} else if (barny_module_layout_insert(layout, position, name, -1)
+			} else if (barny_module_layout_insert(layout, position,
+			                                      name, -1)
 			           < 0) {
 				if (!is_gap) {
 					fprintf(stderr,
@@ -335,13 +339,14 @@ barny_module_layout_set_defaults(barny_module_layout_t *layout)
 
 	int count = catalog_size();
 	for (int i = 0; i < count; i++) {
-		barny_module_layout_insert(layout, module_catalog[i].default_position,
+		barny_module_layout_insert(layout,
+		                           module_catalog[i].default_position,
 		                           module_catalog[i].name, -1);
 	}
 }
 
 int
-barny_module_layout_load_from_config(const barny_config_t *config,
+barny_module_layout_load_from_config(const barny_config_t  *config,
                                      barny_module_layout_t *layout)
 {
 	bool has_explicit_layout = false;
@@ -357,7 +362,8 @@ barny_module_layout_load_from_config(const barny_config_t *config,
 		return 0;
 	}
 
-	has_explicit_layout = config->modules_left || config->modules_center
+	has_explicit_layout = config->modules_left
+	                      || config->modules_center
 	                      || config->modules_right;
 
 	if (!has_explicit_layout) {
@@ -375,8 +381,8 @@ barny_module_layout_load_from_config(const barny_config_t *config,
 char *
 barny_module_layout_serialize_csv(const char *const *names, int count)
 {
-	size_t len = 1;
-	char  *out = NULL;
+	size_t len         = 1;
+	char  *out         = NULL;
 	int    valid_count = 0;
 
 	if (!names || count <= 0) {
@@ -404,7 +410,7 @@ barny_module_layout_serialize_csv(const char *const *names, int count)
 		return NULL;
 	}
 
-	char *p = out;
+	char *p     = out;
 	int   added = 0;
 	for (int i = 0; i < count; i++) {
 		if (!names[i]) {

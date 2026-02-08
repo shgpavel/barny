@@ -534,7 +534,8 @@ test_config_load(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("clock_24h_format = false\n");
+		const char *path
+		        = create_temp_config("clock_24h_format = false\n");
 		barny_config_load(&config, path);
 		ASSERT_FALSE(config.clock_24h_format);
 		cleanup_temp_config(path);
@@ -574,7 +575,8 @@ test_config_load(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("clock_date_separator = -\n");
+		const char *path
+		        = create_temp_config("clock_date_separator = -\n");
 		barny_config_load(&config, path);
 		ASSERT_EQ_INT('-', config.clock_date_separator);
 		cleanup_temp_config(path);
@@ -654,7 +656,8 @@ test_config_load(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("sysinfo_temp_show_unit = false\n");
+		const char *path
+		        = create_temp_config("sysinfo_temp_show_unit = false\n");
 		barny_config_load(&config, path);
 		ASSERT_FALSE(config.sysinfo_temp_show_unit);
 		cleanup_temp_config(path);
@@ -697,7 +700,8 @@ test_config_load(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("ram_used_method = \"free\"\n");
+		const char *path
+		        = create_temp_config("ram_used_method = \"free\"\n");
 		barny_config_load(&config, path);
 		ASSERT_NOT_NULL(config.ram_used_method);
 		ASSERT_EQ_STR("free", config.ram_used_method);
@@ -744,7 +748,8 @@ test_config_load(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("network_prefer_ipv4 = false\n");
+		const char *path
+		        = create_temp_config("network_prefer_ipv4 = false\n");
 		barny_config_load(&config, path);
 		ASSERT_FALSE(config.network_prefer_ipv4);
 		cleanup_temp_config(path);
@@ -781,7 +786,8 @@ test_config_load(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("fileread_max_chars = 128\n");
+		const char *path
+		        = create_temp_config("fileread_max_chars = 128\n");
 		barny_config_load(&config, path);
 		ASSERT_EQ_INT(128, config.fileread_max_chars);
 		cleanup_temp_config(path);
@@ -791,7 +797,8 @@ test_config_load(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("fileread_max_chars = 500\n");
+		const char *path
+		        = create_temp_config("fileread_max_chars = 500\n");
 		barny_config_load(&config, path);
 		ASSERT_EQ_INT(256, config.fileread_max_chars);
 		cleanup_temp_config(path);
@@ -809,7 +816,8 @@ test_config_edge_cases(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("text_color = \"#FF5500\"\n");
+		const char *path
+		        = create_temp_config("text_color = \"#FF5500\"\n");
 		barny_config_load(&config, path);
 		ASSERT_TRUE(config.text_color_set);
 		ASSERT_EQ_DBL(1.0, config.text_color_r, 0.01);
@@ -868,7 +876,8 @@ test_config_edge_cases(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("workspace_names = term, code, web, music\n");
+		const char *path = create_temp_config(
+		        "workspace_names = term, code, web, music\n");
 		barny_config_load(&config, path);
 		ASSERT_EQ_INT(4, config.workspace_name_count);
 		ASSERT_EQ_STR("term", config.workspace_names[0]);
@@ -886,7 +895,8 @@ test_config_edge_cases(void)
 		barny_config_t config;
 		barny_config_defaults(&config);
 		/* Empty entries between commas should be skipped */
-		const char *path = create_temp_config("workspace_names = one, , three\n");
+		const char *path
+		        = create_temp_config("workspace_names = one, , three\n");
 		barny_config_load(&config, path);
 		/* Empty entry is skipped */
 		ASSERT_EQ_INT(2, config.workspace_name_count);
@@ -902,7 +912,8 @@ test_config_edge_cases(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("workspace_names = single\n");
+		const char *path
+		        = create_temp_config("workspace_names = single\n");
 		barny_config_load(&config, path);
 		ASSERT_EQ_INT(1, config.workspace_name_count);
 		ASSERT_EQ_STR("single", config.workspace_names[0]);
@@ -915,7 +926,8 @@ test_config_edge_cases(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("workspace_shape = square\n");
+		const char *path
+		        = create_temp_config("workspace_shape = square\n");
 		barny_config_load(&config, path);
 		ASSERT_NOT_NULL(config.workspace_shape);
 		ASSERT_EQ_STR("square", config.workspace_shape);
@@ -927,10 +939,8 @@ test_config_edge_cases(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config(
-			"height = 30\n"
-			"height = 50\n"
-		);
+		const char *path = create_temp_config("height = 30\n"
+		                                      "height = 50\n");
 		barny_config_load(&config, path);
 		ASSERT_EQ_INT(50, config.height);
 		cleanup_temp_config(path);
@@ -940,7 +950,8 @@ test_config_edge_cases(void)
 	{
 		barny_config_t config;
 		barny_config_defaults(&config);
-		const char *path = create_temp_config("height = 42 # this is a comment\n");
+		const char *path
+		        = create_temp_config("height = 42 # this is a comment\n");
 		barny_config_load(&config, path);
 		ASSERT_EQ_INT(42, config.height);
 		cleanup_temp_config(path);

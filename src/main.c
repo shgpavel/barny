@@ -123,7 +123,8 @@ run_event_loop(barny_state_t *s)
 				 * multiple refreshes during rapid switching */
 				for (;;) {
 					uint32_t type;
-					char *payload = barny_sway_ipc_recv(s, &type);
+					char    *payload
+					        = barny_sway_ipc_recv(s, &type);
 					if (!payload)
 						break;
 					free(payload);
@@ -174,7 +175,7 @@ run_event_loop(barny_state_t *s)
 			}
 			if (needs_redraw) {
 				for (barny_output_t *out = s->outputs; out;
-				     out = out->next) {
+				     out                 = out->next) {
 					if (out->configured)
 						barny_render_frame(out);
 				}

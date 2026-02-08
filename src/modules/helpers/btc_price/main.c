@@ -7,9 +7,9 @@
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
 
-#define TICKER "BTC-USDT-SWAP"
-#define WS_URL "wss://ws.okx.com:8443/ws/v5/public"
-#define OUTPUT_PATH "/opt/barny/modules/btc_price"
+#define TICKER          "BTC-USDT-SWAP"
+#define WS_URL          "wss://ws.okx.com:8443/ws/v5/public"
+#define OUTPUT_PATH     "/opt/barny/modules/btc_price"
 #define OUTPUT_TMP_PATH "/opt/barny/modules/btc_price.tmp"
 #define RECONNECT_DELAY 5
 
@@ -46,8 +46,10 @@ process_message(const char *data, size_t len)
 
 	/* Check if this is a data message (not subscribe confirmation) */
 	cJSON *data_arr = cJSON_GetObjectItem(json, "data");
-	if (data_arr && cJSON_IsArray(data_arr) && cJSON_GetArraySize(data_arr) > 0) {
-		cJSON *first = cJSON_GetArrayItem(data_arr, 0);
+	if (data_arr
+	    && cJSON_IsArray(data_arr)
+	    && cJSON_GetArraySize(data_arr) > 0) {
+		cJSON *first  = cJSON_GetArrayItem(data_arr, 0);
 		cJSON *markPx = cJSON_GetObjectItem(first, "markPx");
 		if (markPx && markPx->valuestring) {
 			double price = strtod(markPx->valuestring, NULL);
@@ -61,15 +63,17 @@ process_message(const char *data, size_t len)
 static int
 websocket_loop(CURL *curl)
 {
-	const char *subscribe_msg =
-	        "{\"op\":\"subscribe\",\"args\":[{\"channel\":\"mark-price\",\"instId\":\"" TICKER "\"}]}";
+	const char *subscribe_msg
+	        = "{\"op\":\"subscribe\",\"args\":[{\"channel\":\"mark-price\",\"instId\":\"" TICKER
+	          "\"}]}";
 
 	/* Send subscription message */
-	size_t sent;
+	size_t   sent;
 	CURLcode res = curl_ws_send(curl, subscribe_msg, strlen(subscribe_msg),
 	                            &sent, 0, CURLWS_TEXT);
 	if (res != CURLE_OK) {
-		fprintf(stderr, "Failed to send subscribe: %s\n", curl_easy_strerror(res));
+		fprintf(stderr, "Failed to send subscribe: %s\n",
+		        curl_easy_strerror(res));
 		return -1;
 	}
 	fprintf(stderr, "Subscribed to %s\n", TICKER);
@@ -77,10 +81,11 @@ websocket_loop(CURL *curl)
 	/* Receive loop */
 	char buffer[4096];
 	while (running) {
-		size_t rlen;
+		size_t                      rlen;
 		const struct curl_ws_frame *frame;
 
-		res = curl_ws_recv(curl, buffer, sizeof(buffer) - 1, &rlen, &frame);
+		res = curl_ws_recv(curl, buffer, sizeof(buffer) - 1, &rlen,
+		                   &frame);
 
 		if (res == CURLE_AGAIN) {
 			/* No data available, wait a bit */
@@ -89,7 +94,8 @@ websocket_loop(CURL *curl)
 		}
 
 		if (res != CURLE_OK) {
-			fprintf(stderr, "WebSocket recv error: %s\n", curl_easy_strerror(res));
+			fprintf(stderr, "WebSocket recv error: %s\n",
+			        curl_easy_strerror(res));
 			return -1;
 		}
 
@@ -117,7 +123,8 @@ create_websocket(void)
 
 	CURLcode res = curl_easy_perform(curl);
 	if (res != CURLE_OK) {
-		fprintf(stderr, "WebSocket connect failed: %s\n", curl_easy_strerror(res));
+		fprintf(stderr, "WebSocket connect failed: %s\n",
+		        curl_easy_strerror(res));
 		curl_easy_cleanup(curl);
 		return NULL;
 	}
@@ -142,7 +149,8 @@ main(void)
 		}
 
 		if (running) {
-			fprintf(stderr, "Reconnecting in %d seconds...\n", RECONNECT_DELAY);
+			fprintf(stderr, "Reconnecting in %d seconds...\n",
+			        RECONNECT_DELAY);
 			sleep(RECONNECT_DELAY);
 		}
 	}

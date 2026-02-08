@@ -149,14 +149,15 @@ Run:
 barny-layout-editor
 ```
 
-Optional config path:
+The editor currently always reads/writes this path relative to the current
+working directory:
 ```bash
-barny-layout-editor ~/.config/barny/barny.conf
+config/barny.conf
 ```
 
 Controls:
 - Drag blocks between the contiguous bar lane and `MODULE POOL`
-- `S` saves contiguous placement into `modules_left` and emits `gap:N` tokens
+- `W` (or `S`) saves contiguous placement into `modules_left` and emits `gap:N` tokens
 - `R` resets to legacy defaults
 - `C` clears all modules from the bar
 

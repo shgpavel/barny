@@ -7,10 +7,10 @@
 #include <ctype.h>
 
 #define UPDATE_INTERVAL 2
-#define OUTPUT_PATH "/opt/barny/modules/cpu_freq"
+#define OUTPUT_PATH     "/opt/barny/modules/cpu_freq"
 #define OUTPUT_TMP_PATH "/opt/barny/modules/cpu_freq.tmp"
-#define CONFIG_PATH "/etc/barny/barny.conf"
-#define MAX_CPUS 256
+#define CONFIG_PATH     "/etc/barny/barny.conf"
+#define MAX_CPUS        256
 
 static volatile int running = 1;
 
@@ -20,13 +20,13 @@ struct cpu_info {
 };
 
 static struct cpu_info cpus[MAX_CPUS];
-static int cpu_count = 0;
-static int p_core_count = 0;
-static int e_core_count = 0;
+static int             cpu_count    = 0;
+static int             p_core_count = 0;
+static int             e_core_count = 0;
 
 /* Config values */
-static int cfg_p_cores = 0;      /* 0 = auto-detect */
-static int cfg_e_cores = 0;      /* 0 = auto-detect */
+static int             cfg_p_cores  = 0; /* 0 = auto-detect */
+static int             cfg_e_cores  = 0; /* 0 = auto-detect */
 
 static void
 signal_handler(int sig)
@@ -54,12 +54,13 @@ trim(char *str)
 static void
 read_config(void)
 {
-	char user_path[512];
+	char        user_path[512];
 	const char *home = getenv("HOME");
-	FILE *f = NULL;
+	FILE       *f    = NULL;
 
 	if (home) {
-		snprintf(user_path, sizeof(user_path), "%s/.config/barny/barny.conf", home);
+		snprintf(user_path, sizeof(user_path),
+		         "%s/.config/barny/barny.conf", home);
 		f = fopen(user_path, "r");
 	}
 
@@ -80,16 +81,18 @@ read_config(void)
 		if (!eq)
 			continue;
 
-		*eq = '\0';
-		char *key = trim(trimmed);
+		*eq         = '\0';
+		char *key   = trim(trimmed);
 		char *value = trim(eq + 1);
 
 		if (strcmp(key, "sysinfo_p_cores") == 0) {
 			cfg_p_cores = atoi(value);
-			if (cfg_p_cores < 0) cfg_p_cores = 0;
+			if (cfg_p_cores < 0)
+				cfg_p_cores = 0;
 		} else if (strcmp(key, "sysinfo_e_cores") == 0) {
 			cfg_e_cores = atoi(value);
-			if (cfg_e_cores < 0) cfg_e_cores = 0;
+			if (cfg_e_cores < 0)
+				cfg_e_cores = 0;
 		}
 	}
 
@@ -118,9 +121,9 @@ detect_cpus(void)
 	if (!dir)
 		return;
 
-	int max_freqs[MAX_CPUS];
-	int cpu_ids[MAX_CPUS];
-	int highest_freq = 0;
+	int            max_freqs[MAX_CPUS];
+	int            cpu_ids[MAX_CPUS];
+	int            highest_freq = 0;
 
 	/* First pass: collect all CPUs and their max frequencies */
 	struct dirent *entry;
@@ -131,12 +134,13 @@ detect_cpus(void)
 		if (!isdigit(entry->d_name[3]))
 			continue;
 
-		int cpu_id = atoi(entry->d_name + 3);
+		int  cpu_id = atoi(entry->d_name + 3);
 
 		/* Check if this CPU has frequency scaling */
 		char path[256];
 		snprintf(path, sizeof(path),
-		         "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", cpu_id);
+		         "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq",
+		         cpu_id);
 
 		FILE *f = fopen(path, "r");
 		if (!f)
@@ -145,10 +149,11 @@ detect_cpus(void)
 
 		/* Read max frequency */
 		snprintf(path, sizeof(path),
-		         "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu_id);
-		int max_freq = read_int_file(path);
+		         "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq",
+		         cpu_id);
+		int max_freq         = read_int_file(path);
 
-		cpu_ids[cpu_count] = cpu_id;
+		cpu_ids[cpu_count]   = cpu_id;
 		max_freqs[cpu_count] = max_freq;
 
 		if (max_freq > highest_freq)
@@ -163,9 +168,9 @@ detect_cpus(void)
 	for (int i = 0; i < cpu_count - 1; i++) {
 		for (int j = i + 1; j < cpu_count; j++) {
 			if (cpu_ids[j] < cpu_ids[i]) {
-				int tmp_id = cpu_ids[i];
-				cpu_ids[i] = cpu_ids[j];
-				cpu_ids[j] = tmp_id;
+				int tmp_id   = cpu_ids[i];
+				cpu_ids[i]   = cpu_ids[j];
+				cpu_ids[j]   = tmp_id;
 
 				int tmp_freq = max_freqs[i];
 				max_freqs[i] = max_freqs[j];
@@ -187,7 +192,8 @@ detect_cpus(void)
 
 		/* Validate: don't exceed actual CPU count */
 		if (configured_p + configured_e > cpu_count) {
-			fprintf(stderr, "Warning: configured P+E cores (%d+%d) exceeds detected CPUs (%d)\n",
+			fprintf(stderr,
+			        "Warning: configured P+E cores (%d+%d) exceeds detected CPUs (%d)\n",
 			        configured_p, configured_e, cpu_count);
 			/* Fall back to auto-detect */
 			configured_p = 0;
@@ -290,8 +296,8 @@ main(void)
 		return 1;
 	}
 
-	fprintf(stderr, "Detected %d CPUs (%d P-cores, %d E-cores)\n",
-	        cpu_count, p_core_count, e_core_count);
+	fprintf(stderr, "Detected %d CPUs (%d P-cores, %d E-cores)\n", cpu_count,
+	        p_core_count, e_core_count);
 
 	while (running) {
 		double p_sum = 0.0, e_sum = 0.0;

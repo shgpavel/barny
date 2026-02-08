@@ -34,7 +34,8 @@ test_format_bytes(void)
 	TEST("formats gigabytes with 1 decimal")
 	{
 		/* 10.5 GB */
-		unsigned long long bytes = (unsigned long long)(10.5 * 1024 * 1024 * 1024);
+		unsigned long long bytes
+		        = (unsigned long long)(10.5 * 1024 * 1024 * 1024);
 		format_bytes(buf, sizeof(buf), bytes, 1, false);
 		ASSERT_EQ_STR("10.5G", buf);
 	}
@@ -42,7 +43,8 @@ test_format_bytes(void)
 	TEST("formats gigabytes with 2 decimals")
 	{
 		/* 10.25 GB */
-		unsigned long long bytes = (unsigned long long)(10.25 * 1024 * 1024 * 1024);
+		unsigned long long bytes
+		        = (unsigned long long)(10.25 * 1024 * 1024 * 1024);
 		format_bytes(buf, sizeof(buf), bytes, 2, false);
 		ASSERT_EQ_STR("10.25G", buf);
 	}

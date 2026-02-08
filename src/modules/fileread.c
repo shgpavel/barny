@@ -7,7 +7,7 @@
 
 typedef struct {
 	barny_state_t        *state;
-	char                  display_str[272];  /* title + content */
+	char                  display_str[272]; /* title + content */
 	char                  content[256];
 	time_t                last_mtime;
 	PangoFontDescription *font_desc;
@@ -54,7 +54,7 @@ fileread_update(barny_module_t *self)
 	if (!cfg->fileread_path || cfg->fileread_path[0] == '\0') {
 		if (data->display_str[0] != '\0') {
 			data->display_str[0] = '\0';
-			self->dirty = true;
+			self->dirty          = true;
 		}
 		return;
 	}
@@ -77,7 +77,7 @@ fileread_update(barny_module_t *self)
 
 	data->last_mtime = st.st_mtime;
 
-	FILE *f = fopen(cfg->fileread_path, "r");
+	FILE *f          = fopen(cfg->fileread_path, "r");
 	if (!f)
 		return;
 
@@ -100,11 +100,13 @@ fileread_update(barny_module_t *self)
 
 			/* Build display string with optional title */
 			if (cfg->fileread_title && cfg->fileread_title[0]) {
-				snprintf(data->display_str, sizeof(data->display_str),
-				         "%s: %s", cfg->fileread_title, data->content);
+				snprintf(data->display_str,
+				         sizeof(data->display_str), "%s: %s",
+				         cfg->fileread_title, data->content);
 			} else {
-				snprintf(data->display_str, sizeof(data->display_str),
-				         "%s", data->content);
+				snprintf(data->display_str,
+				         sizeof(data->display_str), "%s",
+				         data->content);
 			}
 
 			self->dirty = true;
@@ -139,7 +141,8 @@ fileread_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 
 	barny_config_t *cfg = &data->state->config;
 	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 0.9);
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
+		                      cfg->text_color_b, 0.9);
 	else
 		cairo_set_source_rgba(cr, 1, 1, 1, 0.9);
 	cairo_move_to(cr, x, y + (h - th) / 2);
@@ -162,15 +165,15 @@ barny_module_fileread_create(void)
 		return NULL;
 	}
 
-	mod->name             = "fileread";
-	mod->position         = BARNY_POS_RIGHT;
-	mod->init             = fileread_init;
-	mod->destroy          = fileread_destroy;
-	mod->update           = fileread_update;
-	mod->render           = fileread_render;
-	mod->data             = data;
-	mod->width            = 100;
-	mod->dirty            = true;
+	mod->name     = "fileread";
+	mod->position = BARNY_POS_RIGHT;
+	mod->init     = fileread_init;
+	mod->destroy  = fileread_destroy;
+	mod->update   = fileread_update;
+	mod->render   = fileread_render;
+	mod->data     = data;
+	mod->width    = 100;
+	mod->dirty    = true;
 
 	return mod;
 }

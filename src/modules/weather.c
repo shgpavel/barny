@@ -95,7 +95,8 @@ weather_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	/* Text */
 	barny_config_t *cfg = &data->state->config;
 	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 0.9);
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
+		                      cfg->text_color_b, 0.9);
 	else
 		cairo_set_source_rgba(cr, 1, 1, 1, 0.9);
 	cairo_move_to(cr, x, y + (h - th) / 2);
@@ -118,15 +119,15 @@ barny_module_weather_create(void)
 		return NULL;
 	}
 
-	mod->name            = "weather";
-	mod->position        = BARNY_POS_RIGHT;
-	mod->init            = weather_init;
-	mod->destroy         = weather_destroy;
-	mod->update          = weather_update;
-	mod->render          = weather_render;
-	mod->data            = data;
-	mod->width           = 100;
-	mod->dirty           = true;
+	mod->name     = "weather";
+	mod->position = BARNY_POS_RIGHT;
+	mod->init     = weather_init;
+	mod->destroy  = weather_destroy;
+	mod->update   = weather_update;
+	mod->render   = weather_render;
+	mod->data     = data;
+	mod->width    = 100;
+	mod->dirty    = true;
 
 	return mod;
 }

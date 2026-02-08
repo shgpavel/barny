@@ -75,21 +75,24 @@ barny_sway_ipc_send(barny_state_t *state, uint32_t type, const char *payload)
 	size_t   total = SWAY_IPC_HEADER_SIZE + len;
 	char    *buf   = malloc(total);
 
-	memcpy(buf, SWAY_IPC_MAGIC, 6);          // NOLINT(bugprone-not-null-terminated-result)
+	memcpy(buf, SWAY_IPC_MAGIC,
+	       6); // NOLINT(bugprone-not-null-terminated-result)
 	memcpy(buf + 6, &len, 4);
 	memcpy(buf + 10, &type, 4);
 	if (payload && len > 0) {
-		memcpy(buf + 14, payload, len); // NOLINT(bugprone-not-null-terminated-result)
+		memcpy(buf + 14, payload,
+		       len); // NOLINT(bugprone-not-null-terminated-result)
 	}
 
-	ssize_t offset  = 0;
+	ssize_t offset    = 0;
 	ssize_t remaining = total;
 	while (remaining > 0) {
-		ssize_t written = write(state->sway_ipc_fd, buf + offset, remaining);
+		ssize_t written
+		        = write(state->sway_ipc_fd, buf + offset, remaining);
 		if (written < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				struct pollfd pfd = { .fd = state->sway_ipc_fd,
-				                      .events = POLLOUT };
+				struct pollfd pfd = { .fd     = state->sway_ipc_fd,
+					              .events = POLLOUT };
 				poll(&pfd, 1, 100);
 				continue;
 			}
@@ -124,8 +127,8 @@ barny_sway_ipc_recv(barny_state_t *state, uint32_t *type)
 				if (hdr_offset == 0) {
 					return NULL; /* No data available yet */
 				}
-				struct pollfd pfd = { .fd = state->sway_ipc_fd,
-				                      .events = POLLIN };
+				struct pollfd pfd = { .fd     = state->sway_ipc_fd,
+					              .events = POLLIN };
 				poll(&pfd, 1, 100);
 				continue; /* Partial header, keep reading */
 			}
@@ -157,8 +160,8 @@ barny_sway_ipc_recv(barny_state_t *state, uint32_t *type)
 		ssize_t n = read(state->sway_ipc_fd, payload + offset, remaining);
 		if (n <= 0) {
 			if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-				struct pollfd pfd = { .fd = state->sway_ipc_fd,
-				                      .events = POLLIN };
+				struct pollfd pfd = { .fd     = state->sway_ipc_fd,
+					              .events = POLLIN };
 				poll(&pfd, 1, 100);
 				continue;
 			}

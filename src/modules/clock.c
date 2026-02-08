@@ -22,23 +22,24 @@ build_time_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 
 	if (cfg->clock_24h_format) {
 		if (cfg->clock_show_seconds) {
-			snprintf(buf, buflen, "%02d:%02d:%02d",
-			         tm->tm_hour, tm->tm_min, tm->tm_sec);
+			snprintf(buf, buflen, "%02d:%02d:%02d", tm->tm_hour,
+			         tm->tm_min, tm->tm_sec);
 		} else {
-			snprintf(buf, buflen, "%02d:%02d",
-			         tm->tm_hour, tm->tm_min);
+			snprintf(buf, buflen, "%02d:%02d", tm->tm_hour,
+			         tm->tm_min);
 		}
 	} else {
 		int hour = tm->tm_hour % 12;
-		if (hour == 0) hour = 12;
+		if (hour == 0)
+			hour = 12;
 		const char *ampm = tm->tm_hour >= 12 ? "PM" : "AM";
 
 		if (cfg->clock_show_seconds) {
-			snprintf(buf, buflen, "%d:%02d:%02d %s",
-			         hour, tm->tm_min, tm->tm_sec, ampm);
+			snprintf(buf, buflen, "%d:%02d:%02d %s", hour, tm->tm_min,
+			         tm->tm_sec, ampm);
 		} else {
-			snprintf(buf, buflen, "%d:%02d %s",
-			         hour, tm->tm_min, ampm);
+			snprintf(buf, buflen, "%d:%02d %s", hour, tm->tm_min,
+			         ampm);
 		}
 	}
 }
@@ -74,25 +75,34 @@ build_date_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 	}
 
 	/* Build date based on order preference */
-	char date_part[64] = "";
-	size_t dp_off = 0;
-	const char *parts[3] = { NULL, NULL, NULL };
+	char        date_part[64] = "";
+	size_t      dp_off        = 0;
+	const char *parts[3]      = { NULL, NULL, NULL };
 
 	switch (cfg->clock_date_order) {
-	case 0:  /* dd/mm/yyyy */
-		if (cfg->clock_show_day)   parts[0] = day;
-		if (cfg->clock_show_month) parts[1] = month;
-		if (cfg->clock_show_year)  parts[2] = year;
+	case 0: /* dd/mm/yyyy */
+		if (cfg->clock_show_day)
+			parts[0] = day;
+		if (cfg->clock_show_month)
+			parts[1] = month;
+		if (cfg->clock_show_year)
+			parts[2] = year;
 		break;
-	case 1:  /* mm/dd/yyyy */
-		if (cfg->clock_show_month) parts[0] = month;
-		if (cfg->clock_show_day)   parts[1] = day;
-		if (cfg->clock_show_year)  parts[2] = year;
+	case 1: /* mm/dd/yyyy */
+		if (cfg->clock_show_month)
+			parts[0] = month;
+		if (cfg->clock_show_day)
+			parts[1] = day;
+		if (cfg->clock_show_year)
+			parts[2] = year;
 		break;
-	case 2:  /* yyyy/mm/dd */
-		if (cfg->clock_show_year)  parts[0] = year;
-		if (cfg->clock_show_month) parts[1] = month;
-		if (cfg->clock_show_day)   parts[2] = day;
+	case 2: /* yyyy/mm/dd */
+		if (cfg->clock_show_year)
+			parts[0] = year;
+		if (cfg->clock_show_month)
+			parts[1] = month;
+		if (cfg->clock_show_day)
+			parts[2] = day;
 		break;
 	default:
 		break;
@@ -105,8 +115,8 @@ build_date_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 			dp_off += snprintf(date_part + dp_off,
 			                   sizeof(date_part) - dp_off, "%s", sep);
 		}
-		dp_off += snprintf(date_part + dp_off,
-		                   sizeof(date_part) - dp_off, "%s", parts[i]);
+		dp_off += snprintf(date_part + dp_off, sizeof(date_part) - dp_off,
+		                   "%s", parts[i]);
 	}
 
 	snprintf(buf, buflen, "%s%s", weekday, date_part);
@@ -144,18 +154,18 @@ clock_destroy(barny_module_t *self)
 static void
 clock_update(barny_module_t *self)
 {
-	clock_data_t    *data = self->data;
-	barny_config_t  *cfg  = &data->state->config;
-	time_t           now  = time(NULL);
+	clock_data_t   *data = self->data;
+	barny_config_t *cfg  = &data->state->config;
+	time_t          now  = time(NULL);
 
 	/* Update every second */
 	if (now != data->last_update) {
 		data->last_update = now;
 
-		struct tm *tm = localtime(&now);
+		struct tm *tm     = localtime(&now);
 
-		char time_str[64];
-		char date_str[64];
+		char       time_str[64];
+		char       date_str[64];
 
 		build_time_string(time_str, sizeof(time_str), tm, cfg);
 		build_date_string(date_str, sizeof(date_str), tm, cfg);
@@ -205,7 +215,8 @@ clock_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 
 	barny_config_t *cfg = &data->state->config;
 	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 1);
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
+		                      cfg->text_color_b, 1);
 	else
 		cairo_set_source_rgba(cr, 1, 1, 1, 1);
 	cairo_move_to(cr, x, y + (h - text_height) / 2);
@@ -229,15 +240,15 @@ barny_module_clock_create(void)
 		return NULL;
 	}
 
-	mod->name            = "clock";
-	mod->position        = BARNY_POS_RIGHT;
-	mod->init            = clock_init;
-	mod->destroy         = clock_destroy;
-	mod->update          = clock_update;
-	mod->render          = clock_render;
-	mod->data            = data;
-	mod->width           = 80;
-	mod->dirty           = true;
+	mod->name     = "clock";
+	mod->position = BARNY_POS_RIGHT;
+	mod->init     = clock_init;
+	mod->destroy  = clock_destroy;
+	mod->update   = clock_update;
+	mod->render   = clock_render;
+	mod->data     = data;
+	mod->width    = 80;
+	mod->dirty    = true;
 
 	return mod;
 }

@@ -14,31 +14,49 @@ typedef struct {
 } disk_data_t;
 
 static void
-format_bytes(char *buf, size_t buflen, unsigned long long bytes,
-             int decimals, bool unit_space)
+format_bytes(char *buf, size_t buflen, unsigned long long bytes, int decimals,
+             bool unit_space)
 {
 	const char *sp = unit_space ? " " : "";
-	double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+	double      gb = bytes / (1024.0 * 1024.0 * 1024.0);
 
 	if (gb >= 1000.0) {
 		double tb = gb / 1024.0;
 		switch (decimals) {
-		case 0:  snprintf(buf, buflen, "%.0f%sT", tb, sp); break;
-		case 2:  snprintf(buf, buflen, "%.2f%sT", tb, sp); break;
-		default: snprintf(buf, buflen, "%.1f%sT", tb, sp); break;
+		case 0:
+			snprintf(buf, buflen, "%.0f%sT", tb, sp);
+			break;
+		case 2:
+			snprintf(buf, buflen, "%.2f%sT", tb, sp);
+			break;
+		default:
+			snprintf(buf, buflen, "%.1f%sT", tb, sp);
+			break;
 		}
 	} else if (gb >= 1.0) {
 		switch (decimals) {
-		case 0:  snprintf(buf, buflen, "%.0f%sG", gb, sp); break;
-		case 2:  snprintf(buf, buflen, "%.2f%sG", gb, sp); break;
-		default: snprintf(buf, buflen, "%.1f%sG", gb, sp); break;
+		case 0:
+			snprintf(buf, buflen, "%.0f%sG", gb, sp);
+			break;
+		case 2:
+			snprintf(buf, buflen, "%.2f%sG", gb, sp);
+			break;
+		default:
+			snprintf(buf, buflen, "%.1f%sG", gb, sp);
+			break;
 		}
 	} else {
 		double mb = bytes / (1024.0 * 1024.0);
 		switch (decimals) {
-		case 0:  snprintf(buf, buflen, "%.0f%sM", mb, sp); break;
-		case 2:  snprintf(buf, buflen, "%.2f%sM", mb, sp); break;
-		default: snprintf(buf, buflen, "%.1f%sM", mb, sp); break;
+		case 0:
+			snprintf(buf, buflen, "%.0f%sM", mb, sp);
+			break;
+		case 2:
+			snprintf(buf, buflen, "%.2f%sM", mb, sp);
+			break;
+		default:
+			snprintf(buf, buflen, "%.1f%sM", mb, sp);
+			break;
 		}
 	}
 }
@@ -80,9 +98,9 @@ disk_update(barny_module_t *self)
 	disk_data_t    *data = self->data;
 	barny_config_t *cfg  = &data->state->config;
 
-	const char *path = cfg->disk_path ? cfg->disk_path : "/";
+	const char     *path = cfg->disk_path ? cfg->disk_path : "/";
 
-	struct statvfs st;
+	struct statvfs  st;
 	if (statvfs(path, &st) != 0)
 		return;
 
@@ -95,18 +113,19 @@ disk_update(barny_module_t *self)
 		data->used_bytes  = used;
 		data->total_bytes = total;
 
-		const char *mode = cfg->disk_mode ? cfg->disk_mode : "used_total";
+		const char *mode  = cfg->disk_mode ? cfg->disk_mode : "used_total";
 
 		if (strcmp(mode, "percentage") == 0) {
 			int percent = 0;
 			if (total > 0)
 				percent = (int)((used * 100) / total);
 			const char *fmt = cfg->disk_unit_space ? "%d %%" : "%d%%";
-			snprintf(data->display_str, sizeof(data->display_str),
-			         fmt, percent);
+			snprintf(data->display_str, sizeof(data->display_str), fmt,
+			         percent);
 		} else if (strcmp(mode, "free") == 0) {
 			format_bytes(data->display_str, sizeof(data->display_str),
-			             avail, cfg->disk_decimals, cfg->disk_unit_space);
+			             avail, cfg->disk_decimals,
+			             cfg->disk_unit_space);
 		} else {
 			/* "used_total" (default) */
 			char used_str[16];
@@ -143,7 +162,8 @@ disk_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 
 	barny_config_t *cfg = &data->state->config;
 	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g, cfg->text_color_b, 0.9);
+		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
+		                      cfg->text_color_b, 0.9);
 	else
 		cairo_set_source_rgba(cr, 1, 0.8, 0.9, 0.9);
 	cairo_move_to(cr, x, y + (h - th) / 2);
@@ -166,15 +186,15 @@ barny_module_disk_create(void)
 		return NULL;
 	}
 
-	mod->name            = "disk";
-	mod->position        = BARNY_POS_RIGHT;
-	mod->init            = disk_init;
-	mod->destroy         = disk_destroy;
-	mod->update          = disk_update;
-	mod->render          = disk_render;
-	mod->data            = data;
-	mod->width           = 80;
-	mod->dirty           = true;
+	mod->name     = "disk";
+	mod->position = BARNY_POS_RIGHT;
+	mod->init     = disk_init;
+	mod->destroy  = disk_destroy;
+	mod->update   = disk_update;
+	mod->render   = disk_render;
+	mod->data     = data;
+	mod->width    = 80;
+	mod->dirty    = true;
 
 	return mod;
 }

@@ -13,7 +13,7 @@ barny_dbus_init(barny_state_t *state)
 	if (r < 0) {
 		fprintf(stderr, "barny: failed to connect to session bus: %s\n",
 		        strerror(-r));
-		state->dbus = NULL;
+		state->dbus    = NULL;
 		state->dbus_fd = -1;
 		return -1;
 	}
@@ -22,7 +22,7 @@ barny_dbus_init(barny_state_t *state)
 	if (state->dbus_fd < 0) {
 		fprintf(stderr, "barny: failed to get D-Bus fd\n");
 		sd_bus_unref(state->dbus);
-		state->dbus = NULL;
+		state->dbus    = NULL;
 		state->dbus_fd = -1;
 		return -1;
 	}
@@ -72,15 +72,9 @@ barny_dbus_dispatch(barny_state_t *state)
 			return -1;
 		}
 		if (r == 0) {
-			break;  /* No more messages to process */
+			break; /* No more messages to process */
 		}
 	}
 
 	return 0;
-}
-
-int
-barny_dbus_get_fd(barny_state_t *state)
-{
-	return state->dbus_fd;
 }

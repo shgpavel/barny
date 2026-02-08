@@ -7,9 +7,9 @@
 #include <cjson/cJSON.h>
 
 #define UPDATE_INTERVAL 600 /* 10 minutes */
-#define OUTPUT_PATH "/opt/barny/modules/weather"
+#define OUTPUT_PATH     "/opt/barny/modules/weather"
 #define OUTPUT_TMP_PATH "/opt/barny/modules/weather.tmp"
-#define API_KEY_PATH "/opt/barny/modules/weather_api_key"
+#define API_KEY_PATH    "/opt/barny/modules/weather_api_key"
 
 static volatile int running = 1;
 
@@ -29,8 +29,8 @@ signal_handler(int sig)
 static size_t
 write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
-	size_t realsize = size * nmemb;
-	struct response_buf *buf = userdata;
+	size_t               realsize = size * nmemb;
+	struct response_buf *buf      = userdata;
 
 	char *new_data = realloc(buf->data, buf->size + realsize + 1);
 	if (!new_data)
@@ -38,8 +38,8 @@ write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
 
 	buf->data = new_data;
 	memcpy(buf->data + buf->size, ptr, realsize);
-	buf->size += realsize;
-	buf->data[buf->size] = '\0';
+	buf->size            += realsize;
+	buf->data[buf->size]  = '\0';
 
 	return realsize;
 }
@@ -96,20 +96,22 @@ get_location(double *lat, double *lon)
 	}
 
 	*comma = '\0';
-	*lat = strtod(locbuf, NULL);
-	*lon = strtod(comma + 1, NULL);
+	*lat   = strtod(locbuf, NULL);
+	*lon   = strtod(comma + 1, NULL);
 
 	cJSON_Delete(json);
 	return 0;
 }
 
 static int
-get_weather(double lat, double lon, const char *api_key, double *temp, char *weather, size_t weather_size)
+get_weather(double lat, double lon, const char *api_key, double *temp,
+            char *weather, size_t weather_size)
 {
 	char url[512];
-	snprintf(url, sizeof(url),
-	         "https://api.openweathermap.org/data/2.5/weather?lat=%lg&lon=%lg&appid=%s&units=metric",
-	         lat, lon, api_key);
+	snprintf(
+	        url, sizeof(url),
+	        "https://api.openweathermap.org/data/2.5/weather?lat=%lg&lon=%lg&appid=%s&units=metric",
+	        lat, lon, api_key);
 
 	cJSON *json = fetch_json(url);
 	if (!json)
@@ -123,15 +125,16 @@ get_weather(double lat, double lon, const char *api_key, double *temp, char *wea
 		cJSON_Delete(json);
 		return -1;
 	}
-	*temp = temp_obj->valuedouble;
+	*temp              = temp_obj->valuedouble;
 
 	/* Get weather description */
 	cJSON *weather_arr = cJSON_GetObjectItem(json, "weather");
 	if (cJSON_IsArray(weather_arr) && cJSON_GetArraySize(weather_arr) > 0) {
-		cJSON *first = cJSON_GetArrayItem(weather_arr, 0);
+		cJSON *first    = cJSON_GetArrayItem(weather_arr, 0);
 		cJSON *main_str = cJSON_GetObjectItem(first, "main");
 		if (main_str && main_str->valuestring) {
-			snprintf(weather, weather_size, "%s", main_str->valuestring);
+			snprintf(weather, weather_size, "%s",
+			         main_str->valuestring);
 		} else {
 			snprintf(weather, weather_size, "Unknown");
 		}
@@ -202,9 +205,10 @@ main(void)
 
 	while (running) {
 		double temp;
-		char weather[64];
+		char   weather[64];
 
-		if (get_weather(lat, lon, api_key, &temp, weather, sizeof(weather)) == 0) {
+		if (get_weather(lat, lon, api_key, &temp, weather, sizeof(weather))
+		    == 0) {
 			write_output(temp, weather);
 			fprintf(stderr, "Updated: %.1f°C %s\n", temp, weather);
 		}
