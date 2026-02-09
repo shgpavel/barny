@@ -15,9 +15,10 @@ barny_btc_price = executable(
     install_dir: get_option('bindir'),
 )
 
-# Install systemd user service
-install_data(
-    'btc_price.service',
-    install_dir: '/usr/lib/systemd/user',
-    rename: 'barny-btc-price.service',
-)
+if init_system == 'systemd'
+    install_data(
+        'btc_price.service',
+        install_dir: '/usr/lib/systemd/user',
+        rename: 'barny-btc-price.service',
+    )
+endif

@@ -1,0 +1,9 @@
+option('init_system', type: 'combo',
+    choices: ['systemd', 'openrc', 'none'],
+    value: 'systemd',
+    description: 'Init system for service management (systemd, openrc, or none)')
+
+option('compiler', type: 'combo',
+    choices: ['clang', 'gcc'],
+    value: 'clang',
+    description: 'Preferred C compiler family (set matching CC when configuring)')

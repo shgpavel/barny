@@ -9,12 +9,13 @@ barny_cpu_power = executable(
     install_dir: get_option('bindir'),
 )
 
-# Install systemd user service
-install_data(
-    'cpu_power.service',
-    install_dir: '/usr/lib/systemd/user',
-    rename: 'barny-cpu-power.service',
-)
+if init_system == 'systemd'
+    install_data(
+        'cpu_power.service',
+        install_dir: '/usr/lib/systemd/user',
+        rename: 'barny-cpu-power.service',
+    )
+endif
 
 # Install udev rule for RAPL permissions
 install_data(

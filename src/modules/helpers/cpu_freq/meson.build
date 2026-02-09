@@ -9,9 +9,10 @@ barny_cpu_freq = executable(
     install_dir: get_option('bindir'),
 )
 
-# Install systemd user service
-install_data(
-    'cpu_freq.service',
-    install_dir: '/usr/lib/systemd/user',
-    rename: 'barny-cpu-freq.service',
-)
+if init_system == 'systemd'
+    install_data(
+        'cpu_freq.service',
+        install_dir: '/usr/lib/systemd/user',
+        rename: 'barny-cpu-freq.service',
+    )
+endif

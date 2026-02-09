@@ -1,0 +1,140 @@
+#!/bin/sh
+# barny-session — manage barny and helpers via supervise-daemon or plain processes
+# Usage: barny-session {start|stop|status}
+
+BARNY_SERVICES="barny barny-weather barny-btc-price barny-cpu-freq barny-cpu-power"
+RESPAWN_DELAY_BARNY=2
+RESPAWN_DELAY_HELPER=5
+
+if [ "$(id -u)" -eq 0 ]; then
+    BASE_RUNTIME_DIR="/run"
+elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    BASE_RUNTIME_DIR="$XDG_RUNTIME_DIR"
+elif [ -n "${HOME:-}" ]; then
+    BASE_RUNTIME_DIR="$HOME/.local/run"
+else
+    echo "error: unable to determine runtime directory; set XDG_RUNTIME_DIR" >&2
+    exit 1
+fi
+
+RUNDIR="$BASE_RUNTIME_DIR/barny"
+
+has_supervise_daemon() {
+    command -v supervise-daemon >/dev/null 2>&1
+}
+
+ensure_rundir() {
+    mkdir -p "$RUNDIR"
+    chmod 700 "$RUNDIR" 2>/dev/null || true
+}
+
+read_pid() {
+    pidfile="$1"
+    [ -f "$pidfile" ] || return 1
+    pid="$(cat "$pidfile" 2>/dev/null || true)"
+    case "$pid" in
+        ''|*[!0-9]*)
+            return 1
+            ;;
+    esac
+    printf '%s\n' "$pid"
+}
+
+start_service() {
+    name="$1"
+    bin="$(command -v "$name" 2>/dev/null || echo "@BINDIR@/$name")"
+
+    if [ ! -x "$bin" ]; then
+        echo "warning: $name not found, skipping"
+        return 0
+    fi
+
+    if [ "$name" = "barny" ]; then
+        delay=$RESPAWN_DELAY_BARNY
+    else
+        delay=$RESPAWN_DELAY_HELPER
+    fi
+
+    pidfile="$RUNDIR/$name.pid"
+
+    if has_supervise_daemon; then
+        supervise-daemon "$name" --start \
+            --pidfile "$pidfile" \
+            --respawn-delay "$delay" \
+            -- "$bin"
+    else
+        if pid="$(read_pid "$pidfile")" && kill -0 "$pid" 2>/dev/null; then
+            echo "$name is already running"
+            return 0
+        fi
+        $bin &
+        echo $! > "$pidfile"
+    fi
+}
+
+stop_service() {
+    name="$1"
+    pidfile="$RUNDIR/$name.pid"
+
+    if has_supervise_daemon; then
+        supervise-daemon "$name" --stop --pidfile "$pidfile" 2>/dev/null
+    else
+        if [ -f "$pidfile" ]; then
+            if pid="$(read_pid "$pidfile")"; then
+                kill "$pid" 2>/dev/null || true
+            fi
+            rm -f "$pidfile"
+        fi
+    fi
+}
+
+status_service() {
+    name="$1"
+    pidfile="$RUNDIR/$name.pid"
+
+    if has_supervise_daemon; then
+        if supervise-daemon "$name" --status --pidfile "$pidfile" 2>/dev/null; then
+            echo "$name: running"
+        else
+            echo "$name: stopped"
+        fi
+    else
+        if pid="$(read_pid "$pidfile")" && kill -0 "$pid" 2>/dev/null; then
+            echo "$name: running (pid $pid)"
+        else
+            echo "$name: stopped"
+            rm -f "$pidfile" 2>/dev/null
+        fi
+    fi
+}
+
+case "${1:-}" in
+    start)
+        ensure_rundir
+        echo "Starting barny session..."
+        for svc in $BARNY_SERVICES; do
+            start_service "$svc"
+        done
+        if has_supervise_daemon; then
+            echo "Services started under supervise-daemon (auto-restart enabled)"
+        else
+            echo "Services started as plain processes (no auto-restart)"
+        fi
+        ;;
+    stop)
+        echo "Stopping barny session..."
+        for svc in $BARNY_SERVICES; do
+            stop_service "$svc"
+        done
+        echo "All barny services stopped"
+        ;;
+    status)
+        for svc in $BARNY_SERVICES; do
+            status_service "$svc"
+        done
+        ;;
+    *)
+        echo "Usage: barny-session {start|stop|status}" >&2
+        exit 1
+        ;;
+esac

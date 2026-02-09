@@ -215,6 +215,10 @@ struct barny_state {
 	barny_output_t             *pointer_output;
 	double                      pointer_x, pointer_y;
 
+	/* Touchpad swipe accumulator */
+	uint32_t                    axis_source;
+	double                      touchpad_scroll_accum;
+
 	/* Modules */
 	barny_module_t             *modules[BARNY_MAX_MODULES];
 	int                         module_count;

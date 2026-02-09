@@ -15,9 +15,10 @@ barny_weather = executable(
     install_dir: get_option('bindir'),
 )
 
-# Install systemd user service
-install_data(
-    'weather.service',
-    install_dir: '/usr/lib/systemd/user',
-    rename: 'barny-weather.service',
-)
+if init_system == 'systemd'
+    install_data(
+        'weather.service',
+        install_dir: '/usr/lib/systemd/user',
+        rename: 'barny-weather.service',
+    )
+endif

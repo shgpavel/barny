@@ -72,6 +72,13 @@ barny_test_ipc = executable(
 
 test('barny_test_ipc', barny_test_ipc)
 
+# --- Session launcher script regressions ---
+test('barny_session_script',
+    find_program('sh'),
+    args: [files('test_barny_session.sh'), meson.project_source_root()],
+    is_parallel: false,
+)
+
 # --- Static analysis ---
 run_clang_tidy = find_program('run-clang-tidy', required: false)
 if run_clang_tidy.found()

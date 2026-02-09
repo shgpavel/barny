@@ -49,8 +49,13 @@ Like modules/ is not vibecoded. Its mine. I used them for years.
 Barny uses Meson as its build system and requires a C compiler with C2x support (GCC or Clang).
 
 ```bash
-meson setup build
+CC=clang meson setup build -Dcompiler=clang
 meson compile -C build
+```
+
+To use GCC explicitly:
+```bash
+CC=gcc meson setup build -Dcompiler=gcc
 ```
 
 To run tests:
@@ -73,6 +78,8 @@ Enable and start services (run as your regular user, not root):
 systemctl --user daemon-reload
 systemctl --user enable --now barny.service
 ```
+
+**Note:** OpenRC support is partial and experimental.
 
 ## Uninstallation
 

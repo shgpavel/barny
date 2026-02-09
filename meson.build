@@ -6,12 +6,23 @@ project(
     default_options: [
         'c_std=c2x',
         'warning_level=3',
-        'optimization=2',
+        'buildtype=release',
+        'strip=true',
+        'werror=true',
         'prefix=/usr',
     ],
 )
 
+init_system = get_option('init_system')
+preferred_compiler = get_option('compiler')
 cc = meson.get_compiler('c')
+
+if cc.get_id() != preferred_compiler
+    error(
+        'Compiler mismatch: -Dcompiler=' + preferred_compiler + ' but Meson detected "' + cc.get_id() +
+        '". Configure with a matching compiler (for example: CC=' + preferred_compiler + ' meson setup build --wipe).'
+    )
+endif
 
 wayland_client = dependency('wayland-client')
 wayland_scanner = find_program('wayland-scanner')
@@ -104,14 +115,32 @@ install_data(
     install_dir: get_option('sysconfdir') / 'barny',
 )
 
-# Install systemd user service
-install_data(
-    'config/barny.service',
-    install_dir: '/usr/lib/systemd/user',
-)
+# Install service files based on init system
+if init_system == 'systemd'
+    install_data(
+        'config/barny.service',
+        install_dir: '/usr/lib/systemd/user',
+    )
+elif init_system == 'openrc'
+    # Configure and install barny-session launcher script
+    barny_session = configure_file(
+        input: 'config/barny-session.in',
+        output: 'barny-session',
+        configuration: {'BINDIR': get_option('prefix') / get_option('bindir')},
+    )
+    install_data(
+        barny_session,
+        install_dir: get_option('bindir'),
+        install_mode: 'rwxr-xr-x',
+    )
+endif
 
 # Post-install script: create dirs, enable and start services
-meson.add_install_script('scripts/post-install.sh')
+meson.add_install_script(
+    'scripts/post-install.sh',
+    get_option('prefix'),
+    get_option('bindir'),
+)
 
 # Uninstall target
 uninstall_script = files('scripts/uninstall.sh')

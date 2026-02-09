@@ -171,11 +171,26 @@ static void
 pointer_axis(void *data, struct wl_pointer *pointer, uint32_t time, uint32_t axis,
              wl_fixed_t value)
 {
-	(void)data;
+	barny_state_t *state = data;
 	(void)pointer;
 	(void)time;
-	(void)axis;
-	(void)value;
+
+	/* Only handle horizontal axis (1) from touchpad when pointer is over the bar */
+	if (axis != 1 || !state->pointer_output ||
+	    state->axis_source != WL_POINTER_AXIS_SOURCE_FINGER) {
+		return;
+	}
+
+	double px = wl_fixed_to_double(value);
+	state->touchpad_scroll_accum += px;
+
+	if (state->touchpad_scroll_accum > 30.0) {
+		barny_sway_ipc_send(state, 0, "workspace next");
+		state->touchpad_scroll_accum = 0.0;
+	} else if (state->touchpad_scroll_accum < -30.0) {
+		barny_sway_ipc_send(state, 0, "workspace prev");
+		state->touchpad_scroll_accum = 0.0;
+	}
 }
 
 static void
@@ -188,19 +203,22 @@ pointer_frame(void *data, struct wl_pointer *pointer)
 static void
 pointer_axis_source(void *data, struct wl_pointer *pointer, uint32_t axis_source)
 {
-	(void)data;
+	barny_state_t *state = data;
 	(void)pointer;
-	(void)axis_source;
+	state->axis_source = axis_source;
 }
 
 static void
 pointer_axis_stop(void *data, struct wl_pointer *pointer, uint32_t time,
                   uint32_t axis)
 {
-	(void)data;
+	barny_state_t *state = data;
 	(void)pointer;
 	(void)time;
-	(void)axis;
+
+	if (axis == 1) {
+		state->touchpad_scroll_accum = 0.0;
+	}
 }
 
 static void
