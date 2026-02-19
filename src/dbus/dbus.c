@@ -36,6 +36,11 @@ barny_dbus_init(barny_state_t *state)
 
 	if (barny_sni_host_init(state) < 0) {
 		fprintf(stderr, "barny: failed to initialize SNI host\n");
+	} else {
+		/* Set host_registered directly since watcher and host share
+		 * the same D-Bus connection - sd_bus_call_method() to self
+		 * fails with ELOOP through the daemon */
+		barny_sni_watcher_set_host_registered(true);
 	}
 
 	return 0;

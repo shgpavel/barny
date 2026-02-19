@@ -347,6 +347,22 @@ barny_sni_watcher_init(barny_state_t *state)
 }
 
 void
+barny_sni_watcher_set_host_registered(bool registered)
+{
+	if (watcher) {
+		watcher->host_registered = registered;
+
+		if (registered) {
+			sd_bus_emit_signal(watcher->state->dbus,
+			                   SNI_WATCHER_PATH,
+			                   SNI_WATCHER_INTERFACE,
+			                   "StatusNotifierHostRegistered",
+			                   "");
+		}
+	}
+}
+
+void
 barny_sni_watcher_cleanup(barny_state_t *state)
 {
 	if (!watcher) {

@@ -592,18 +592,9 @@ barny_sni_host_init(barny_state_t *state)
 		printf("barny: registered as %s\n", host->host_name);
 	}
 
-	/* Register with the watcher */
-	sd_bus_error error = SD_BUS_ERROR_NULL;
-	r                  = sd_bus_call_method(state->dbus, SNI_WATCHER_INTERFACE,
-	                                        SNI_WATCHER_PATH, SNI_WATCHER_INTERFACE,
-	                                        "RegisterStatusNotifierHost", &error, NULL, "s",
-	                                        host->host_name);
-
-	if (r < 0) {
-		fprintf(stderr, "barny: failed to register as SNI host: %s\n",
-		        error.message ? error.message : strerror(-r));
-	}
-	sd_bus_error_free(&error);
+	/* Host registration with the watcher is handled by barny_dbus_init()
+	 * via barny_sni_watcher_set_host_registered() since both share the
+	 * same D-Bus connection (sd_bus_call_method to self returns ELOOP) */
 
 	/* Subscribe to item registered/unregistered signals */
 	r = sd_bus_match_signal(state->dbus,
