@@ -75,13 +75,11 @@ barny_sway_ipc_send(barny_state_t *state, uint32_t type, const char *payload)
 	size_t   total = SWAY_IPC_HEADER_SIZE + len;
 	char    *buf   = malloc(total);
 
-	memcpy(buf, SWAY_IPC_MAGIC,
-	       6); // NOLINT(bugprone-not-null-terminated-result)
+	memcpy(buf, SWAY_IPC_MAGIC, 6); // NOLINT(bugprone-not-null-terminated-result)
 	memcpy(buf + 6, &len, 4);
 	memcpy(buf + 10, &type, 4);
 	if (payload && len > 0) {
-		memcpy(buf + 14, payload,
-		       len); // NOLINT(bugprone-not-null-terminated-result)
+		memcpy(buf + 14, payload, len); // NOLINT(bugprone-not-null-terminated-result)
 	}
 
 	ssize_t offset    = 0;

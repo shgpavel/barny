@@ -262,71 +262,88 @@ sysinfo_update(barny_module_t *self)
 		char line[64];
 		if (fgets(line, sizeof(line), f)) {
 			double p_freq = 0, e_freq = 0;
-			if (sscanf(line, "P: %lf E: %lf", &p_freq, &e_freq) == 2) {
-				if (p_freq != data->p_freq
-				    || e_freq != data->e_freq) {
-					data->p_freq = p_freq;
-					data->e_freq = e_freq;
+			bool   hybrid = false;
+			bool   parsed = false;
 
-					if (cfg->sysinfo_freq_combined) {
+			if (sscanf(line, "P: %lf E: %lf", &p_freq, &e_freq)
+			    == 2) {
+				hybrid = true;
+				parsed = true;
+			} else if (sscanf(line, "%lf", &p_freq) == 1) {
+				/* Homogeneous CPU: single frequency value */
+				e_freq = 0;
+				parsed = true;
+			}
+
+			if (parsed
+			    && (p_freq != data->p_freq
+			        || e_freq != data->e_freq)) {
+				data->p_freq = p_freq;
+				data->e_freq = e_freq;
+
+				if (!hybrid || cfg->sysinfo_freq_combined) {
+					double avg;
+					if (!hybrid) {
+						avg = p_freq;
+					} else {
 						int total = data->p_core_count
 						            + data->e_core_count;
-						double avg
-						        = (total > 0) ?
-						                  (p_freq * data->p_core_count
-						                   + e_freq * data->e_core_count)
-						                          / total :
-						                  0.0;
-						if (cfg->sysinfo_freq_show_unit) {
-							const char *fmt
-							        = cfg->sysinfo_freq_unit_space ?
-							                  "%.2f GHz" :
-							                  "%.2fGHz";
-							snprintf(
-							        data->freq_str,
-							        sizeof(data->freq_str),
-							        fmt, avg);
-						} else {
-							snprintf(
-							        data->freq_str,
-							        sizeof(data->freq_str),
-							        "%.2f", avg);
-						}
-					} else {
-						/* Build format based on label_space and show_unit */
-						const char *label_sep
-						        = cfg->sysinfo_freq_label_space ?
-						                  " " :
-						                  "";
-						const char *unit_sep
-						        = cfg->sysinfo_freq_unit_space ?
-						                  " " :
-						                  "";
-						const char *unit
-						        = cfg->sysinfo_freq_show_unit ?
-						                  "GHz" :
-						                  "";
-
-						if (cfg->sysinfo_freq_show_unit) {
-							snprintf(
-							        data->freq_str,
-							        sizeof(data->freq_str),
-							        "P:%s%.2f%s%s E:%s%.2f%s%s",
-							        label_sep, p_freq,
-							        unit_sep, unit,
-							        label_sep, e_freq,
-							        unit_sep, unit);
-						} else {
-							snprintf(
-							        data->freq_str,
-							        sizeof(data->freq_str),
-							        "P:%s%.2f E:%s%.2f",
-							        label_sep, p_freq,
-							        label_sep, e_freq);
-						}
+						avg = (total > 0) ?
+						              (p_freq * data->p_core_count
+						               + e_freq
+						                         * data->e_core_count)
+						                      / total :
+						              0.0;
 					}
-					self->dirty = true;
+					if (cfg->sysinfo_freq_show_unit) {
+						const char *fmt
+						        = cfg->sysinfo_freq_unit_space ?
+						                  "%.2f GHz" :
+						                  "%.2fGHz";
+						snprintf(
+						        data->freq_str,
+						        sizeof(data->freq_str),
+						        fmt, avg);
+					} else {
+						snprintf(
+						        data->freq_str,
+						        sizeof(data->freq_str),
+						        "%.2f", avg);
+					}
+				} else {
+					/* Build format based on label_space and show_unit */
+					const char *label_sep
+					        = cfg->sysinfo_freq_label_space ?
+					                  " " :
+					                  "";
+					const char *unit_sep
+					        = cfg->sysinfo_freq_unit_space ?
+					                  " " :
+					                  "";
+					const char *unit
+					        = cfg->sysinfo_freq_show_unit ?
+					                  "GHz" :
+					                  "";
+
+					if (cfg->sysinfo_freq_show_unit) {
+						snprintf(
+						        data->freq_str,
+						        sizeof(data->freq_str),
+						        "P:%s%.2f%s%s E:%s%.2f%s%s",
+						        label_sep, p_freq,
+						        unit_sep, unit,
+						        label_sep, e_freq,
+						        unit_sep, unit);
+					} else {
+						snprintf(
+						        data->freq_str,
+						        sizeof(data->freq_str),
+						        "P:%s%.2f E:%s%.2f",
+						        label_sep, p_freq,
+						        label_sep, e_freq);
+					}
 				}
+				self->dirty = true;
 			}
 		}
 		fclose(f);

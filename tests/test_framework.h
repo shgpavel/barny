@@ -51,8 +51,8 @@ __attribute__((unused)) static const char *_current_test_name = NULL;
 		_test_fail_count++;                                                \
 		_test_pass_count--; /* Will be incremented at end of TEST block */ \
 		printf(COLOR_RED "FAIL\n" COLOR_RESET);                            \
-		printf(COLOR_RED "         -> " msg "\n" COLOR_RESET               \
-		       __VA_OPT__(,) __VA_ARGS__);                                \
+		printf(COLOR_RED "         -> " msg "\n" COLOR_RESET \
+		       __VA_OPT__(,) __VA_ARGS__);                                 \
 		break;                                                             \
 	} while (0)
 
