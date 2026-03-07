@@ -430,6 +430,28 @@ remove_item(const char *service)
 }
 
 /*
+ * Update the tray module's item count, width, and dirty flag immediately.
+ * Called after any change to the item list so that the next render uses
+ * correct layout values instead of waiting for the 500 ms tray_update tick.
+ */
+static void
+notify_tray_module(void)
+{
+	if (!host || !host->state)
+		return;
+
+	for (int i = 0; i < host->state->module_count; i++) {
+		barny_module_t *mod = host->state->modules[i];
+		if (mod && mod->name && strcmp(mod->name, "tray") == 0) {
+			if (mod->update)
+				mod->update(mod);
+			mod->dirty = true;
+			break;
+		}
+	}
+}
+
+/*
  * Handle NewIcon signal from an item
  */
 static int
@@ -456,17 +478,7 @@ handle_new_icon(sd_bus_message *m, void *userdata, sd_bus_error *error)
 				item->icon = NULL;
 			}
 			fetch_item_icon(item, icon_size);
-
-			/* Invalidate the tray module so the new icon gets rendered */
-			for (int i = 0; i < host->state->module_count; i++) {
-				barny_module_t *mod = host->state->modules[i];
-				if (mod
-				    && mod->name
-				    && strcmp(mod->name, "tray") == 0) {
-					mod->dirty = true;
-					break;
-				}
-			}
+			notify_tray_module();
 			break;
 		}
 	}
@@ -491,6 +503,7 @@ handle_item_registered(sd_bus_message *m, void *userdata, sd_bus_error *error)
 
 	if (host && host->state) {
 		add_item(service, host->state->config.tray_icon_size);
+		notify_tray_module();
 	}
 
 	return 0;
@@ -512,6 +525,7 @@ handle_item_unregistered(sd_bus_message *m, void *userdata, sd_bus_error *error)
 	}
 
 	remove_item(service);
+	notify_tray_module();
 
 	return 0;
 }

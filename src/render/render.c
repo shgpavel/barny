@@ -20,7 +20,7 @@ effective_module_width(const barny_module_t *mod, double gap_scale)
 	}
 
 	if (is_gap_placeholder(mod) && gap_scale < 1.0) {
-		int scaled = (int)(w * gap_scale + 0.5);
+		int scaled = (int)(w * gap_scale);
 		return scaled > 0 ? scaled : 0;
 	}
 
@@ -66,14 +66,51 @@ barny_render_frame(barny_output_t *output)
 		return;
 	}
 
+	/* If a frame is already in-flight, queue a redraw request for this
+	 * output.  Rendering now would overwrite the SHM buffer while the
+	 * compositor may still be reading it. */
+	if (output->frame_pending) {
+		output->redraw_queued = true;
+		return;
+	}
+
+	/* This render is consuming the latest queued request. */
+	output->redraw_queued = false;
+
 	cairo_t       *cr    = output->cr;
 	barny_state_t *state = output->state;
+
+	/* Snapshot module widths before rendering so we can detect layout
+	 * changes (e.g. workspace count change, text width change).  If any
+	 * width changed we re-render once more — still inside the same frame
+	 * before commit — so the compositor only ever sees the final layout. */
+	int saved_widths[BARNY_MAX_MODULES];
+	for (int i = 0; i < state->module_count; i++) {
+		saved_widths[i] = state->modules[i] ? state->modules[i]->width : 0;
+	}
 
 	/* Render liquid glass background */
 	barny_render_liquid_glass(output, cr);
 
 	/* Render modules */
 	barny_render_modules(output, cr);
+
+	/* Check if any module width changed during render */
+	bool width_changed = false;
+	for (int i = 0; i < state->module_count; i++) {
+		int new_w = state->modules[i] ? state->modules[i]->width : 0;
+		if (new_w != saved_widths[i]) {
+			width_changed = true;
+			break;
+		}
+	}
+
+	/* If layout changed, re-render with the now-correct widths so the
+	 * committed frame already has the final positions. */
+	if (width_changed) {
+		barny_render_liquid_glass(output, cr);
+		barny_render_modules(output, cr);
+	}
 
 	/* Mark all modules as clean */
 	for (int i = 0; i < state->module_count; i++) {
@@ -82,6 +119,12 @@ barny_render_frame(barny_output_t *output)
 		}
 	}
 
+	/* Register the frame callback BEFORE committing — the Wayland spec
+	 * requires wl_surface.frame to precede the commit that activates it.
+	 * This guarantees frame_done fires after the compositor presents this
+	 * frame, which is when it is safe to render the next one. */
+	barny_output_request_frame(output);
+
 	/* Commit surface */
 	cairo_surface_flush(output->cairo_surface);
 	wl_surface_attach(output->surface, output->buffer, 0, 0);
@@ -89,18 +132,14 @@ barny_render_frame(barny_output_t *output)
 	                         output->width * output->scale,
 	                         output->height * output->scale);
 	wl_surface_commit(output->surface);
-
-	/* Request frame callback for vsync pacing — frame_done will
-	 * trigger the next render only if a module is dirty */
-	barny_output_request_frame(output);
 }
 
 void
 barny_render_modules(barny_output_t *output, cairo_t *cr)
 {
-	barny_state_t *state    = output->state;
-	int            width    = output->width;
-	int            height   = output->height;
+	barny_state_t *state  = output->state;
+	int            width  = output->width;
+	int            height = output->height;
 
 	/* Calculate module positions */
 	int            left_x   = 16;
@@ -156,21 +195,26 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 		int mod_width       = effective_module_width(mod, left_gap_scale);
 		int mod_height      = mod->height > 0 ? mod->height : height;
 		int y               = (height - mod_height) / 2;
+		int draw_x          = x;
+		int max_x           = right_x - mod_width;
 
-		if (x >= right_x) {
-			break;
+		if (max_x < left_x) {
+			max_x = left_x;
 		}
-		if (mod_width > 0 && x + mod_width > right_x) {
-			break;
+		if (draw_x < left_x) {
+			draw_x = left_x;
+		}
+		if (draw_x > max_x) {
+			draw_x = max_x;
 		}
 
 		cairo_save(cr);
 		if (mod->render) {
-			mod->render(mod, cr, x, y, mod_width, mod_height);
+			mod->render(mod, cr, draw_x, y, mod_width, mod_height);
 		}
 		cairo_restore(cr);
 
-		x += mod_width + spacing;
+		x = draw_x + mod_width + spacing;
 	}
 
 	/* Render center modules */
@@ -183,21 +227,26 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 		int mod_width  = effective_module_width(mod, center_gap_scale);
 		int mod_height = mod->height > 0 ? mod->height : height;
 		int y          = (height - mod_height) / 2;
+		int draw_x     = x;
+		int max_x      = right_x - mod_width;
 
-		if (x >= right_x) {
-			break;
+		if (max_x < left_x) {
+			max_x = left_x;
 		}
-		if (mod_width > 0 && x + mod_width > right_x) {
-			break;
+		if (draw_x < left_x) {
+			draw_x = left_x;
+		}
+		if (draw_x > max_x) {
+			draw_x = max_x;
 		}
 
 		cairo_save(cr);
 		if (mod->render) {
-			mod->render(mod, cr, x, y, mod_width, mod_height);
+			mod->render(mod, cr, draw_x, y, mod_width, mod_height);
 		}
 		cairo_restore(cr);
 
-		x += mod_width + spacing;
+		x = draw_x + mod_width + spacing;
 	}
 
 	/* Render right modules (right-to-left) */
@@ -207,22 +256,25 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 		int mod_width       = effective_module_width(mod, right_gap_scale);
 		int mod_height      = mod->height > 0 ? mod->height : height;
 		int y               = (height - mod_height) / 2;
+		int draw_x          = x - mod_width;
+		int max_x           = right_x - mod_width;
 
-		if (x <= left_x) {
-			break;
+		if (max_x < left_x) {
+			max_x = left_x;
 		}
-		if (mod_width > 0 && x - mod_width < left_x) {
-			break;
+		if (draw_x < left_x) {
+			draw_x = left_x;
 		}
-
-		x -= mod_width;
+		if (draw_x > max_x) {
+			draw_x = max_x;
+		}
 
 		cairo_save(cr);
 		if (mod->render) {
-			mod->render(mod, cr, x, y, mod_width, mod_height);
+			mod->render(mod, cr, draw_x, y, mod_width, mod_height);
 		}
 		cairo_restore(cr);
 
-		x -= spacing;
+		x = draw_x - spacing;
 	}
 }

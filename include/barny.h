@@ -189,6 +189,7 @@ struct barny_output {
 	/* State */
 	bool                 configured;
 	bool                 frame_pending;
+	bool                 redraw_queued;
 
 	/* Cached liquid glass background (invalidated on resize) */
 	cairo_surface_t     *bg_cache;

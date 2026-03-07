@@ -55,6 +55,12 @@ frame_done(void *data, struct wl_callback *callback, uint32_t callback_time)
 	wl_callback_destroy(callback);
 	output->frame_pending = false;
 
+	/* Honor redraw requests queued while a frame callback was pending. */
+	if (output->redraw_queued) {
+		barny_render_frame(output);
+		return;
+	}
+
 	/* Check if any module needs redraw */
 	bool needs_redraw     = false;
 	for (int i = 0; i < output->state->module_count; i++) {
@@ -186,7 +192,9 @@ barny_output_destroy_surface(barny_output_t *output)
 		wl_surface_destroy(output->surface);
 		output->surface = NULL;
 	}
-	output->configured = false;
+	output->configured    = false;
+	output->frame_pending = false;
+	output->redraw_queued = false;
 }
 
 int
