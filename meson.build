@@ -17,6 +17,10 @@ init_system = get_option('init_system')
 preferred_compiler = get_option('compiler')
 cc = meson.get_compiler('c')
 
+if cc.get_id() == 'clang' and cc.has_argument('-Wno-c2y-extensions')
+    add_project_arguments('-Wno-c2y-extensions', language: 'c')
+endif
+
 if cc.get_id() != preferred_compiler
     error(
         'Compiler mismatch: -Dcompiler=' + preferred_compiler + ' but Meson detected "' + cc.get_id() +
@@ -94,6 +98,7 @@ if sdl3.found()
             'src/editor/main.c',
             'src/config.c',
             'src/modules/layout.c',
+            'src/util.c',
         ),
         dependencies: [sdl3, pangocairo, math],
         include_directories: inc_dirs,
@@ -104,10 +109,7 @@ else
 endif
 
 subdir('tests')
-subdir('src/modules/helpers/weather')
-subdir('src/modules/helpers/btc_price')
-subdir('src/modules/helpers/cpu_freq')
-subdir('src/modules/helpers/cpu_power')
+subdir('src/modules/helpers')
 
 # Install config file
 install_data(

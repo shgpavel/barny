@@ -100,18 +100,20 @@ read_config(void)
 }
 
 static int
-read_int_file(const char *path)
+read_int_file(const char *path, int *out)
 {
 	FILE *f = fopen(path, "r");
 	if (!f)
 		return -1;
 
 	int val;
-	if (fscanf(f, "%d", &val) != 1)
-		val = -1;
+	int rc = (fscanf(f, "%d", &val) == 1) ? 0 : -1;
 
 	fclose(f);
-	return val;
+
+	if (rc == 0 && out)
+		*out = val;
+	return rc;
 }
 
 static void
@@ -142,16 +144,16 @@ detect_cpus(void)
 		         "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq",
 		         cpu_id);
 
-		FILE *f = fopen(path, "r");
-		if (!f)
+		if (access(path, R_OK) != 0)
 			continue;
-		fclose(f);
 
 		/* Read max frequency */
 		snprintf(path, sizeof(path),
 		         "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq",
 		         cpu_id);
-		int max_freq         = read_int_file(path);
+		int max_freq = -1;
+		if (read_int_file(path, &max_freq) != 0)
+			max_freq = -1;
 
 		cpu_ids[cpu_count]   = cpu_id;
 		max_freqs[cpu_count] = max_freq;
@@ -250,8 +252,8 @@ read_cpu_freq(int cpu_id)
 	snprintf(path, sizeof(path),
 	         "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", cpu_id);
 
-	int freq_khz = read_int_file(path);
-	if (freq_khz < 0)
+	int freq_khz = 0;
+	if (read_int_file(path, &freq_khz) != 0)
 		return 0.0;
 
 	return freq_khz / 1000000.0; /* Convert kHz to GHz */

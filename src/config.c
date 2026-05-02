@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "barny.h"
+#include "util.h"
 
 void
 barny_config_validate_font(const barny_config_t *config)
@@ -105,6 +106,8 @@ barny_config_defaults(barny_config_t *config)
 	config->modules_left             = NULL;
 	config->modules_center           = NULL;
 	config->modules_right            = NULL;
+	config->crypto_pairs             = NULL;
+	config->crypto_pair_count        = 0;
 
 	/* Sysinfo module defaults */
 	config->sysinfo_freq_combined    = true;
@@ -213,17 +216,7 @@ parse_hex_color(const char *str, double *r, double *g, double *b)
 static char *
 trim(char *str)
 {
-	while (isspace((unsigned char)*str))
-		str++;
-	if (*str == 0)
-		return str;
-
-	char *end = str + strlen(str) - 1;
-	while (end > str && isspace((unsigned char)*end))
-		end--;
-	end[1] = '\0';
-
-	return str;
+	return barny_trim(str);
 }
 
 static bool
@@ -245,6 +238,31 @@ parse_int_clamped(const char *value, int min, int max)
 	if (v > max)
 		return max;
 	return (int)v;
+}
+
+static void
+config_replace_string_array(char ***items, int *count, const char *value)
+{
+	if (items && *items) {
+		size_t prev = (count && *count > 0) ? (size_t)*count : 0;
+		barny_free_string_array(*items, prev);
+		*items = NULL;
+	}
+	if (count) {
+		*count = 0;
+	}
+
+	size_t  new_count = 0;
+	char  **parsed    = barny_parse_csv(value, &new_count);
+	if (items) {
+		*items = parsed;
+	} else {
+		barny_free_string_array(parsed, new_count);
+		return;
+	}
+	if (count) {
+		*count = (int)new_count;
+	}
 }
 
 static void
@@ -316,53 +334,8 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 	} else if (strcmp(key, "workspace_spacing") == 0) {
 		config->workspace_spacing = atoi(value);
 	} else if (strcmp(key, "workspace_names") == 0) {
-		/* Parse comma-separated workspace names */
-		/* Free existing names */
-		if (config->workspace_names) {
-			for (int i = 0; i < config->workspace_name_count; i++) {
-				free(config->workspace_names[i]);
-			}
-			free((void *)config->workspace_names);
-		}
-		config->workspace_names      = NULL;
-		config->workspace_name_count = 0;
-
-		/* Count commas to determine array size */
-		int count                    = 1;
-		for (const char *p = value; *p; p++) {
-			if (*p == ',')
-				count++;
-		}
-
-		config->workspace_names
-		        = (char **)calloc(count + 1, sizeof(char *));
-		if (config->workspace_names) {
-			char *tmp = strdup(value);
-			char *saveptr;
-			char *token = strtok_r(tmp, ",", &saveptr);
-			int   idx   = 0;
-			while (token && idx < count) {
-				/* Trim whitespace */
-				while (isspace((unsigned char)*token))
-					token++;
-				if (*token) {
-					char *end = token + strlen(token) - 1;
-					while (end > token
-					       && isspace((unsigned char)*end))
-						*end-- = '\0';
-				}
-				if (*token) {
-					char *dup = strdup(token);
-					if (dup) {
-						config->workspace_names[idx++]
-						        = dup;
-					}
-				}
-				token = strtok_r(NULL, ",", &saveptr);
-			}
-			config->workspace_name_count = idx;
-			free(tmp);
-		}
+		config_replace_string_array(&config->workspace_names,
+		                            &config->workspace_name_count, value);
 	} else if (strcmp(key, "workspace_shape") == 0) {
 		free(config->workspace_shape);
 		config->workspace_shape = strdup(value);
@@ -401,6 +374,9 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 	} else if (strcmp(key, "modules_right") == 0) {
 		free(config->modules_right);
 		config->modules_right = strdup(value);
+	} else if (strcmp(key, "crypto_pairs") == 0) {
+		config_replace_string_array(&config->crypto_pairs,
+		                            &config->crypto_pair_count, value);
 	} else if (strcmp(key, "tray_icon_size") == 0) {
 		config->tray_icon_size = parse_int_clamped(value, 8, 64);
 	} else if (strcmp(key, "tray_icon_spacing") == 0) {
@@ -576,6 +552,12 @@ barny_config_cleanup(barny_config_t *config)
 	free(config->modules_left);
 	free(config->modules_center);
 	free(config->modules_right);
+	if (config->crypto_pairs) {
+		barny_free_string_array(config->crypto_pairs,
+		                        (size_t)config->crypto_pair_count);
+		config->crypto_pairs      = NULL;
+		config->crypto_pair_count = 0;
+	}
 	free(config->tray_icon_shape);
 	free(config->disk_path);
 	free(config->disk_mode);
@@ -588,10 +570,10 @@ barny_config_cleanup(barny_config_t *config)
 	free(config->battery_path);
 
 	if (config->workspace_names) {
-		for (int i = 0; i < config->workspace_name_count; i++) {
-			free(config->workspace_names[i]);
-		}
-		free((void *)config->workspace_names);
+		barny_free_string_array(config->workspace_names,
+		                        (size_t)config->workspace_name_count);
+		config->workspace_names     = NULL;
+		config->workspace_name_count = 0;
 	}
 }
 

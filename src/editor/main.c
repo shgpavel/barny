@@ -23,6 +23,32 @@
 #define MAX_DETAIL_OPTIONS 8
 #define DETAIL_ROW_H       24.0f
 #define DETAIL_CTRL_W      228.0f
+#define GAP_TOKEN_LEN      32
+
+/*
+ * UI color palette. SDL3 uses 8-bit RGBA. Centralizing the values keeps the
+ * editor's look-and-feel coherent and makes future re-skinning a one-stop
+ * change. Naming mirrors usage rather than raw color so that intent reads
+ * cleanly at the call sites.
+ */
+typedef struct {
+	Uint8 r, g, b, a;
+} ui_color_t;
+
+static const ui_color_t UI_COLOR_PANEL_BG     = { 22, 26, 34, 242 };
+static const ui_color_t UI_COLOR_PANEL_BORDER = { 104, 126, 165, 255 };
+static const ui_color_t UI_COLOR_OVERLAY_DIM  = { 0, 0, 0, 180 };
+static const ui_color_t UI_COLOR_TEXT_MUTED   = { 220, 220, 220, 255 };
+static const ui_color_t UI_COLOR_TEXT_PRIMARY = { 238, 242, 250, 255 };
+static const ui_color_t UI_COLOR_TEXT_LABEL   = { 232, 238, 248, 255 };
+static const ui_color_t UI_COLOR_STATUS_WARN  = { 255, 226, 160, 255 };
+static const ui_color_t UI_COLOR_INFO_AMBER   = { 233, 208, 145, 255 };
+
+static inline void
+ui_set_draw_color(SDL_Renderer *renderer, ui_color_t color)
+{
+	SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+}
 
 typedef struct {
 	SDL_FRect bar;
@@ -521,6 +547,185 @@ out:
 	return rc;
 }
 
+/*
+ * Per-module field initializers. Each function appends the editable bool/enum
+ * fields for a single module to `details` using the shared add_bool/add_enum_*
+ * helpers. Splitting them out keeps `module_details_open` to a table dispatch.
+ */
+static void
+module_details_init_clock(module_details_t *details, barny_config_t *config)
+{
+	static const detail_option_t date_order[] = {
+		{ "dd/mm/yyyy", "0", 0, 0, NULL },
+		{ "mm/dd/yyyy", "1", 1, 0, NULL },
+		{ "yyyy/mm/dd", "2", 2, 0, NULL },
+	};
+	static const detail_option_t date_separator[] = {
+		{ "/", "/", 0, '/', NULL },
+		{ "-", "-", 0, '-', NULL },
+		{ ".", ".", 0, '.', NULL },
+	};
+	module_details_add_bool(details, "Show time", "clock_show_time",
+	                        &config->clock_show_time);
+	module_details_add_bool(details, "Use 24h format", "clock_24h_format",
+	                        &config->clock_24h_format);
+	module_details_add_bool(details, "Show seconds", "clock_show_seconds",
+	                        &config->clock_show_seconds);
+	module_details_add_bool(details, "Show date", "clock_show_date",
+	                        &config->clock_show_date);
+	module_details_add_bool(details, "Show weekday", "clock_show_weekday",
+	                        &config->clock_show_weekday);
+	module_details_add_bool(details, "Show day", "clock_show_day",
+	                        &config->clock_show_day);
+	module_details_add_bool(details, "Show month", "clock_show_month",
+	                        &config->clock_show_month);
+	module_details_add_bool(details, "Show year", "clock_show_year",
+	                        &config->clock_show_year);
+	module_details_add_enum_int(details, "Date order", "clock_date_order",
+	                            &config->clock_date_order, date_order, 3);
+	module_details_add_enum_char(details, "Date separator",
+	                             "clock_date_separator",
+	                             &config->clock_date_separator,
+	                             date_separator, 3);
+}
+
+static void
+module_details_init_workspace(module_details_t *details, barny_config_t *config)
+{
+	static const detail_option_t shape_options[] = {
+		{ "circle", "circle", 0, 0, "circle" },
+		{ "square", "square", 0, 0, "square" },
+	};
+	module_details_add_enum_str(details, "Shape", "workspace_shape",
+	                            &config->workspace_shape, "circle",
+	                            shape_options, 2);
+}
+
+static void
+module_details_init_sysinfo(module_details_t *details, barny_config_t *config)
+{
+	module_details_add_bool(details, "Combined frequency view",
+	                        "sysinfo_freq_combined",
+	                        &config->sysinfo_freq_combined);
+	module_details_add_bool(details, "Show frequency unit",
+	                        "sysinfo_freq_show_unit",
+	                        &config->sysinfo_freq_show_unit);
+	module_details_add_bool(details, "Space after freq label",
+	                        "sysinfo_freq_label_space",
+	                        &config->sysinfo_freq_label_space);
+	module_details_add_bool(details, "Space before GHz",
+	                        "sysinfo_freq_unit_space",
+	                        &config->sysinfo_freq_unit_space);
+	module_details_add_bool(details, "Space before W",
+	                        "sysinfo_power_unit_space",
+	                        &config->sysinfo_power_unit_space);
+	module_details_add_bool(details, "Show temp unit",
+	                        "sysinfo_temp_show_unit",
+	                        &config->sysinfo_temp_show_unit);
+	module_details_add_bool(details, "Space before C",
+	                        "sysinfo_temp_unit_space",
+	                        &config->sysinfo_temp_unit_space);
+}
+
+static void
+module_details_init_tray(module_details_t *details, barny_config_t *config)
+{
+	static const detail_option_t shape_options[] = {
+		{ "circle", "circle", 0, 0, "circle" },
+		{ "square", "square", 0, 0, "square" },
+	};
+	module_details_add_enum_str(details, "Icon shape", "tray_icon_shape",
+	                            &config->tray_icon_shape, "circle",
+	                            shape_options, 2);
+}
+
+static void
+module_details_init_disk(module_details_t *details, barny_config_t *config)
+{
+	static const detail_option_t mode_options[] = {
+		{ "percentage", "percentage", 0, 0, "percentage" },
+		{ "used_total", "used_total", 0, 0, "used_total" },
+		{ "free",       "free",       0, 0, "free"       },
+	};
+	module_details_add_enum_str(details, "Mode", "disk_mode",
+	                            &config->disk_mode, "used_total",
+	                            mode_options, 3);
+	module_details_add_bool(details, "Space before units",
+	                        "disk_unit_space", &config->disk_unit_space);
+}
+
+static void
+module_details_init_ram(module_details_t *details, barny_config_t *config)
+{
+	static const detail_option_t mode_options[] = {
+		{ "percentage", "percentage", 0, 0, "percentage" },
+		{ "used_total", "used_total", 0, 0, "used_total" },
+		{ "used",       "used",       0, 0, "used"       },
+		{ "free",       "free",       0, 0, "free"       },
+	};
+	static const detail_option_t used_method_options[] = {
+		{ "available", "available", 0, 0, "available" },
+		{ "free",      "free",      0, 0, "free"      },
+	};
+	module_details_add_enum_str(details, "Mode", "ram_mode",
+	                            &config->ram_mode, "used_total",
+	                            mode_options, 4);
+	module_details_add_enum_str(details, "Used method", "ram_used_method",
+	                            &config->ram_used_method, "available",
+	                            used_method_options, 2);
+	module_details_add_bool(details, "Space before units", "ram_unit_space",
+	                        &config->ram_unit_space);
+}
+
+static void
+module_details_init_network(module_details_t *details, barny_config_t *config)
+{
+	module_details_add_bool(details, "Show IP", "network_show_ip",
+	                        &config->network_show_ip);
+	module_details_add_bool(details, "Show interface",
+	                        "network_show_interface",
+	                        &config->network_show_interface);
+	module_details_add_bool(details, "Prefer IPv4", "network_prefer_ipv4",
+	                        &config->network_prefer_ipv4);
+}
+
+static void
+module_details_init_fileread(module_details_t *details, barny_config_t *config)
+{
+	/* Text/number fields are currently read-only in this editor. */
+	(void)details;
+	(void)config;
+}
+
+static void
+module_details_init_battery(module_details_t *details, barny_config_t *config)
+{
+	module_details_add_bool(details, "Show charging status",
+	                        "battery_show_status",
+	                        &config->battery_show_status);
+	module_details_add_bool(details, "Space before percent",
+	                        "battery_unit_space",
+	                        &config->battery_unit_space);
+}
+
+typedef void (*module_opener_fn)(module_details_t *details,
+                                 barny_config_t   *config);
+
+static const struct {
+	const char       *name;
+	module_opener_fn  open;
+} module_openers[] = {
+	{ "clock",     module_details_init_clock     },
+	{ "workspace", module_details_init_workspace },
+	{ "sysinfo",   module_details_init_sysinfo   },
+	{ "tray",      module_details_init_tray      },
+	{ "disk",      module_details_init_disk      },
+	{ "ram",       module_details_init_ram       },
+	{ "network",   module_details_init_network   },
+	{ "fileread",  module_details_init_fileread  },
+	{ "battery",   module_details_init_battery   },
+};
+
 static void
 module_details_open(module_details_t *details, barny_config_t *config,
                     const char *module_name)
@@ -533,133 +738,12 @@ module_details_open(module_details_t *details, barny_config_t *config,
 	details->open = true;
 	snprintf(details->module, sizeof(details->module), "%s", module_name);
 
-	if (strcmp(module_name, "clock") == 0) {
-		const detail_option_t date_order[] = {
-			{ "dd/mm/yyyy", "0", 0, 0, NULL },
-			{ "mm/dd/yyyy", "1", 1, 0, NULL },
-			{ "yyyy/mm/dd", "2", 2, 0, NULL },
-		};
-		const detail_option_t date_separator[] = {
-			{ "/", "/", 0, '/', NULL },
-			{ "-", "-", 0, '-', NULL },
-			{ ".", ".", 0, '.', NULL },
-		};
-		module_details_add_bool(details, "Show time", "clock_show_time",
-		                        &config->clock_show_time);
-		module_details_add_bool(details, "Use 24h format",
-		                        "clock_24h_format",
-		                        &config->clock_24h_format);
-		module_details_add_bool(details, "Show seconds",
-		                        "clock_show_seconds",
-		                        &config->clock_show_seconds);
-		module_details_add_bool(details, "Show date", "clock_show_date",
-		                        &config->clock_show_date);
-		module_details_add_bool(details, "Show weekday",
-		                        "clock_show_weekday",
-		                        &config->clock_show_weekday);
-		module_details_add_bool(details, "Show day", "clock_show_day",
-		                        &config->clock_show_day);
-		module_details_add_bool(details, "Show month", "clock_show_month",
-		                        &config->clock_show_month);
-		module_details_add_bool(details, "Show year", "clock_show_year",
-		                        &config->clock_show_year);
-		module_details_add_enum_int(details, "Date order",
-		                            "clock_date_order",
-		                            &config->clock_date_order, date_order,
-		                            3);
-		module_details_add_enum_char(details, "Date separator",
-		                             "clock_date_separator",
-		                             &config->clock_date_separator,
-		                             date_separator, 3);
-	} else if (strcmp(module_name, "workspace") == 0) {
-		const detail_option_t shape_options[] = {
-			{ "circle", "circle", 0, 0, "circle" },
-			{ "square", "square", 0, 0, "square" },
-		};
-		module_details_add_enum_str(details, "Shape", "workspace_shape",
-		                            &config->workspace_shape, "circle",
-		                            shape_options, 2);
-	} else if (strcmp(module_name, "sysinfo") == 0) {
-		module_details_add_bool(details, "Combined frequency view",
-		                        "sysinfo_freq_combined",
-		                        &config->sysinfo_freq_combined);
-		module_details_add_bool(details, "Show frequency unit",
-		                        "sysinfo_freq_show_unit",
-		                        &config->sysinfo_freq_show_unit);
-		module_details_add_bool(details, "Space after freq label",
-		                        "sysinfo_freq_label_space",
-		                        &config->sysinfo_freq_label_space);
-		module_details_add_bool(details, "Space before GHz",
-		                        "sysinfo_freq_unit_space",
-		                        &config->sysinfo_freq_unit_space);
-		module_details_add_bool(details, "Space before W",
-		                        "sysinfo_power_unit_space",
-		                        &config->sysinfo_power_unit_space);
-		module_details_add_bool(details, "Show temp unit",
-		                        "sysinfo_temp_show_unit",
-		                        &config->sysinfo_temp_show_unit);
-		module_details_add_bool(details, "Space before C",
-		                        "sysinfo_temp_unit_space",
-		                        &config->sysinfo_temp_unit_space);
-	} else if (strcmp(module_name, "tray") == 0) {
-		const detail_option_t shape_options[] = {
-			{ "circle", "circle", 0, 0, "circle" },
-			{ "square", "square", 0, 0, "square" },
-		};
-		module_details_add_enum_str(details, "Icon shape",
-		                            "tray_icon_shape",
-		                            &config->tray_icon_shape, "circle",
-		                            shape_options, 2);
-	} else if (strcmp(module_name, "disk") == 0) {
-		const detail_option_t mode_options[] = {
-			{ "percentage", "percentage", 0, 0, "percentage" },
-			{ "used_total", "used_total", 0, 0, "used_total" },
-			{ "free",       "free",       0, 0, "free"       },
-		};
-		module_details_add_enum_str(details, "Mode", "disk_mode",
-		                            &config->disk_mode, "used_total",
-		                            mode_options, 3);
-		module_details_add_bool(details, "Space before units",
-		                        "disk_unit_space",
-		                        &config->disk_unit_space);
-	} else if (strcmp(module_name, "ram") == 0) {
-		const detail_option_t mode_options[] = {
-			{ "percentage", "percentage", 0, 0, "percentage" },
-			{ "used_total", "used_total", 0, 0, "used_total" },
-			{ "used",       "used",       0, 0, "used"       },
-			{ "free",       "free",       0, 0, "free"       },
-		};
-		const detail_option_t used_method_options[] = {
-			{ "available", "available", 0, 0, "available" },
-			{ "free",      "free",      0, 0, "free"      },
-		};
-		module_details_add_enum_str(details, "Mode", "ram_mode",
-		                            &config->ram_mode, "used_total",
-		                            mode_options, 4);
-		module_details_add_enum_str(details, "Used method",
-		                            "ram_used_method",
-		                            &config->ram_used_method, "available",
-		                            used_method_options, 2);
-		module_details_add_bool(details, "Space before units",
-		                        "ram_unit_space", &config->ram_unit_space);
-	} else if (strcmp(module_name, "network") == 0) {
-		module_details_add_bool(details, "Show IP", "network_show_ip",
-		                        &config->network_show_ip);
-		module_details_add_bool(details, "Show interface",
-		                        "network_show_interface",
-		                        &config->network_show_interface);
-		module_details_add_bool(details, "Prefer IPv4",
-		                        "network_prefer_ipv4",
-		                        &config->network_prefer_ipv4);
-	} else if (strcmp(module_name, "fileread") == 0) {
-		/* Text/number fields are currently read-only in this editor. */
-	} else if (strcmp(module_name, "battery") == 0) {
-		module_details_add_bool(details, "Show charging status",
-		                        "battery_show_status",
-		                        &config->battery_show_status);
-		module_details_add_bool(details, "Space before percent",
-		                        "battery_unit_space",
-		                        &config->battery_unit_space);
+	for (size_t i = 0;
+	     i < sizeof(module_openers) / sizeof(module_openers[0]); i++) {
+		if (strcmp(module_name, module_openers[i].name) == 0) {
+			module_openers[i].open(details, config);
+			return;
+		}
 	}
 }
 
@@ -1138,11 +1222,12 @@ save_layout(const char *config_path, const bar_layout_t *bar, int spacing)
 		int lead_units
 		        = (int)lroundf(bar->items[0].x_rel / (float)spacing);
 		if (lead_units > 0) {
-			gap_tokens[gap_count] = malloc(32);
+			gap_tokens[gap_count] = malloc(GAP_TOKEN_LEN);
 			if (!gap_tokens[gap_count]) {
 				goto out;
 			}
-			snprintf(gap_tokens[gap_count], 32, "gap:%d", lead_units);
+			snprintf(gap_tokens[gap_count], GAP_TOKEN_LEN,
+			         "gap:%d", lead_units);
 			tokens[token_count++] = gap_tokens[gap_count++];
 		}
 	}
@@ -1162,11 +1247,12 @@ save_layout(const char *config_path, const bar_layout_t *bar, int spacing)
 		int   units  = (int)lroundf(extra / (float)spacing);
 
 		if (units > 0) {
-			gap_tokens[gap_count] = malloc(32);
+			gap_tokens[gap_count] = malloc(GAP_TOKEN_LEN);
 			if (!gap_tokens[gap_count]) {
 				goto out;
 			}
-			snprintf(gap_tokens[gap_count], 32, "gap:%d", units);
+			snprintf(gap_tokens[gap_count], GAP_TOKEN_LEN,
+			         "gap:%d", units);
 			tokens[token_count++] = gap_tokens[gap_count++];
 		}
 	}
@@ -1205,7 +1291,7 @@ draw_labeled_zone(SDL_Renderer *renderer, const SDL_FRect *rect, const char *lab
 	SDL_RenderFillRect(renderer, rect);
 	SDL_SetRenderDrawColor(renderer, r, g, b, 180);
 	SDL_RenderRect(renderer, rect);
-	SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
+	ui_set_draw_color(renderer, UI_COLOR_TEXT_MUTED);
 	SDL_RenderDebugText(renderer, rect->x + 6.0f, rect->y + 6.0f, label);
 }
 
@@ -1360,124 +1446,84 @@ module_details_handle_click(module_details_t *details, SDL_Renderer *renderer,
 	return DETAIL_CLICK_NONE;
 }
 
+/*
+ * Render a boolean checkbox row inside the details panel. The row covers the
+ * "control_rect" already laid out by the caller; this helper does not advance
+ * the y cursor (the caller does).
+ */
 static void
-draw_module_details(SDL_Renderer *renderer, module_details_t *details)
+draw_checkbox(SDL_Renderer *renderer, const detail_field_t *field, float text_y)
 {
-	SDL_FRect bg;
-	float     y;
+	SDL_FRect box = { field->control_rect.x + 6.0f,
+		          field->control_rect.y + 2.0f, 14.0f, 14.0f };
+	bool      checked = field->bool_ptr && *field->bool_ptr;
 
-	if (!details || !details->open) {
-		return;
+	SDL_SetRenderDrawColor(renderer, 94, 102, 118, 255);
+	SDL_RenderRect(renderer, &box);
+	if (checked) {
+		SDL_FRect fill = { box.x + 3.0f, box.y + 3.0f, box.w - 6.0f,
+			           box.h - 6.0f };
+		SDL_SetRenderDrawColor(renderer, 112, 180, 126, 255);
+		SDL_RenderFillRect(renderer, &fill);
+	}
+	SDL_SetRenderDrawColor(renderer, 210, 220, 236, 255);
+	SDL_RenderDebugText(renderer, field->control_rect.x + 28.0f, text_y,
+	                    checked ? "true" : "false");
+}
+
+/*
+ * Render the closed dropdown control plus, when expanded, the popup list of
+ * options. Returns the y offset *after* the control row and any popup, so the
+ * caller can continue laying out subsequent fields.
+ */
+static float
+draw_dropdown_field(SDL_Renderer *renderer, detail_field_t *field, float y)
+{
+	SDL_SetRenderDrawColor(renderer, 46, 54, 66, 255);
+	SDL_RenderFillRect(renderer, &field->control_rect);
+	SDL_SetRenderDrawColor(renderer, 110, 122, 141, 255);
+	SDL_RenderRect(renderer, &field->control_rect);
+	SDL_SetRenderDrawColor(renderer, 220, 226, 236, 255);
+	SDL_RenderDebugText(renderer, field->control_rect.x + 6.0f, y + 6.0f,
+	                    detail_field_selected_label(field));
+	SDL_RenderDebugText(renderer,
+	                    field->control_rect.x + field->control_rect.w
+	                            - 14.0f,
+	                    y + 6.0f, "v");
+
+	y += DETAIL_ROW_H;
+	if (!field->dropdown_open) {
+		return y;
 	}
 
-	if (!module_details_compute_panel_rect(renderer, &details->panel_rect)) {
-		return;
+	for (int o = 0; o < field->option_count; o++) {
+		field->option_rects[o].x = field->control_rect.x;
+		field->option_rects[o].y = y;
+		field->option_rects[o].w = field->control_rect.w;
+		field->option_rects[o].h = 18.0f;
+
+		SDL_SetRenderDrawColor(renderer, 38, 45, 55, 255);
+		SDL_RenderFillRect(renderer, &field->option_rects[o]);
+		SDL_SetRenderDrawColor(renderer, 98, 112, 130, 255);
+		SDL_RenderRect(renderer, &field->option_rects[o]);
+		SDL_SetRenderDrawColor(renderer, 219, 226, 238, 255);
+		SDL_RenderDebugText(renderer, field->option_rects[o].x + 6.0f,
+		                    y + 6.0f, field->options[o].label);
+
+		y += 19.0f;
 	}
+	y += 2.0f;
+	return y;
+}
 
-	bg.x = 0.0f;
-	bg.y = 0.0f;
-	bg.w = details->panel_rect.x * 2.0f + details->panel_rect.w;
-	bg.h = details->panel_rect.y * 2.0f + details->panel_rect.h;
-	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
-	SDL_RenderFillRect(renderer, &bg);
-
-	SDL_SetRenderDrawColor(renderer, 22, 26, 34, 242);
-	SDL_RenderFillRect(renderer, &details->panel_rect);
-	SDL_SetRenderDrawColor(renderer, 104, 126, 165, 255);
-	SDL_RenderRect(renderer, &details->panel_rect);
-
-	SDL_SetRenderDrawColor(renderer, 238, 242, 250, 255);
-	SDL_RenderDebugTextFormat(renderer, details->panel_rect.x + 14.0f,
-	                          details->panel_rect.y + 14.0f,
-	                          "Module settings: %s", details->module);
-	SDL_RenderDebugText(
-	        renderer, details->panel_rect.x + 14.0f,
-	        details->panel_rect.y + 28.0f,
-	        "Checkboxes for true/false, dropdowns for multi-choice.");
-
-	y = details->panel_rect.y + 48.0f;
-	for (int i = 0; i < details->field_count; i++) {
-		detail_field_t *field  = &details->fields[i];
-		float           ctrl_x = details->panel_rect.x
-		               + details->panel_rect.w
-		               - DETAIL_CTRL_W
-		               - 16.0f;
-
-		memset(field->option_rects, 0, sizeof(field->option_rects));
-		field->control_rect.x = ctrl_x;
-		field->control_rect.y = y + 2.0f;
-		field->control_rect.w = DETAIL_CTRL_W;
-		field->control_rect.h = 18.0f;
-
-		if (field->control_rect.y + field->control_rect.h
-		    > details->panel_rect.y + details->panel_rect.h - 56.0f) {
-			break;
-		}
-
-		SDL_SetRenderDrawColor(renderer, 232, 238, 248, 255);
-		SDL_RenderDebugText(renderer, details->panel_rect.x + 14.0f,
-		                    y + 6.0f, field->label);
-
-		if (field->kind == DETAIL_FIELD_BOOL) {
-			SDL_FRect box = { field->control_rect.x + 6.0f,
-				          field->control_rect.y + 2.0f, 14.0f,
-				          14.0f };
-			SDL_SetRenderDrawColor(renderer, 94, 102, 118, 255);
-			SDL_RenderRect(renderer, &box);
-			if (field->bool_ptr && *field->bool_ptr) {
-				SDL_FRect fill = { box.x + 3.0f, box.y + 3.0f,
-					           box.w - 6.0f, box.h - 6.0f };
-				SDL_SetRenderDrawColor(renderer, 112, 180, 126,
-				                       255);
-				SDL_RenderFillRect(renderer, &fill);
-			}
-			SDL_SetRenderDrawColor(renderer, 210, 220, 236, 255);
-			SDL_RenderDebugText(
-			        renderer, field->control_rect.x + 28.0f, y + 6.0f,
-			        field->bool_ptr && *field->bool_ptr ? "true" :
-			                                              "false");
-			y += DETAIL_ROW_H;
-			continue;
-		}
-
-		SDL_SetRenderDrawColor(renderer, 46, 54, 66, 255);
-		SDL_RenderFillRect(renderer, &field->control_rect);
-		SDL_SetRenderDrawColor(renderer, 110, 122, 141, 255);
-		SDL_RenderRect(renderer, &field->control_rect);
-		SDL_SetRenderDrawColor(renderer, 220, 226, 236, 255);
-		SDL_RenderDebugText(renderer, field->control_rect.x + 6.0f,
-		                    y + 6.0f, detail_field_selected_label(field));
-		SDL_RenderDebugText(
-		        renderer,
-		        field->control_rect.x + field->control_rect.w - 14.0f,
-		        y + 6.0f, "v");
-
-		y += DETAIL_ROW_H;
-		if (field->dropdown_open) {
-			for (int o = 0; o < field->option_count; o++) {
-				field->option_rects[o].x = field->control_rect.x;
-				field->option_rects[o].y = y;
-				field->option_rects[o].w = field->control_rect.w;
-				field->option_rects[o].h = 18.0f;
-
-				SDL_SetRenderDrawColor(renderer, 38, 45, 55, 255);
-				SDL_RenderFillRect(renderer,
-				                   &field->option_rects[o]);
-				SDL_SetRenderDrawColor(renderer, 98, 112, 130,
-				                       255);
-				SDL_RenderRect(renderer, &field->option_rects[o]);
-				SDL_SetRenderDrawColor(renderer, 219, 226, 238,
-				                       255);
-				SDL_RenderDebugText(
-				        renderer, field->option_rects[o].x + 6.0f,
-				        y + 6.0f, field->options[o].label);
-
-				y += 19.0f;
-			}
-			y += 2.0f;
-		}
-	}
-
+/*
+ * Lay out and draw the "Save module settings" / "Close" buttons plus the
+ * keyboard hint string at the bottom of the panel. Updates save_rect /
+ * close_rect on `details` so click handling stays in sync.
+ */
+static void
+draw_detail_buttons(SDL_Renderer *renderer, module_details_t *details)
+{
 	details->save_rect.x = details->panel_rect.x + 14.0f;
 	details->save_rect.y
 	        = details->panel_rect.y + details->panel_rect.h - 30.0f;
@@ -1509,9 +1555,79 @@ draw_module_details(SDL_Renderer *renderer, module_details_t *details)
 	SDL_RenderDebugText(renderer, details->panel_rect.x + 206.0f,
 	                    details->panel_rect.y + details->panel_rect.h - 16.0f,
 	                    "q/ESC close  |  w save");
+}
+
+static void
+draw_module_details(SDL_Renderer *renderer, module_details_t *details)
+{
+	SDL_FRect bg;
+	float     y;
+
+	if (!details || !details->open) {
+		return;
+	}
+
+	if (!module_details_compute_panel_rect(renderer, &details->panel_rect)) {
+		return;
+	}
+
+	bg.x = 0.0f;
+	bg.y = 0.0f;
+	bg.w = details->panel_rect.x * 2.0f + details->panel_rect.w;
+	bg.h = details->panel_rect.y * 2.0f + details->panel_rect.h;
+	ui_set_draw_color(renderer, UI_COLOR_OVERLAY_DIM);
+	SDL_RenderFillRect(renderer, &bg);
+
+	ui_set_draw_color(renderer, UI_COLOR_PANEL_BG);
+	SDL_RenderFillRect(renderer, &details->panel_rect);
+	ui_set_draw_color(renderer, UI_COLOR_PANEL_BORDER);
+	SDL_RenderRect(renderer, &details->panel_rect);
+
+	ui_set_draw_color(renderer, UI_COLOR_TEXT_PRIMARY);
+	SDL_RenderDebugTextFormat(renderer, details->panel_rect.x + 14.0f,
+	                          details->panel_rect.y + 14.0f,
+	                          "Module settings: %s", details->module);
+	SDL_RenderDebugText(
+	        renderer, details->panel_rect.x + 14.0f,
+	        details->panel_rect.y + 28.0f,
+	        "Checkboxes for true/false, dropdowns for multi-choice.");
+
+	y = details->panel_rect.y + 48.0f;
+	for (int i = 0; i < details->field_count; i++) {
+		detail_field_t *field  = &details->fields[i];
+		float           ctrl_x = details->panel_rect.x
+		               + details->panel_rect.w
+		               - DETAIL_CTRL_W
+		               - 16.0f;
+
+		memset(field->option_rects, 0, sizeof(field->option_rects));
+		field->control_rect.x = ctrl_x;
+		field->control_rect.y = y + 2.0f;
+		field->control_rect.w = DETAIL_CTRL_W;
+		field->control_rect.h = 18.0f;
+
+		if (field->control_rect.y + field->control_rect.h
+		    > details->panel_rect.y + details->panel_rect.h - 56.0f) {
+			break;
+		}
+
+		ui_set_draw_color(renderer, UI_COLOR_TEXT_LABEL);
+		SDL_RenderDebugText(renderer, details->panel_rect.x + 14.0f,
+		                    y + 6.0f, field->label);
+
+		if (field->kind == DETAIL_FIELD_BOOL) {
+			draw_checkbox(renderer, field, y + 6.0f);
+			y += DETAIL_ROW_H;
+			continue;
+		}
+
+		y = draw_dropdown_field(renderer, field, y);
+	}
+
+	draw_detail_buttons(renderer, details);
 
 	if (details->field_count == 0) {
-		SDL_SetRenderDrawColor(renderer, 233, 208, 145, 255);
+		ui_set_draw_color(renderer, UI_COLOR_INFO_AMBER);
 		SDL_RenderDebugText(
 		        renderer, details->panel_rect.x + 14.0f,
 		        details->panel_rect.y + 54.0f,
@@ -1570,7 +1686,7 @@ draw_frame(SDL_Renderer *renderer, const ui_regions_t *ui, const block_map_t *ma
 		draw_block(renderer, &ghost);
 	}
 
-	SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
+	ui_set_draw_color(renderer, UI_COLOR_TEXT_MUTED);
 	SDL_RenderDebugText(
 	        renderer, 32.0f, 20.0f,
 	        "Barny Layout Editor  |  Drag modules or click for details");
@@ -1584,7 +1700,7 @@ draw_frame(SDL_Renderer *renderer, const ui_regions_t *ui, const block_map_t *ma
 	SDL_RenderDebugTextFormat(renderer, 32.0f, ui->pool.y + ui->pool.h + 10.0f,
 	                          "Config: %s", config_path);
 	if (show_status) {
-		SDL_SetRenderDrawColor(renderer, 255, 226, 160, 255);
+		ui_set_draw_color(renderer, UI_COLOR_STATUS_WARN);
 		SDL_RenderDebugText(renderer, 32.0f,
 		                    ui->pool.y + ui->pool.h + 24.0f, status);
 	}

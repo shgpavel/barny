@@ -2,6 +2,7 @@
 barny_sources = files(
     'config.c',
     'main.c',
+    'util.c',
 )
 
 # Include subdirectories

@@ -6,18 +6,15 @@
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
 
+#include "helper_util.h"
+
 #define UPDATE_INTERVAL 600 /* 10 minutes */
 #define OUTPUT_PATH     "/opt/barny/modules/weather"
 #define OUTPUT_TMP_PATH "/opt/barny/modules/weather.tmp"
 #define API_KEY_PATH    "/opt/barny/modules/weather_api_key"
+#define HTTP_TIMEOUT    30L
 
 static volatile int running = 1;
-
-/* Buffer for accumulating curl response */
-struct response_buf {
-	char  *data;
-	size_t size;
-};
 
 static void
 signal_handler(int sig)
@@ -26,56 +23,10 @@ signal_handler(int sig)
 	running = 0;
 }
 
-static size_t
-write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
-{
-	size_t               realsize = size * nmemb;
-	struct response_buf *buf      = userdata;
-
-	char *new_data = realloc(buf->data, buf->size + realsize + 1);
-	if (!new_data)
-		return 0;
-
-	buf->data = new_data;
-	memcpy(buf->data + buf->size, ptr, realsize);
-	buf->size            += realsize;
-	buf->data[buf->size]  = '\0';
-
-	return realsize;
-}
-
-static cJSON *
-fetch_json(const char *url)
-{
-	CURL *curl = curl_easy_init();
-	if (!curl)
-		return NULL;
-
-	struct response_buf buf = { .data = NULL, .size = 0 };
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-
-	CURLcode res = curl_easy_perform(curl);
-	curl_easy_cleanup(curl);
-
-	if (res != CURLE_OK) {
-		fprintf(stderr, "curl failed: %s\n", curl_easy_strerror(res));
-		free(buf.data);
-		return NULL;
-	}
-
-	cJSON *json = cJSON_Parse(buf.data);
-	free(buf.data);
-	return json;
-}
-
 static int
 get_location(double *lat, double *lon)
 {
-	cJSON *json = fetch_json("https://ipinfo.io/json");
+	cJSON *json = helper_fetch_json("https://ipinfo.io/json", HTTP_TIMEOUT);
 	if (!json)
 		return -1;
 
@@ -113,7 +64,7 @@ get_weather(double lat, double lon, const char *api_key, double *temp,
 	        "https://api.openweathermap.org/data/2.5/weather?lat=%lg&lon=%lg&appid=%s&units=metric",
 	        lat, lon, api_key);
 
-	cJSON *json = fetch_json(url);
+	cJSON *json = helper_fetch_json(url, HTTP_TIMEOUT);
 	if (!json)
 		return -1;
 

@@ -4,6 +4,7 @@
 #include <ctype.h>
 
 #include "barny.h"
+#include "util.h"
 
 typedef struct {
 	const char      *name;
@@ -81,26 +82,6 @@ slot_array_for_position(barny_module_layout_t *layout, barny_position_t position
 	default:
 		return NULL;
 	}
-}
-
-static char *
-trim_ws(char *str)
-{
-	while (*str && isspace((unsigned char)*str)) {
-		str++;
-	}
-
-	if (*str == '\0') {
-		return str;
-	}
-
-	char *end = str + strlen(str) - 1;
-	while (end > str && isspace((unsigned char)*end)) {
-		*end = '\0';
-		end--;
-	}
-
-	return str;
 }
 
 static void
@@ -295,37 +276,30 @@ parse_csv_slot(barny_module_layout_t *layout, barny_position_t position,
 		return;
 	}
 
-	char *tmp = strdup(csv);
-	if (!tmp) {
+	size_t  count = 0;
+	char  **items = barny_parse_csv(csv, &count);
+	if (!items) {
 		return;
 	}
 
-	char *saveptr = NULL;
-	char *token   = strtok_r(tmp, ",", &saveptr);
-	while (token) {
-		const char *name = trim_ws(token);
-		bool        is_gap;
-		if (*name) {
-			is_gap = barny_module_layout_gap_units(name) > 0;
-			if (!barny_module_catalog_has(name)) {
+	for (size_t i = 0; i < count; i++) {
+		const char *name   = items[i];
+		bool        is_gap = barny_module_layout_gap_units(name) > 0;
+		if (!barny_module_catalog_has(name)) {
+			fprintf(stderr,
+			        "barny: ignoring unknown module in layout: %s\n",
+			        name);
+		} else if (barny_module_layout_insert(layout, position, name, -1)
+		           < 0) {
+			if (!is_gap) {
 				fprintf(stderr,
-				        "barny: ignoring unknown module in layout: %s\n",
+				        "barny: ignoring duplicate module in layout: %s\n",
 				        name);
-			} else if (barny_module_layout_insert(layout, position,
-			                                      name, -1)
-			           < 0) {
-				if (!is_gap) {
-					fprintf(stderr,
-					        "barny: ignoring duplicate module in layout: %s\n",
-					        name);
-				}
 			}
 		}
-
-		token = strtok_r(NULL, ",", &saveptr);
 	}
 
-	free(tmp);
+	barny_free_string_array(items, count);
 }
 
 void
