@@ -34,7 +34,9 @@ struct barny_module {
 	void  (*render)(barny_module_t *self, cairo_t *cr, int x, int y, int w,
                        int h);
 	void  (*on_click)(barny_module_t *self, int button, int x, int y);
+	void  (*on_hover)(barny_module_t *self, bool hovering, int x, int y);
 	void *data;
+	int   render_x; /* X position of last render; <0 means not rendered this frame */
 	int   width;
 	int   height;
 	bool  dirty;
@@ -79,6 +81,10 @@ struct barny_config {
 	char *modules_left;   /* CSV list of module IDs for left section */
 	char *modules_center; /* CSV list of module IDs for center section */
 	char *modules_right;  /* CSV list of module IDs for right section */
+
+	/* Crypto module */
+	char **crypto_pairs;    /* CSV list of market pairs, e.g. BTC-USDT-SWAP */
+	int    crypto_pair_count;
 
 	/* Sysinfo module */
 	bool sysinfo_freq_combined; /* true = combined avg, false = "P: X.XX E: X.XX" */
@@ -215,6 +221,9 @@ struct barny_state {
 	/* Currently focused output for pointer events */
 	barny_output_t             *pointer_output;
 	double                      pointer_x, pointer_y;
+
+	/* Hover tracking */
+	barny_module_t             *hover_module;
 
 	/* Touchpad swipe accumulator */
 	uint32_t                    axis_source;

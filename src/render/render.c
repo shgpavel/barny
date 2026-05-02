@@ -141,6 +141,15 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 	int            width  = output->width;
 	int            height = output->height;
 
+	/* Reset render_x for all modules. Sections below will write the actual x
+	 * for visible modules; anything not rendered this frame stays at -1 so
+	 * pointer hit-testing won't pick up stale or zero-initialized values. */
+	for (int i = 0; i < state->module_count; i++) {
+		if (state->modules[i]) {
+			state->modules[i]->render_x = -1;
+		}
+	}
+
 	/* Calculate module positions */
 	int            left_x   = 16;
 	int            right_x  = width - 16;
@@ -208,6 +217,7 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 			draw_x = max_x;
 		}
 
+		mod->render_x = draw_x;
 		cairo_save(cr);
 		if (mod->render) {
 			mod->render(mod, cr, draw_x, y, mod_width, mod_height);
@@ -240,6 +250,7 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 			draw_x = max_x;
 		}
 
+		mod->render_x = draw_x;
 		cairo_save(cr);
 		if (mod->render) {
 			mod->render(mod, cr, draw_x, y, mod_width, mod_height);
@@ -269,6 +280,7 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 			draw_x = max_x;
 		}
 
+		mod->render_x = draw_x;
 		cairo_save(cr);
 		if (mod->render) {
 			mod->render(mod, cr, draw_x, y, mod_width, mod_height);

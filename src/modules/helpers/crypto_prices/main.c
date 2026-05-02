@@ -90,6 +90,9 @@ set_pairs_from_csv(const char *value)
 		return;
 	}
 
+	if (token_count > 64)
+		token_count = 64;
+
 	pairs = calloc(token_count, sizeof(*pairs));
 	if (!pairs) {
 		helper_free_string_array(tokens, token_count);
@@ -248,7 +251,11 @@ process_message(const char *data, size_t len)
 		return;
 	}
 
-	first   = cJSON_GetArrayItem(data_arr, 0);
+	first = cJSON_GetArrayItem(data_arr, 0);
+	if (!cJSON_IsObject(first)) {
+		cJSON_Delete(json);
+		return;
+	}
 	inst_id = cJSON_GetObjectItem(first, "instId");
 	mark_px = cJSON_GetObjectItem(first, "markPx");
 	if (!inst_id || !inst_id->valuestring || !mark_px
@@ -352,6 +359,13 @@ create_websocket(void)
 
 	curl_easy_setopt(curl, CURLOPT_URL, WS_URL);
 	curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 2L);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+#ifdef CURLOPT_PROTOCOLS_STR
+	curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "wss");
+#endif
 
 	res = curl_easy_perform(curl);
 	if (res != CURLE_OK) {

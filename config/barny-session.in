@@ -2,7 +2,7 @@
 # barny-session — manage barny and helpers via supervise-daemon or plain processes
 # Usage: barny-session {start|stop|status}
 
-BARNY_SERVICES="barny barny-weather barny-btc-price barny-cpu-freq barny-cpu-power"
+BARNY_SERVICES="barny barny-weather barny-crypto-prices barny-cpu-freq barny-cpu-power"
 RESPAWN_DELAY_BARNY=2
 RESPAWN_DELAY_HELPER=5
 

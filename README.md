@@ -96,7 +96,7 @@ Barny uses external data provider modules that run as systemd user services:
 | Module | Service | Data File | Description |
 |--------|---------|-----------|-------------|
 | Weather | `barny-weather` | `/opt/barny/modules/weather` | Weather data (requires API key) |
-| BTC Price | `barny-btc-price` | `/opt/barny/modules/btc_price` | Bitcoin price from OKX |
+| Crypto Prices | `barny-crypto-prices` | `/opt/barny/modules/*_price` | Configurable OKX mark prices for the crypto module |
 | CPU Freq | `barny-cpu-freq` | `/opt/barny/modules/cpu_freq` | CPU frequency (P/E cores) |
 | CPU Power | `barny-cpu-power` | `/opt/barny/modules/cpu_power` | CPU power consumption |
 
@@ -148,6 +148,14 @@ exact selection/order and allows an empty bar.
 You can add proportional spacer tokens in these CSV lists:
 - `gap:N` adds extra spacing of `N * module_spacing`
 - Example: `modules_left = workspace, gap:3, clock`
+
+### Crypto Module
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `crypto_pairs` | `BTC-USDT-SWAP, ETH-USDT-SWAP, SOL-USDT-SWAP, XRP-USDT-SWAP, ADA-USDT-SWAP, DOGE-USDT-SWAP, DOT-USDT-SWAP` | CSV list of OKX markets tracked by `barny-crypto-prices`; the first pair is shown in the bar and the rest appear in the hover popup |
+
+Note: the shipped `config/barny.conf` sets a different example list (BTC, ETH, SOL, BZ, ADA, POL, OP, TON, TRX); the default above is the built-in fallback used when no config is provided.
 
 ### Graphical Layout Editor
 

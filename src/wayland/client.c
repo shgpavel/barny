@@ -124,6 +124,14 @@ pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
 	(void)pointer;
 	(void)serial;
 	(void)surface;
+
+	/* Clear hover state */
+	if (state->hover_module && state->hover_module->on_hover) {
+		state->hover_module->on_hover(state->hover_module, false, 0,
+		                              0);
+	}
+	state->hover_module = NULL;
+
 	state->pointer_output = NULL;
 }
 
@@ -136,6 +144,34 @@ pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time,
 	(void)time;
 	state->pointer_x = wl_fixed_to_double(sx);
 	state->pointer_y = wl_fixed_to_double(sy);
+
+	/* Hover detection: find module under pointer */
+	int             mx      = (int)state->pointer_x;
+	barny_module_t *hovered = NULL;
+
+	for (int i = 0; i < state->module_count; i++) {
+		barny_module_t *mod = state->modules[i];
+		if (mod && mod->on_hover && mod->width > 0
+		    && mod->render_x >= 0
+		    && mx >= mod->render_x
+		    && mx < mod->render_x + mod->width) {
+			hovered = mod;
+			break;
+		}
+	}
+
+	if (hovered != state->hover_module) {
+		if (state->hover_module && state->hover_module->on_hover) {
+			state->hover_module->on_hover(state->hover_module,
+			                              false, mx,
+			                              (int)state->pointer_y);
+		}
+		if (hovered) {
+			hovered->on_hover(hovered, true, mx,
+			                  (int)state->pointer_y);
+		}
+		state->hover_module = hovered;
+	}
 }
 
 static void

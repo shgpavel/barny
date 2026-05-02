@@ -102,6 +102,14 @@ test_config_defaults(void)
 		ASSERT_NULL(config.wallpaper_path);
 	}
 
+	TEST("crypto pairs default to unset")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		ASSERT_NULL(config.crypto_pairs);
+		ASSERT_EQ_INT(0, config.crypto_pair_count);
+	}
+
 	/* Clock module defaults */
 	TEST("clock default show_time is true")
 	{
@@ -919,6 +927,35 @@ test_config_edge_cases(void)
 		ASSERT_EQ_STR("single", config.workspace_names[0]);
 		free(config.workspace_names[0]);
 		free((void *)config.workspace_names);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses crypto_pairs CSV")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config(
+		        "crypto_pairs = BTC-USDT-SWAP, ETH-USDT-SWAP, SOL-USDT-SWAP\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(3, config.crypto_pair_count);
+		ASSERT_EQ_STR("BTC-USDT-SWAP", config.crypto_pairs[0]);
+		ASSERT_EQ_STR("ETH-USDT-SWAP", config.crypto_pairs[1]);
+		ASSERT_EQ_STR("SOL-USDT-SWAP", config.crypto_pairs[2]);
+		barny_config_cleanup(&config);
+		cleanup_temp_config(path);
+	}
+
+	TEST("crypto_pairs skips empty entries")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config(
+		        "crypto_pairs = BTC-USDT-SWAP, , DOGE-USDT-SWAP\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(2, config.crypto_pair_count);
+		ASSERT_EQ_STR("BTC-USDT-SWAP", config.crypto_pairs[0]);
+		ASSERT_EQ_STR("DOGE-USDT-SWAP", config.crypto_pairs[1]);
+		barny_config_cleanup(&config);
 		cleanup_temp_config(path);
 	}
 

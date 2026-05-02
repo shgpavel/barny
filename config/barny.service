@@ -1,7 +1,7 @@
 [Unit]
 Description=Barny liquid glass status bar
 After=graphical-session.target
-Wants=barny-weather.service barny-btc-price.service barny-cpu-freq.service barny-cpu-power.service
+Wants=barny-weather.service barny-crypto-prices.service barny-cpu-freq.service barny-cpu-power.service
 PartOf=graphical-session.target
 
 [Service]
