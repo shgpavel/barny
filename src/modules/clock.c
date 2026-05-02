@@ -245,6 +245,7 @@ barny_module_clock_create(void)
 	mod->init     = clock_init;
 	mod->destroy  = clock_destroy;
 	mod->update   = clock_update;
+	mod->update_interval_ms = 0; /* every tick — second-precision clock */
 	mod->render   = clock_render;
 	mod->data     = data;
 	mod->width    = 80;

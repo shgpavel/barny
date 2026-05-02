@@ -1,8 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "barny.h"
+
+static uint64_t
+now_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
 
 void
 barny_module_register(barny_state_t *state, barny_module_t *module)
@@ -37,11 +46,19 @@ barny_modules_init(barny_state_t *state)
 void
 barny_modules_update(barny_state_t *state)
 {
+	uint64_t t = now_ms();
 	for (int i = 0; i < state->module_count; i++) {
 		barny_module_t *mod = state->modules[i];
-		if (mod && mod->update) {
-			mod->update(mod);
+		if (!mod || !mod->update)
+			continue;
+		if (mod->update_interval_ms > 0
+		    && mod->last_update_ms != 0
+		    && (t - mod->last_update_ms)
+		               < (uint64_t)mod->update_interval_ms) {
+			continue;
 		}
+		mod->update(mod);
+		mod->last_update_ms = t;
 	}
 
 	/* Request frame redraw if any module is dirty */

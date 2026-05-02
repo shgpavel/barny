@@ -98,7 +98,7 @@ run_event_loop(barny_state_t *s)
 			break;
 		}
 
-		int nfds = epoll_wait(s->epoll_fd, events, 16, 500);
+		int nfds = epoll_wait(s->epoll_fd, events, 16, 200);
 
 		if (nfds < 0) {
 			wl_display_cancel_read(s->display);

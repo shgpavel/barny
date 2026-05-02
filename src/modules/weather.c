@@ -528,6 +528,7 @@ barny_module_weather_create(void)
 	mod->init     = weather_init;
 	mod->destroy  = weather_destroy;
 	mod->update   = weather_update;
+	mod->update_interval_ms = 30000; /* helper writes every ~10min */
 	mod->render   = weather_render;
 	mod->on_hover = weather_on_hover;
 	mod->data     = data;

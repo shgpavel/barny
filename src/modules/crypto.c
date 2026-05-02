@@ -432,6 +432,7 @@ barny_module_crypto_create(void)
 	mod->init     = crypto_init;
 	mod->destroy  = crypto_destroy;
 	mod->update   = crypto_update;
+	mod->update_interval_ms = 1000; /* prices file refreshed by helper at most every ~1s */
 	mod->render   = crypto_render;
 	mod->on_hover = crypto_on_hover;
 	mod->data     = data;

@@ -220,6 +220,7 @@ barny_module_battery_create(void)
 	mod->init     = battery_init;
 	mod->destroy  = battery_destroy;
 	mod->update   = battery_update;
+	mod->update_interval_ms = 5000;
 	mod->render   = battery_render;
 	mod->data     = data;
 	mod->width    = 80;

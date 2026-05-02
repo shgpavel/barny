@@ -40,6 +40,8 @@ struct barny_module {
 	int   width;
 	int   height;
 	bool  dirty;
+	int   update_interval_ms; /* 0 = every tick; otherwise min ms between updates */
+	uint64_t last_update_ms;  /* internal: last time update() ran (CLOCK_MONOTONIC) */
 };
 
 typedef enum {

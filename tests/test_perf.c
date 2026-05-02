@@ -6,6 +6,7 @@
  * prints ns/op for each benchmark; eyeball them on PR diffs.
  */
 #include "barny.h"
+#include "../src/modules/popup.h"
 
 #include <cairo.h>
 #include <stdio.h>
@@ -171,6 +172,18 @@ main(void)
 
 	bench_config_parse(2000);
 	bench_text_measure(5000);
+
+	{
+		PangoFontDescription *fd
+		        = pango_font_description_from_string("Sans 11");
+		int    iters = 5000;
+		double t0    = now_ns();
+		for (int i = 0; i < iters; i++)
+			(void)barny_popup_measure_text(fd, "BTC-USDT-SWAP $109234.56");
+		double t1 = now_ns();
+		report("popup_measure_text (cached)", iters, t1 - t0);
+		pango_font_description_free(fd);
+	}
 
 	printf("\n");
 	bench_module("clock", barny_module_clock_create, 1000, 1000);

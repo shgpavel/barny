@@ -214,6 +214,7 @@ barny_module_ram_create(void)
 	mod->init     = ram_init;
 	mod->destroy  = ram_destroy;
 	mod->update   = ram_update;
+	mod->update_interval_ms = 1000;
 	mod->render   = ram_render;
 	mod->data     = data;
 	mod->width    = 80;

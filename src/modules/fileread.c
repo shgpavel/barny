@@ -170,6 +170,7 @@ barny_module_fileread_create(void)
 	mod->init     = fileread_init;
 	mod->destroy  = fileread_destroy;
 	mod->update   = fileread_update;
+	mod->update_interval_ms = 1000;
 	mod->render   = fileread_render;
 	mod->data     = data;
 	mod->width    = 100;

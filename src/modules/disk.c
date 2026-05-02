@@ -191,6 +191,7 @@ barny_module_disk_create(void)
 	mod->init     = disk_init;
 	mod->destroy  = disk_destroy;
 	mod->update   = disk_update;
+	mod->update_interval_ms = 5000; /* disk usage changes slowly */
 	mod->render   = disk_render;
 	mod->data     = data;
 	mod->width    = 80;

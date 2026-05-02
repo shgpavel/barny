@@ -987,6 +987,7 @@ barny_module_sysinfo_create(void)
 	mod->init     = sysinfo_init;
 	mod->destroy  = sysinfo_destroy;
 	mod->update   = sysinfo_update;
+	mod->update_interval_ms = 0; /* every tick (200ms) — fast freq/temp updates */
 	mod->render   = sysinfo_render;
 	mod->on_hover = sysinfo_on_hover;
 	mod->data     = data;

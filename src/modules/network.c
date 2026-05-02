@@ -39,8 +39,17 @@ typedef struct {
 	struct timespec       last_sample;
 	bool                  have_last_sample;
 
+	/* SSID/MAC cache: avoid popen per tick. SSID refetched on iface
+	 * change or every SSID_REFRESH_MS. MAC refetched only on iface
+	 * change (interface MAC is stable for the lifetime of the iface). */
+	char                  cached_ssid_iface[32];
+	char                  cached_mac_iface[32];
+	struct timespec       last_ssid_fetch;
+
 	barny_popup_t        *popup;
 } network_data_t;
+
+#define SSID_REFRESH_MS 30000
 
 static bool
 is_interface_up(const char *iface)
@@ -401,8 +410,42 @@ refresh_popup_data(network_data_t *data)
 		collect_interface_addrs(data->current_iface, new_ipv4,
 		                        sizeof(new_ipv4), new_ipv6,
 		                        sizeof(new_ipv6));
-		read_mac(data->current_iface, new_mac, sizeof(new_mac));
-		read_ssid(data->current_iface, new_ssid, sizeof(new_ssid));
+
+		bool iface_mac_stale = strcmp(data->cached_mac_iface,
+		                              data->current_iface) != 0;
+		if (iface_mac_stale) {
+			read_mac(data->current_iface, new_mac, sizeof(new_mac));
+			strncpy(data->cached_mac_iface, data->current_iface,
+			        sizeof(data->cached_mac_iface) - 1);
+			data->cached_mac_iface[sizeof(data->cached_mac_iface) - 1]
+			        = '\0';
+		} else {
+			strncpy(new_mac, data->mac, sizeof(new_mac) - 1);
+			new_mac[sizeof(new_mac) - 1] = '\0';
+		}
+
+		bool iface_ssid_stale = strcmp(data->cached_ssid_iface,
+		                               data->current_iface) != 0;
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		long ssid_age_ms = (now.tv_sec - data->last_ssid_fetch.tv_sec)
+		                           * 1000
+		                   + (now.tv_nsec - data->last_ssid_fetch.tv_nsec)
+		                             / 1000000;
+		if (iface_ssid_stale || ssid_age_ms > SSID_REFRESH_MS) {
+			read_ssid(data->current_iface, new_ssid, sizeof(new_ssid));
+			strncpy(data->cached_ssid_iface, data->current_iface,
+			        sizeof(data->cached_ssid_iface) - 1);
+			data->cached_ssid_iface[sizeof(data->cached_ssid_iface) - 1]
+			        = '\0';
+			data->last_ssid_fetch = now;
+		} else {
+			strncpy(new_ssid, data->ssid, sizeof(new_ssid) - 1);
+			new_ssid[sizeof(new_ssid) - 1] = '\0';
+		}
+	} else {
+		data->cached_ssid_iface[0] = '\0';
+		data->cached_mac_iface[0]  = '\0';
 	}
 
 	if (strcmp(new_ipv4, data->ipv4) != 0) {
@@ -879,6 +922,7 @@ barny_module_network_create(void)
 	mod->init     = network_init;
 	mod->destroy  = network_destroy;
 	mod->update   = network_update;
+	mod->update_interval_ms = 1000;
 	mod->render   = network_render;
 	mod->on_hover = network_on_hover;
 	mod->data     = data;
