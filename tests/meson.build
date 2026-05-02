@@ -20,6 +20,7 @@ test_support_sources = files(
     '../src/modules/layout_apply.c',
     '../src/modules/module.c',
     '../src/modules/network.c',
+    '../src/modules/popup.c',
     '../src/modules/ram.c',
     '../src/modules/sysinfo.c',
     '../src/modules/weather.c',

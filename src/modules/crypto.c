@@ -1,24 +1,12 @@
 #include <ctype.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <time.h>
-#include <unistd.h>
 
 #include "barny.h"
-#include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "popup.h"
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-#define POPUP_WIDTH          180
 #define POPUP_LINE_H          26
-#define POPUP_PAD_Y           10
-#define POPUP_PAD_X           14
-#define POPUP_RADIUS          12
 #define CRYPTO_NAME_LEN       24
 #define CRYPTO_FILE_PATH_LEN 128
 #define CRYPTO_PRICE_LEN      32
@@ -42,23 +30,14 @@ typedef struct {
 
 typedef struct {
 	barny_state_t        *state;
+	barny_module_t       *self;
 	char                  price_str[64];
 	PangoFontDescription *font_desc;
 	PangoFontDescription *popup_font_desc;
 	crypto_pair_t        *pairs;
 	int                   pair_count;
 
-	bool                          hover_active;
-	bool                          popup_configured;
-	struct wl_surface            *popup_surface;
-	struct zwlr_layer_surface_v1 *popup_layer_surface;
-	struct wl_buffer             *popup_buffer;
-	cairo_surface_t              *popup_cairo_surface;
-	cairo_t                      *popup_cr;
-	void                         *popup_shm_data;
-	int                           popup_shm_size;
-	int                           popup_screen_x;
-	int                           popup_screen_y;
+	barny_popup_t        *popup;
 } crypto_data_t;
 
 static int
@@ -182,168 +161,29 @@ popup_row_count(const crypto_data_t *data)
 }
 
 static int
-popup_height(const crypto_data_t *data)
+crypto_popup_height(void *ud)
 {
-	return POPUP_PAD_Y * 2 + popup_row_count(data) * POPUP_LINE_H;
+	const crypto_data_t *data = ud;
+	return popup_row_count(data) * POPUP_LINE_H;
 }
 
 static void
-rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r)
+crypto_popup_render(void *ud, cairo_t *cr, int w, int h)
 {
-	cairo_new_sub_path(cr);
-	cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, 0);
-	cairo_arc(cr, x + w - r, y + h - r, r, 0, M_PI / 2);
-	cairo_arc(cr, x + r, y + h - r, r, M_PI / 2, M_PI);
-	cairo_arc(cr, x + r, y + r, r, M_PI, 3 * M_PI / 2);
-	cairo_close_path(cr);
-}
+	crypto_data_t  *data = ud;
+	barny_config_t *cfg  = &data->state->config;
+	PangoLayout    *layout;
 
-static int
-popup_create_shm(int size)
-{
-	static unsigned counter = 0;
-	char            name[64];
-	struct timespec ts;
-	int             fd;
+	(void)h;
 
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
-		ts.tv_sec  = 0;
-		ts.tv_nsec = 0;
-	}
-
-	snprintf(name, sizeof(name), "/barny-popup-%d-%u-%lu",
-	         (int)getpid(), (unsigned)counter++,
-	         (unsigned long)ts.tv_nsec);
-
-	fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
-	if (fd < 0)
-		return -1;
-
-	if (ftruncate(fd, size) < 0) {
-		shm_unlink(name);
-		close(fd);
-		return -1;
-	}
-
-	shm_unlink(name);
-	return fd;
-}
-
-static void
-popup_render(crypto_data_t *data)
-{
-	if (!data->popup_cr || popup_row_count(data) == 0)
+	if (popup_row_count(data) == 0)
 		return;
 
-	barny_state_t *state = data->state;
-	cairo_t       *cr    = data->popup_cr;
-	int            pw    = POPUP_WIDTH;
-	int            ph    = popup_height(data);
-
-	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-	cairo_paint(cr);
-	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-
-	cairo_save(cr);
-	rounded_rect(cr, 0, 0, pw, ph, POPUP_RADIUS);
-	cairo_clip(cr);
-
-	cairo_surface_t *bg_surface = state->displaced_wallpaper
-	                                      ? state->displaced_wallpaper
-	                                      : state->blurred_wallpaper;
-
-	if (bg_surface && state->pointer_output) {
-		int out_w = state->pointer_output->width;
-		int out_h = state->pointer_output->height;
-		int wp_w  = cairo_image_surface_get_width(bg_surface);
-		int wp_h  = cairo_image_surface_get_height(bg_surface);
-
-		double scale_x = (double)wp_w / out_w;
-		double scale_y = (double)wp_h / out_h;
-		double scale   = scale_x < scale_y ? scale_x : scale_y;
-		int    src_y_off
-		        = state->config.position_top
-		                  ? 0
-		                  : (wp_h - (int)(out_h * scale));
-
-		cairo_scale(cr, 1.0 / scale, 1.0 / scale);
-		cairo_set_source_surface(
-		        cr, bg_surface,
-		        -data->popup_screen_x * scale,
-		        -(data->popup_screen_y * scale + src_y_off));
-		cairo_paint(cr);
-	} else {
-		cairo_pattern_t *bg = cairo_pattern_create_linear(0, 0, 0, ph);
-		cairo_pattern_add_color_stop_rgba(bg, 0, 0.15, 0.15, 0.18,
-		                                  0.85);
-		cairo_pattern_add_color_stop_rgba(bg, 1, 0.08, 0.08, 0.10,
-		                                  0.85);
-		cairo_set_source(cr, bg);
-		cairo_paint(cr);
-		cairo_pattern_destroy(bg);
-	}
-
-	cairo_restore(cr);
-
-	rounded_rect(cr, 0.5, 0.5, pw - 1, ph - 1, POPUP_RADIUS);
-	cairo_set_source_rgba(cr, 1, 1, 1, 0.12);
-	cairo_set_line_width(cr, 1);
-	cairo_stroke(cr);
-
-	rounded_rect(cr, 1.5, 1.5, pw - 3, ph - 3, POPUP_RADIUS - 1);
-	cairo_set_source_rgba(cr, 1, 1, 1, 0.06);
-	cairo_set_line_width(cr, 2);
-	cairo_stroke(cr);
-
-	cairo_save(cr);
-	rounded_rect(cr, 0, 0, pw, ph, POPUP_RADIUS);
-	cairo_clip(cr);
-	{
-		cairo_pattern_t *hl
-		        = cairo_pattern_create_linear(0, 0, pw * 0.7, ph * 0.7);
-		cairo_pattern_add_color_stop_rgba(hl, 0.0, 1, 1, 1, 0.15);
-		cairo_pattern_add_color_stop_rgba(hl, 0.3, 1, 1, 1, 0.04);
-		cairo_pattern_add_color_stop_rgba(hl, 1.0, 1, 1, 1, 0);
-		cairo_set_source(cr, hl);
-		cairo_paint(cr);
-		cairo_pattern_destroy(hl);
-	}
-	{
-		cairo_pattern_t *sh
-		        = cairo_pattern_create_linear(pw * 0.3, ph * 0.3, pw, ph);
-		cairo_pattern_add_color_stop_rgba(sh, 0.0, 0, 0, 0, 0);
-		cairo_pattern_add_color_stop_rgba(sh, 0.7, 0, 0, 0, 0);
-		cairo_pattern_add_color_stop_rgba(sh, 1.0, 0, 0, 0, 0.15);
-		cairo_set_source(cr, sh);
-		cairo_paint(cr);
-		cairo_pattern_destroy(sh);
-	}
-	{
-		cairo_pattern_t *top_r = cairo_pattern_create_linear(0, 0, 0, 8);
-		cairo_pattern_add_color_stop_rgba(top_r, 0.0, 1, 1, 1, 0.08);
-		cairo_pattern_add_color_stop_rgba(top_r, 1.0, 1, 1, 1, 0);
-		cairo_set_source(cr, top_r);
-		cairo_rectangle(cr, 0, 0, pw, 8);
-		cairo_fill(cr);
-		cairo_pattern_destroy(top_r);
-
-		cairo_pattern_t *left_r = cairo_pattern_create_linear(0, 0, 8, 0);
-		cairo_pattern_add_color_stop_rgba(left_r, 0.0, 1, 1, 1, 0.06);
-		cairo_pattern_add_color_stop_rgba(left_r, 1.0, 1, 1, 1, 0);
-		cairo_set_source(cr, left_r);
-		cairo_rectangle(cr, 0, 0, 8, ph);
-		cairo_fill(cr);
-		cairo_pattern_destroy(left_r);
-	}
-	cairo_restore(cr);
-
-	PangoLayout    *layout = pango_cairo_create_layout(cr);
-	barny_config_t *cfg    = &state->config;
-
+	layout = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, data->popup_font_desc);
 
 	for (int i = 1; i < data->pair_count; i++) {
-		int line_y = POPUP_PAD_Y + (i - 1) * POPUP_LINE_H;
+		int line_y = (i - 1) * POPUP_LINE_H;
 		int tw, th;
 		int text_y;
 		int price_x;
@@ -353,16 +193,16 @@ popup_render(crypto_data_t *data)
 		text_y = line_y + (POPUP_LINE_H - th) / 2;
 
 		cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-		cairo_move_to(cr, POPUP_PAD_X + 1, text_y + 1);
+		cairo_move_to(cr, 1, text_y + 1);
 		pango_cairo_show_layout(cr, layout);
 
 		cairo_set_source_rgba(cr, 0.6, 0.7, 0.65, 0.9);
-		cairo_move_to(cr, POPUP_PAD_X, text_y);
+		cairo_move_to(cr, 0, text_y);
 		pango_cairo_show_layout(cr, layout);
 
 		pango_layout_set_text(layout, data->pairs[i].price_str, -1);
 		pango_layout_get_pixel_size(layout, &tw, &th);
-		price_x = pw - POPUP_PAD_X - tw;
+		price_x = w - tw;
 
 		cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
 		cairo_move_to(cr, price_x + 1, text_y + 1);
@@ -380,209 +220,6 @@ popup_render(crypto_data_t *data)
 	}
 
 	g_object_unref(layout);
-
-	cairo_surface_flush(data->popup_cairo_surface);
-	wl_surface_attach(data->popup_surface, data->popup_buffer, 0, 0);
-	wl_surface_damage_buffer(data->popup_surface, 0, 0, pw, ph);
-	wl_surface_commit(data->popup_surface);
-}
-
-static void
-popup_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
-                      uint32_t serial, uint32_t width, uint32_t height)
-{
-	crypto_data_t *data = userdata;
-	int            pw;
-	int            ph;
-	int            stride;
-	int            size;
-	int            fd;
-	struct wl_shm_pool *pool;
-
-	zwlr_layer_surface_v1_ack_configure(surface, serial);
-
-	/* Compositor may send configure multiple times; tear down only the
-	 * buffer chain (not the layer surface) before re-allocating. */
-	if (data->popup_buffer) {
-		if (data->popup_cr) {
-			cairo_destroy(data->popup_cr);
-			data->popup_cr = NULL;
-		}
-		if (data->popup_cairo_surface) {
-			cairo_surface_destroy(data->popup_cairo_surface);
-			data->popup_cairo_surface = NULL;
-		}
-		wl_buffer_destroy(data->popup_buffer);
-		data->popup_buffer = NULL;
-		if (data->popup_shm_data) {
-			munmap(data->popup_shm_data,
-			       (size_t)data->popup_shm_size);
-			data->popup_shm_data = NULL;
-		}
-		data->popup_shm_size = 0;
-	}
-
-	pw     = (int)width > 0 ? (int)width : POPUP_WIDTH;
-	ph     = (int)height > 0 ? (int)height : popup_height(data);
-	stride = pw * 4;
-	size   = stride * ph;
-
-	fd = popup_create_shm(size);
-	if (fd < 0)
-		return;
-
-	data->popup_shm_data
-	        = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED,
-	               fd, 0);
-	if (data->popup_shm_data == MAP_FAILED) {
-		close(fd);
-		data->popup_shm_data = NULL;
-		return;
-	}
-	data->popup_shm_size = size;
-
-	pool = wl_shm_create_pool(data->state->shm, fd, size);
-	data->popup_buffer = wl_shm_pool_create_buffer(
-	        pool, 0, pw, ph, stride, WL_SHM_FORMAT_ARGB8888);
-	wl_shm_pool_destroy(pool);
-	close(fd);
-
-	data->popup_cairo_surface = cairo_image_surface_create_for_data(
-	        data->popup_shm_data, CAIRO_FORMAT_ARGB32, pw, ph, stride);
-	data->popup_cr            = cairo_create(data->popup_cairo_surface);
-	data->popup_configured    = true;
-
-	popup_render(data);
-}
-
-static void
-popup_layer_closed(void *userdata, struct zwlr_layer_surface_v1 *surface)
-{
-	(void)surface;
-	((crypto_data_t *)userdata)->hover_active = false;
-}
-
-static const struct zwlr_layer_surface_v1_listener popup_layer_listener = {
-	.configure = popup_layer_configure,
-	.closed    = popup_layer_closed,
-};
-
-static void
-popup_destroy(crypto_data_t *data)
-{
-	if (data->popup_cr) {
-		cairo_destroy(data->popup_cr);
-		data->popup_cr = NULL;
-	}
-	if (data->popup_cairo_surface) {
-		cairo_surface_destroy(data->popup_cairo_surface);
-		data->popup_cairo_surface = NULL;
-	}
-	if (data->popup_buffer) {
-		wl_buffer_destroy(data->popup_buffer);
-		data->popup_buffer = NULL;
-	}
-	if (data->popup_shm_data) {
-		munmap(data->popup_shm_data, (size_t)data->popup_shm_size);
-		data->popup_shm_data = NULL;
-	}
-	if (data->popup_layer_surface) {
-		zwlr_layer_surface_v1_destroy(data->popup_layer_surface);
-		data->popup_layer_surface = NULL;
-	}
-	if (data->popup_surface) {
-		wl_surface_destroy(data->popup_surface);
-		data->popup_surface = NULL;
-	}
-	data->popup_configured = false;
-}
-
-static void
-popup_show(barny_module_t *self)
-{
-	crypto_data_t *data  = self->data;
-	barny_state_t *state = data->state;
-	barny_output_t *out;
-	uint32_t        anchor;
-	int             popup_h;
-	int             left_margin;
-	int             center_off;
-	int             top_margin    = 0;
-	int             bottom_margin = 0;
-
-	if (data->popup_surface || popup_row_count(data) == 0)
-		return;
-
-	out = state->pointer_output;
-	if (!out)
-		return;
-
-	popup_h = popup_height(data);
-
-	data->popup_surface = wl_compositor_create_surface(state->compositor);
-	if (!data->popup_surface)
-		return;
-
-	struct wl_region *empty
-	        = wl_compositor_create_region(state->compositor);
-	wl_surface_set_input_region(data->popup_surface, empty);
-	wl_region_destroy(empty);
-
-	data->popup_layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-	        state->layer_shell, data->popup_surface, out->wl_output,
-	        ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "barny-popup");
-	if (!data->popup_layer_surface) {
-		wl_surface_destroy(data->popup_surface);
-		data->popup_surface = NULL;
-		return;
-	}
-
-	zwlr_layer_surface_v1_add_listener(data->popup_layer_surface,
-	                                   &popup_layer_listener, data);
-
-	anchor = ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
-	if (state->config.position_top)
-		anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
-	else
-		anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
-
-	zwlr_layer_surface_v1_set_anchor(data->popup_layer_surface, anchor);
-	zwlr_layer_surface_v1_set_size(data->popup_layer_surface, POPUP_WIDTH,
-	                               popup_h);
-	zwlr_layer_surface_v1_set_exclusive_zone(data->popup_layer_surface, 0);
-
-	left_margin = state->config.margin_left + self->render_x;
-	center_off  = (POPUP_WIDTH - self->width) / 2;
-	left_margin -= center_off;
-	if (left_margin < 0)
-		left_margin = 0;
-
-	int popup_gap = state->config.crypto_popup_gap;
-
-	/* Bar has exclusive_zone = height, so the compositor already pushes
-	 * non-exclusive surfaces past the bar. Margin here is just the
-	 * additional gap between popup and bar edge. */
-	if (state->config.position_top)
-		top_margin = popup_gap;
-	else
-		bottom_margin = popup_gap;
-
-	zwlr_layer_surface_v1_set_margin(data->popup_layer_surface,
-	                                 top_margin, 0, bottom_margin,
-	                                 left_margin);
-
-	data->popup_screen_x = left_margin;
-	/* Compositor reserves bar+margin via exclusive_zone, then pushes
-	 * popup further by popup_gap. Mirror that for wallpaper sampling. */
-	int reserved = state->config.height + (state->config.position_top
-	                                               ? state->config.margin_top
-	                                               : state->config.margin_bottom);
-	if (state->config.position_top)
-		data->popup_screen_y = reserved + popup_gap;
-	else
-		data->popup_screen_y = out->height - reserved - popup_gap - popup_h;
-
-	wl_surface_commit(data->popup_surface);
 }
 
 static void
@@ -593,13 +230,22 @@ crypto_on_hover(barny_module_t *self, bool hovering, int x, int y)
 	(void)y;
 
 	if (hovering) {
-		data->hover_active = true;
-		if (!data->popup_surface)
-			popup_show(self);
+		if (!data->popup && popup_row_count(data) > 0) {
+			barny_popup_callbacks_t cb = {
+				.content_height = crypto_popup_height,
+				.content_width  = NULL,
+				.render         = crypto_popup_render,
+				.userdata       = data,
+			};
+			data->popup = barny_popup_create(
+			        data->state, self, &cb,
+			        data->state->config.crypto_popup_gap);
+		}
 	} else {
-		data->hover_active = false;
-		if (data->popup_configured)
-			popup_destroy(data);
+		if (data->popup) {
+			barny_popup_destroy(data->popup);
+			data->popup = NULL;
+		}
 	}
 }
 
@@ -610,6 +256,7 @@ crypto_init(barny_module_t *self, barny_state_t *state)
 	const barny_config_t *cfg  = &state->config;
 
 	data->state = state;
+	data->self  = self;
 	data->font_desc = pango_font_description_from_string(
 	        cfg->font ? cfg->font : "Sans 11");
 	data->popup_font_desc = pango_font_description_from_string(
@@ -660,7 +307,8 @@ crypto_destroy(barny_module_t *self)
 	if (data->state && data->state->hover_module == self)
 		data->state->hover_module = NULL;
 
-	popup_destroy(data);
+	barny_popup_destroy(data->popup);
+	data->popup = NULL;
 
 	if (data->font_desc)
 		pango_font_description_free(data->font_desc);
@@ -704,8 +352,8 @@ crypto_update(barny_module_t *self)
 		}
 	}
 
-	if (popup_changed && data->popup_configured)
-		popup_render(data);
+	if (popup_changed && barny_popup_visible(data->popup))
+		barny_popup_redraw(data->popup);
 }
 
 static void
