@@ -559,27 +559,28 @@ popup_show(barny_module_t *self)
 
 	int popup_gap = state->config.crypto_popup_gap;
 
-	if (state->config.position_top) {
-		top_margin = state->config.height + state->config.margin_top
-		             + popup_gap;
-		if (top_margin < 0)
-			top_margin = 0;
-	} else {
-		bottom_margin = state->config.height
-		                + state->config.margin_bottom + popup_gap;
-		if (bottom_margin < 0)
-			bottom_margin = 0;
-	}
+	/* Bar has exclusive_zone = height, so the compositor already pushes
+	 * non-exclusive surfaces past the bar. Margin here is just the
+	 * additional gap between popup and bar edge. */
+	if (state->config.position_top)
+		top_margin = popup_gap;
+	else
+		bottom_margin = popup_gap;
 
 	zwlr_layer_surface_v1_set_margin(data->popup_layer_surface,
 	                                 top_margin, 0, bottom_margin,
 	                                 left_margin);
 
 	data->popup_screen_x = left_margin;
+	/* Compositor reserves bar+margin via exclusive_zone, then pushes
+	 * popup further by popup_gap. Mirror that for wallpaper sampling. */
+	int reserved = state->config.height + (state->config.position_top
+	                                               ? state->config.margin_top
+	                                               : state->config.margin_bottom);
 	if (state->config.position_top)
-		data->popup_screen_y = top_margin;
+		data->popup_screen_y = reserved + popup_gap;
 	else
-		data->popup_screen_y = out->height - bottom_margin - popup_h;
+		data->popup_screen_y = out->height - reserved - popup_gap - popup_h;
 
 	wl_surface_commit(data->popup_surface);
 }
