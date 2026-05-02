@@ -154,6 +154,10 @@ You can add proportional spacer tokens in these CSV lists:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `crypto_pairs` | `BTC-USDT-SWAP, ETH-USDT-SWAP, SOL-USDT-SWAP, XRP-USDT-SWAP, ADA-USDT-SWAP, DOGE-USDT-SWAP, DOT-USDT-SWAP` | CSV list of OKX markets tracked by `barny-crypto-prices`; the first pair is shown in the bar and the rest appear in the hover popup |
+| `crypto_popup_gap` | `0` | Pixels between the bar and the hover popup (0-64). 0 = flush |
+| `crypto_currency_symbol` | `$` | Symbol attached to prices. Set to `""` to disable, or any string (e.g. `EUR`, `€`) |
+| `crypto_symbol_position` | `prefix` | `prefix` for `$1234`, `suffix` for `1234$` |
+| `crypto_decimals` | `0` | Decimal places (0-6). `0` = auto: 4 dp under \$1, 2 dp under \$1000, else 0 |
 
 Note: the shipped `config/barny.conf` sets a different example list (BTC, ETH, SOL, BZ, ADA, POL, OP, TON, TRX); the default above is the built-in fallback used when no config is provided.
 

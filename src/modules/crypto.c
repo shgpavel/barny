@@ -19,7 +19,6 @@
 #define POPUP_PAD_Y           10
 #define POPUP_PAD_X           14
 #define POPUP_RADIUS          12
-#define POPUP_BAR_OVERLAP      6
 #define CRYPTO_NAME_LEN       24
 #define CRYPTO_FILE_PATH_LEN 128
 #define CRYPTO_PRICE_LEN      32
@@ -125,14 +124,29 @@ pair_file_from_market(const char *market, char *buf, size_t buf_size)
 }
 
 static void
-format_pair_price(char *buf, size_t buf_size, double price)
+format_pair_price(const barny_config_t *cfg, char *buf, size_t buf_size,
+                  double price)
 {
-	if (price >= 1000.0)
-		snprintf(buf, buf_size, "$%.0f", price);
-	else if (price >= 1.0)
-		snprintf(buf, buf_size, "$%.2f", price);
+	const char *sym = (cfg && cfg->crypto_currency_symbol)
+	                          ? cfg->crypto_currency_symbol
+	                          : "$";
+	bool        suffix    = cfg && cfg->crypto_symbol_suffix;
+	int         decimals  = cfg ? cfg->crypto_decimals : 0;
+	int         auto_dec  = decimals;
+
+	if (cfg && cfg->crypto_decimals == 0) {
+		if (price < 1.0)
+			auto_dec = 4;
+		else if (price < 1000.0)
+			auto_dec = 2;
+		else
+			auto_dec = 0;
+	}
+
+	if (suffix)
+		snprintf(buf, buf_size, "%.*f%s", auto_dec, price, sym);
 	else
-		snprintf(buf, buf_size, "$%.4f", price);
+		snprintf(buf, buf_size, "%s%.*f", sym, auto_dec, price);
 }
 
 static bool
@@ -543,15 +557,16 @@ popup_show(barny_module_t *self)
 	if (left_margin < 0)
 		left_margin = 0;
 
+	int popup_gap = state->config.crypto_popup_gap;
+
 	if (state->config.position_top) {
 		top_margin = state->config.height + state->config.margin_top
-		             - POPUP_BAR_OVERLAP;
+		             + popup_gap;
 		if (top_margin < 0)
 			top_margin = 0;
 	} else {
 		bottom_margin = state->config.height
-		                + state->config.margin_bottom
-		                - POPUP_BAR_OVERLAP;
+		                + state->config.margin_bottom + popup_gap;
 		if (bottom_margin < 0)
 			bottom_margin = 0;
 	}
@@ -581,9 +596,9 @@ crypto_on_hover(barny_module_t *self, bool hovering, int x, int y)
 		if (!data->popup_surface)
 			popup_show(self);
 	} else {
-		/* Defer hide: cursor crossing the bar/popup boundary briefly
-		 * fires pointer_leave; let crypto_update reap stale popups. */
 		data->hover_active = false;
+		if (data->popup_configured)
+			popup_destroy(data);
 	}
 }
 
@@ -672,7 +687,8 @@ crypto_update(barny_module_t *self)
 			char formatted[CRYPTO_PRICE_LEN];
 
 			data->pairs[i].price = price;
-			format_pair_price(formatted, sizeof(formatted), price);
+			format_pair_price(&data->state->config, formatted,
+			                  sizeof(formatted), price);
 			snprintf(data->pairs[i].price_str,
 			         sizeof(data->pairs[i].price_str), "%s",
 			         formatted);
@@ -689,11 +705,6 @@ crypto_update(barny_module_t *self)
 
 	if (popup_changed && data->popup_configured)
 		popup_render(data);
-
-	/* Grace window: hide popup only if hover hasn't returned by next
-	 * tick, avoiding flicker on bar->popup cursor crossings. */
-	if (!data->hover_active && data->popup_configured)
-		popup_destroy(data);
 }
 
 static void

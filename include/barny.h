@@ -85,6 +85,10 @@ struct barny_config {
 	/* Crypto module */
 	char **crypto_pairs;    /* CSV list of market pairs, e.g. BTC-USDT-SWAP */
 	int    crypto_pair_count;
+	int    crypto_popup_gap;        /* px between bar and hover popup (0 = flush) */
+	char  *crypto_currency_symbol;  /* e.g. "$", "EUR", "" */
+	bool   crypto_symbol_suffix;    /* false = prefix (default), true = suffix */
+	int    crypto_decimals;         /* 0..6 decimal places */
 
 	/* Sysinfo module */
 	bool sysinfo_freq_combined; /* true = combined avg, false = "P: X.XX E: X.XX" */

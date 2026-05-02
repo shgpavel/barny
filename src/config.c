@@ -108,6 +108,10 @@ barny_config_defaults(barny_config_t *config)
 	config->modules_right            = NULL;
 	config->crypto_pairs             = NULL;
 	config->crypto_pair_count        = 0;
+	config->crypto_popup_gap         = 0;
+	config->crypto_currency_symbol   = strdup("$");
+	config->crypto_symbol_suffix     = false;
+	config->crypto_decimals          = 0;
 
 	/* Sysinfo module defaults */
 	config->sysinfo_freq_combined    = true;
@@ -377,6 +381,15 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 	} else if (strcmp(key, "crypto_pairs") == 0) {
 		config_replace_string_array(&config->crypto_pairs,
 		                            &config->crypto_pair_count, value);
+	} else if (strcmp(key, "crypto_popup_gap") == 0) {
+		config->crypto_popup_gap = parse_int_clamped(value, 0, 64);
+	} else if (strcmp(key, "crypto_currency_symbol") == 0) {
+		free(config->crypto_currency_symbol);
+		config->crypto_currency_symbol = strdup(value);
+	} else if (strcmp(key, "crypto_symbol_position") == 0) {
+		config->crypto_symbol_suffix = (strcmp(value, "suffix") == 0);
+	} else if (strcmp(key, "crypto_decimals") == 0) {
+		config->crypto_decimals = parse_int_clamped(value, 0, 6);
 	} else if (strcmp(key, "tray_icon_size") == 0) {
 		config->tray_icon_size = parse_int_clamped(value, 8, 64);
 	} else if (strcmp(key, "tray_icon_spacing") == 0) {
@@ -558,6 +571,8 @@ barny_config_cleanup(barny_config_t *config)
 		config->crypto_pairs      = NULL;
 		config->crypto_pair_count = 0;
 	}
+	free(config->crypto_currency_symbol);
+	config->crypto_currency_symbol = NULL;
 	free(config->tray_icon_shape);
 	free(config->disk_path);
 	free(config->disk_mode);
