@@ -125,6 +125,8 @@ barny_config_defaults(barny_config_t *config)
 	config->sysinfo_freq_unit_space  = true;
 	config->sysinfo_power_unit_space = true;
 	config->sysinfo_temp_unit_space  = true;
+	config->sysinfo_popup_gap        = 0;
+	config->sysinfo_popup_per_core   = false;
 
 	/* Tray module defaults */
 	config->tray_icon_size           = 24;
@@ -178,6 +180,10 @@ barny_config_defaults(barny_config_t *config)
 	config->network_show_ip          = true;
 	config->network_show_interface   = false;
 	config->network_prefer_ipv4      = true;
+	config->network_popup_gap        = 0;
+	config->network_popup_show_ssid  = true;
+	config->network_popup_show_ipv6  = false;
+	config->network_popup_show_mac   = false;
 
 	/* File read module defaults */
 	config->fileread_path            = NULL;
@@ -188,6 +194,13 @@ barny_config_defaults(barny_config_t *config)
 	config->battery_path             = NULL; /* auto-detect */
 	config->battery_show_status      = true;
 	config->battery_unit_space       = false;
+
+	/* Weather module defaults */
+	config->weather_popup_gap          = 0;
+	config->weather_popup_show_humidity   = true;
+	config->weather_popup_show_wind       = true;
+	config->weather_popup_show_pressure   = false;
+	config->weather_popup_show_feels_like = true;
 }
 
 static int
@@ -367,6 +380,10 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->sysinfo_power_unit_space = parse_bool(value);
 	} else if (strcmp(key, "sysinfo_temp_unit_space") == 0) {
 		config->sysinfo_temp_unit_space = parse_bool(value);
+	} else if (strcmp(key, "sysinfo_popup_gap") == 0) {
+		config->sysinfo_popup_gap = parse_int_clamped(value, 0, 64);
+	} else if (strcmp(key, "sysinfo_popup_per_core") == 0) {
+		config->sysinfo_popup_per_core = parse_bool(value);
 	} else if (strcmp(key, "module_spacing") == 0) {
 		config->module_spacing = parse_int_clamped(value, 0, 64);
 	} else if (strcmp(key, "modules_left") == 0) {
@@ -471,6 +488,14 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->network_show_interface = parse_bool(value);
 	} else if (strcmp(key, "network_prefer_ipv4") == 0) {
 		config->network_prefer_ipv4 = parse_bool(value);
+	} else if (strcmp(key, "network_popup_gap") == 0) {
+		config->network_popup_gap = parse_int_clamped(value, 0, 64);
+	} else if (strcmp(key, "network_popup_show_ssid") == 0) {
+		config->network_popup_show_ssid = parse_bool(value);
+	} else if (strcmp(key, "network_popup_show_ipv6") == 0) {
+		config->network_popup_show_ipv6 = parse_bool(value);
+	} else if (strcmp(key, "network_popup_show_mac") == 0) {
+		config->network_popup_show_mac = parse_bool(value);
 	/* File read module */
 	} else if (strcmp(key, "fileread_path") == 0) {
 		free(config->fileread_path);
@@ -488,6 +513,16 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->battery_show_status = parse_bool(value);
 	} else if (strcmp(key, "battery_unit_space") == 0) {
 		config->battery_unit_space = parse_bool(value);
+	} else if (strcmp(key, "weather_popup_gap") == 0) {
+		config->weather_popup_gap = parse_int_clamped(value, 0, 64);
+	} else if (strcmp(key, "weather_popup_show_humidity") == 0) {
+		config->weather_popup_show_humidity = parse_bool(value);
+	} else if (strcmp(key, "weather_popup_show_wind") == 0) {
+		config->weather_popup_show_wind = parse_bool(value);
+	} else if (strcmp(key, "weather_popup_show_pressure") == 0) {
+		config->weather_popup_show_pressure = parse_bool(value);
+	} else if (strcmp(key, "weather_popup_show_feels_like") == 0) {
+		config->weather_popup_show_feels_like = parse_bool(value);
 	}
 }
 

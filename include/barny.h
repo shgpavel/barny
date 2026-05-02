@@ -94,6 +94,8 @@ struct barny_config {
 	bool sysinfo_freq_combined; /* true = combined avg, false = "P: X.XX E: X.XX" */
 	int  sysinfo_freq_decimals;  /* 0, 1, or 2 decimal places for frequency */
 	int  sysinfo_power_decimals; /* 0, 1, or 2 decimal places for watts */
+	int  sysinfo_popup_gap;      /* px between bar and hover popup (0 = flush) */
+	bool sysinfo_popup_per_core; /* show per-core freq rows in popup */
 	int  sysinfo_p_cores;        /* P-core count (0 = auto-detect) */
 	int  sysinfo_e_cores;        /* E-core count (0 = auto-detect) */
 	int  sysinfo_item_spacing; /* Space between freq/power/temp (default 8) */
@@ -155,6 +157,10 @@ struct barny_config {
 	bool   network_show_ip;
 	bool   network_show_interface;
 	bool   network_prefer_ipv4;
+	int    network_popup_gap;       /* px between bar and hover popup (0 = flush) */
+	bool   network_popup_show_ssid; /* SSID line for wifi */
+	bool   network_popup_show_ipv6; /* IPv6 row in addition to IPv4 */
+	bool   network_popup_show_mac;  /* MAC address row */
 
 	/* File read module */
 	char  *fileread_path;
@@ -165,6 +171,13 @@ struct barny_config {
 	char  *battery_path;        /* Override uevent path, NULL = auto-detect */
 	bool   battery_show_status; /* Show Charging/Discharging/Full prefix */
 	bool   battery_unit_space;  /* "85 %" vs "85%" */
+
+	/* Weather module */
+	int  weather_popup_gap;          /* px between bar and hover popup */
+	bool weather_popup_show_humidity;
+	bool weather_popup_show_wind;
+	bool weather_popup_show_pressure;
+	bool weather_popup_show_feels_like;
 };
 
 typedef struct barny_module_layout {

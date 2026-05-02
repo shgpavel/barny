@@ -1,3 +1,25 @@
+/*
+ * barny-weather: writes /opt/barny/modules/weather every UPDATE_INTERVAL.
+ *
+ * Output schema (key=value, one per line, UTF-8, no trailing whitespace):
+ *
+ *     temp=<float, deg C>
+ *     condition=<short text, e.g. "Clouds">
+ *     description=<long text, e.g. "scattered clouds">
+ *     location=<city name>
+ *     feels_like=<float, deg C>
+ *     humidity=<int, percent>
+ *     wind_speed=<float, m/s>
+ *     wind_deg=<int, degrees 0-359>
+ *     wind_dir=<short string, e.g. "NE">
+ *     pressure=<int, hPa>
+ *
+ * The first line is also kept compatible-ish with older readers in that
+ * temp is the first key. Readers MUST be tolerant of missing fields and
+ * unknown keys.
+ */
+
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +35,24 @@
 #define OUTPUT_TMP_PATH "/opt/barny/modules/weather.tmp"
 #define API_KEY_PATH    "/opt/barny/modules/weather_api_key"
 #define HTTP_TIMEOUT    30L
+
+typedef struct {
+	double temp;
+	double feels_like;
+	int    humidity;
+	int    pressure;
+	double wind_speed;
+	int    wind_deg;
+	char   condition[64];
+	char   description[128];
+	char   location[64];
+	bool   have_feels_like;
+	bool   have_humidity;
+	bool   have_pressure;
+	bool   have_wind;
+	bool   have_location;
+	bool   have_description;
+} weather_t;
 
 static volatile int running = 1;
 
@@ -54,9 +94,17 @@ get_location(double *lat, double *lon)
 	return 0;
 }
 
+static const char *
+deg_to_compass(int deg)
+{
+	static const char *dirs[] = { "N",  "NE", "E", "SE",
+		                      "S",  "SW", "W", "NW" };
+	int                idx    = (int)((deg + 22) / 45) & 7;
+	return dirs[idx];
+}
+
 static int
-get_weather(double lat, double lon, const char *api_key, double *temp,
-            char *weather, size_t weather_size)
+get_weather(double lat, double lon, const char *api_key, weather_t *out)
 {
 	char url[512];
 	snprintf(
@@ -68,7 +116,8 @@ get_weather(double lat, double lon, const char *api_key, double *temp,
 	if (!json)
 		return -1;
 
-	/* Get temperature */
+	memset(out, 0, sizeof(*out));
+
 	cJSON *main_obj = cJSON_GetObjectItem(json, "main");
 	cJSON *temp_obj = main_obj ? cJSON_GetObjectItem(main_obj, "temp") : NULL;
 	if (!temp_obj || !cJSON_IsNumber(temp_obj)) {
@@ -76,21 +125,66 @@ get_weather(double lat, double lon, const char *api_key, double *temp,
 		cJSON_Delete(json);
 		return -1;
 	}
-	*temp              = temp_obj->valuedouble;
+	out->temp = temp_obj->valuedouble;
 
-	/* Get weather description */
+	if (main_obj) {
+		cJSON *fl = cJSON_GetObjectItem(main_obj, "feels_like");
+		if (cJSON_IsNumber(fl)) {
+			out->feels_like      = fl->valuedouble;
+			out->have_feels_like = true;
+		}
+		cJSON *h = cJSON_GetObjectItem(main_obj, "humidity");
+		if (cJSON_IsNumber(h)) {
+			out->humidity      = (int)h->valuedouble;
+			out->have_humidity = true;
+		}
+		cJSON *p = cJSON_GetObjectItem(main_obj, "pressure");
+		if (cJSON_IsNumber(p)) {
+			out->pressure      = (int)p->valuedouble;
+			out->have_pressure = true;
+		}
+	}
+
+	cJSON *wind = cJSON_GetObjectItem(json, "wind");
+	if (wind) {
+		cJSON *ws = cJSON_GetObjectItem(wind, "speed");
+		cJSON *wd = cJSON_GetObjectItem(wind, "deg");
+		if (cJSON_IsNumber(ws)) {
+			out->wind_speed = ws->valuedouble;
+			out->wind_deg   = cJSON_IsNumber(wd) ? (int)wd->valuedouble
+			                                    : 0;
+			out->have_wind  = true;
+		}
+	}
+
+	cJSON *name = cJSON_GetObjectItem(json, "name");
+	if (cJSON_IsString(name) && name->valuestring && *name->valuestring) {
+		snprintf(out->location, sizeof(out->location), "%s",
+		         name->valuestring);
+		out->have_location = true;
+	}
+
 	cJSON *weather_arr = cJSON_GetObjectItem(json, "weather");
 	if (cJSON_IsArray(weather_arr) && cJSON_GetArraySize(weather_arr) > 0) {
 		cJSON *first    = cJSON_GetArrayItem(weather_arr, 0);
 		cJSON *main_str = cJSON_GetObjectItem(first, "main");
-		if (main_str && main_str->valuestring) {
-			snprintf(weather, weather_size, "%s",
+		cJSON *desc     = cJSON_GetObjectItem(first, "description");
+		if (main_str && cJSON_IsString(main_str)
+		    && main_str->valuestring) {
+			snprintf(out->condition, sizeof(out->condition), "%s",
 			         main_str->valuestring);
 		} else {
-			snprintf(weather, weather_size, "Unknown");
+			snprintf(out->condition, sizeof(out->condition),
+			         "Unknown");
+		}
+		if (desc && cJSON_IsString(desc) && desc->valuestring
+		    && *desc->valuestring) {
+			snprintf(out->description, sizeof(out->description),
+			         "%s", desc->valuestring);
+			out->have_description = true;
 		}
 	} else {
-		snprintf(weather, weather_size, "Unknown");
+		snprintf(out->condition, sizeof(out->condition), "Unknown");
 	}
 
 	cJSON_Delete(json);
@@ -98,7 +192,7 @@ get_weather(double lat, double lon, const char *api_key, double *temp,
 }
 
 static void
-write_output(double temp, const char *weather)
+write_output(const weather_t *w)
 {
 	FILE *f = fopen(OUTPUT_TMP_PATH, "w");
 	if (!f) {
@@ -106,7 +200,24 @@ write_output(double temp, const char *weather)
 		return;
 	}
 
-	fprintf(f, "%lg %s\n", temp, weather);
+	fprintf(f, "temp=%lg\n", w->temp);
+	fprintf(f, "condition=%s\n", w->condition);
+	if (w->have_description)
+		fprintf(f, "description=%s\n", w->description);
+	if (w->have_location)
+		fprintf(f, "location=%s\n", w->location);
+	if (w->have_feels_like)
+		fprintf(f, "feels_like=%lg\n", w->feels_like);
+	if (w->have_humidity)
+		fprintf(f, "humidity=%d\n", w->humidity);
+	if (w->have_wind) {
+		fprintf(f, "wind_speed=%lg\n", w->wind_speed);
+		fprintf(f, "wind_deg=%d\n", w->wind_deg);
+		fprintf(f, "wind_dir=%s\n", deg_to_compass(w->wind_deg));
+	}
+	if (w->have_pressure)
+		fprintf(f, "pressure=%d\n", w->pressure);
+
 	fclose(f);
 
 	if (rename(OUTPUT_TMP_PATH, OUTPUT_PATH) != 0) {
@@ -155,13 +266,12 @@ main(void)
 	fprintf(stderr, "Location: %.4f, %.4f\n", lat, lon);
 
 	while (running) {
-		double temp;
-		char   weather[64];
+		weather_t w;
 
-		if (get_weather(lat, lon, api_key, &temp, weather, sizeof(weather))
-		    == 0) {
-			write_output(temp, weather);
-			fprintf(stderr, "Updated: %.1f°C %s\n", temp, weather);
+		if (get_weather(lat, lon, api_key, &w) == 0) {
+			write_output(&w);
+			fprintf(stderr, "Updated: %.1f C %s\n", w.temp,
+			        w.condition);
 		}
 
 		/* Sleep in small increments to allow signal handling */

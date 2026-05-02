@@ -110,6 +110,30 @@ test_config_defaults(void)
 		ASSERT_EQ_INT(0, config.crypto_pair_count);
 	}
 
+	TEST("popup gaps default to 0")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		ASSERT_EQ_INT(0, config.crypto_popup_gap);
+		ASSERT_EQ_INT(0, config.sysinfo_popup_gap);
+		ASSERT_EQ_INT(0, config.network_popup_gap);
+		ASSERT_EQ_INT(0, config.weather_popup_gap);
+	}
+
+	TEST("popup content defaults match docs")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		ASSERT_EQ_INT(0, (int)config.sysinfo_popup_per_core);
+		ASSERT_EQ_INT(1, (int)config.network_popup_show_ssid);
+		ASSERT_EQ_INT(0, (int)config.network_popup_show_ipv6);
+		ASSERT_EQ_INT(0, (int)config.network_popup_show_mac);
+		ASSERT_EQ_INT(1, (int)config.weather_popup_show_humidity);
+		ASSERT_EQ_INT(1, (int)config.weather_popup_show_wind);
+		ASSERT_EQ_INT(0, (int)config.weather_popup_show_pressure);
+		ASSERT_EQ_INT(1, (int)config.weather_popup_show_feels_like);
+	}
+
 	/* Clock module defaults */
 	TEST("clock default show_time is true")
 	{
@@ -955,6 +979,78 @@ test_config_edge_cases(void)
 		ASSERT_EQ_INT(2, config.crypto_pair_count);
 		ASSERT_EQ_STR("BTC-USDT-SWAP", config.crypto_pairs[0]);
 		ASSERT_EQ_STR("DOGE-USDT-SWAP", config.crypto_pairs[1]);
+		barny_config_cleanup(&config);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses sysinfo_popup_gap and clamps")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path
+		        = create_temp_config("sysinfo_popup_gap = 12\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(12, config.sysinfo_popup_gap);
+		barny_config_cleanup(&config);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses sysinfo_popup_per_core true")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config(
+		        "sysinfo_popup_per_core = true\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(1, (int)config.sysinfo_popup_per_core);
+		barny_config_cleanup(&config);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses network popup options")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config(
+		        "network_popup_gap = 6\n"
+		        "network_popup_show_ssid = false\n"
+		        "network_popup_show_ipv6 = true\n"
+		        "network_popup_show_mac = true\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(6, config.network_popup_gap);
+		ASSERT_EQ_INT(0, (int)config.network_popup_show_ssid);
+		ASSERT_EQ_INT(1, (int)config.network_popup_show_ipv6);
+		ASSERT_EQ_INT(1, (int)config.network_popup_show_mac);
+		barny_config_cleanup(&config);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses weather popup options")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path = create_temp_config(
+		        "weather_popup_gap = 8\n"
+		        "weather_popup_show_humidity = false\n"
+		        "weather_popup_show_pressure = true\n"
+		        "weather_popup_show_feels_like = false\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(8, config.weather_popup_gap);
+		ASSERT_EQ_INT(0, (int)config.weather_popup_show_humidity);
+		ASSERT_EQ_INT(1, (int)config.weather_popup_show_pressure);
+		ASSERT_EQ_INT(0, (int)config.weather_popup_show_feels_like);
+		barny_config_cleanup(&config);
+		cleanup_temp_config(path);
+	}
+
+	TEST("popup_gap clamps to 64")
+	{
+		barny_config_t config;
+		barny_config_defaults(&config);
+		const char *path
+		        = create_temp_config("network_popup_gap = 999\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(64, config.network_popup_gap);
 		barny_config_cleanup(&config);
 		cleanup_temp_config(path);
 	}

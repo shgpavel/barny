@@ -5,6 +5,10 @@
 #include <ctype.h>
 
 #include "barny.h"
+#include "popup.h"
+
+#define LINE_H              26
+#define MAX_PER_CORE_ROWS   32
 
 typedef struct {
 	barny_state_t        *state;
@@ -21,6 +25,16 @@ typedef struct {
 	int                   current_temp;
 	bool                  temp_path_found;
 	PangoFontDescription *font_desc;
+	PangoFontDescription *popup_font_desc;
+
+	/* Popup state */
+	barny_popup_t        *popup;
+	long                  uptime_seconds;
+	char                  uptime_str[32];
+	double                load_avg[3];
+	char                  load_str[48];
+	int                   per_core_khz[MAX_PER_CORE_ROWS];
+	int                   per_core_count;
 } sysinfo_data_t;
 
 static int
@@ -215,6 +229,316 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 	data->temp_path_found = true;
 }
 
+static long
+read_uptime_seconds(void)
+{
+	FILE *f = fopen("/proc/uptime", "r");
+	if (!f)
+		return -1;
+	double up = 0.0;
+	if (fscanf(f, "%lf", &up) != 1) {
+		fclose(f);
+		return -1;
+	}
+	fclose(f);
+	return (long)up;
+}
+
+static bool
+read_loadavg(double load[3])
+{
+	FILE *f = fopen("/proc/loadavg", "r");
+	if (!f)
+		return false;
+	bool ok = (fscanf(f, "%lf %lf %lf", &load[0], &load[1], &load[2]) == 3);
+	fclose(f);
+	return ok;
+}
+
+static int
+read_per_core_freqs(int *out_khz, int max)
+{
+	DIR *dir = opendir("/sys/devices/system/cpu");
+	if (!dir)
+		return 0;
+
+	int  ids[256];
+	int  id_count = 0;
+
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != NULL && id_count < 256) {
+		if (strncmp(entry->d_name, "cpu", 3) != 0)
+			continue;
+		if (!isdigit(entry->d_name[3]))
+			continue;
+		ids[id_count++] = atoi(entry->d_name + 3);
+	}
+	closedir(dir);
+
+	/* Simple insertion sort to keep core ids ordered */
+	for (int i = 1; i < id_count; i++) {
+		int key = ids[i];
+		int j   = i - 1;
+		while (j >= 0 && ids[j] > key) {
+			ids[j + 1] = ids[j];
+			j--;
+		}
+		ids[j + 1] = key;
+	}
+
+	int out = 0;
+	for (int i = 0; i < id_count && out < max; i++) {
+		char path[256];
+		snprintf(path, sizeof(path),
+		         "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq",
+		         ids[i]);
+		int khz = read_int_file(path);
+		if (khz < 0)
+			continue;
+		out_khz[out++] = khz;
+	}
+	return out;
+}
+
+static void
+format_uptime(long secs, char *buf, size_t buf_size)
+{
+	if (secs < 0) {
+		snprintf(buf, buf_size, "--");
+		return;
+	}
+	long days  = secs / 86400;
+	long hours = (secs % 86400) / 3600;
+	long mins  = (secs % 3600) / 60;
+	if (days > 0)
+		snprintf(buf, buf_size, "%ldd %ldh %ldm", days, hours, mins);
+	else
+		snprintf(buf, buf_size, "%ldh %ldm", hours, mins);
+}
+
+static void
+format_loadavg(const double load[3], char *buf, size_t buf_size)
+{
+	snprintf(buf, buf_size, "%.2f / %.2f / %.2f", load[0], load[1], load[2]);
+}
+
+static int
+sysinfo_popup_row_count(const sysinfo_data_t *data)
+{
+	const barny_config_t *cfg = &data->state->config;
+	int rows = 0;
+
+	rows++; /* CPU summary (avg freq + power + temp) */
+	if (data->p_core_count > 0 && data->e_core_count > 0)
+		rows++; /* P/E avg */
+	rows++; /* Power */
+	rows++; /* Temperature */
+	rows++; /* Uptime */
+	rows++; /* Load average */
+
+	if (cfg->sysinfo_popup_per_core) {
+		int n = data->per_core_count;
+		if (n > MAX_PER_CORE_ROWS)
+			n = MAX_PER_CORE_ROWS;
+		rows += n;
+	}
+
+	return rows;
+}
+
+static int
+sysinfo_popup_height(void *ud)
+{
+	const sysinfo_data_t *data = ud;
+	return sysinfo_popup_row_count(data) * LINE_H;
+}
+
+static void
+draw_label_value_row(cairo_t *cr, PangoLayout *layout, int row_y, int w,
+                     const char *label, const char *value, double lr,
+                     double lg, double lb, double vr, double vg, double vb)
+{
+	int tw, th, text_y;
+
+	/* Label, left-aligned */
+	pango_layout_set_text(layout, label, -1);
+	pango_layout_get_pixel_size(layout, &tw, &th);
+	text_y = row_y + (LINE_H - th) / 2;
+
+	cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
+	cairo_move_to(cr, 1, text_y + 1);
+	pango_cairo_show_layout(cr, layout);
+
+	cairo_set_source_rgba(cr, lr, lg, lb, 0.9);
+	cairo_move_to(cr, 0, text_y);
+	pango_cairo_show_layout(cr, layout);
+
+	/* Value, right-aligned */
+	pango_layout_set_text(layout, value, -1);
+	pango_layout_get_pixel_size(layout, &tw, &th);
+	text_y = row_y + (LINE_H - th) / 2;
+	int x  = w - tw;
+
+	cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
+	cairo_move_to(cr, x + 1, text_y + 1);
+	pango_cairo_show_layout(cr, layout);
+
+	cairo_set_source_rgba(cr, vr, vg, vb, 0.9);
+	cairo_move_to(cr, x, text_y);
+	pango_cairo_show_layout(cr, layout);
+}
+
+static void
+sysinfo_popup_render(void *ud, cairo_t *cr, int w, int h)
+{
+	sysinfo_data_t  *data = ud;
+	barny_config_t  *cfg  = &data->state->config;
+	PangoLayout     *layout;
+	int              row    = 0;
+	double           lr = 0.6, lg = 0.7, lb = 0.65;
+	double           vr = 0.85, vg = 0.95, vb = 0.85;
+
+	(void)h;
+
+	if (cfg->text_color_set) {
+		vr = cfg->text_color_r;
+		vg = cfg->text_color_g;
+		vb = cfg->text_color_b;
+	}
+
+	layout = pango_cairo_create_layout(cr);
+	pango_layout_set_font_description(layout, data->popup_font_desc);
+
+	/* Row 1: CPU summary */
+	{
+		double avg = 0.0;
+		bool   hybrid = (data->p_core_count > 0 && data->e_core_count > 0);
+		if (hybrid) {
+			int total = data->p_core_count + data->e_core_count;
+			avg = (total > 0) ? (data->p_freq * data->p_core_count
+			                     + data->e_freq * data->e_core_count)
+			                            / total
+			                  : 0.0;
+		} else {
+			avg = data->p_freq;
+		}
+
+		char value[96];
+		const char *power_fmt;
+		switch (cfg->sysinfo_power_decimals) {
+		case 1:  power_fmt = "%.1fW"; break;
+		case 2:  power_fmt = "%.2fW"; break;
+		default: power_fmt = "%.0fW"; break;
+		}
+
+		char power_buf[32];
+		snprintf(power_buf, sizeof(power_buf), power_fmt, data->power);
+
+		const char *temp_unit = cfg->sysinfo_temp_show_unit ? "C" : "";
+		snprintf(value, sizeof(value), "%.2fGHz  %s  %d%s", avg, power_buf,
+		         data->current_temp, temp_unit);
+
+		draw_label_value_row(cr, layout, row * LINE_H, w, "CPU", value,
+		                     lr, lg, lb, vr, vg, vb);
+		row++;
+	}
+
+	/* Row 2: P/E avg if heterogeneous */
+	if (data->p_core_count > 0 && data->e_core_count > 0) {
+		char value[64];
+		snprintf(value, sizeof(value), "P:%.2f  E:%.2f GHz", data->p_freq,
+		         data->e_freq);
+		draw_label_value_row(cr, layout, row * LINE_H, w, "P/E avg",
+		                     value, lr, lg, lb, vr, vg, vb);
+		row++;
+	}
+
+	/* Row 3: Power */
+	{
+		const char *fmt;
+		switch (cfg->sysinfo_power_decimals) {
+		case 1:  fmt = "%.1f W"; break;
+		case 2:  fmt = "%.2f W"; break;
+		default: fmt = "%.0f W"; break;
+		}
+		char value[32];
+		snprintf(value, sizeof(value), fmt, data->power);
+		draw_label_value_row(cr, layout, row * LINE_H, w, "Power",
+		                     value, lr, lg, lb, vr, vg, vb);
+		row++;
+	}
+
+	/* Row 4: Temperature */
+	{
+		char value[32];
+		if (cfg->sysinfo_temp_show_unit) {
+			const char *fmt = cfg->sysinfo_temp_unit_space ? "%d C" : "%dC";
+			snprintf(value, sizeof(value), fmt, data->current_temp);
+		} else {
+			snprintf(value, sizeof(value), "%d", data->current_temp);
+		}
+		draw_label_value_row(cr, layout, row * LINE_H, w, "Temp",
+		                     value, lr, lg, lb, vr, vg, vb);
+		row++;
+	}
+
+	/* Row 5: Uptime */
+	draw_label_value_row(cr, layout, row * LINE_H, w, "Uptime",
+	                     data->uptime_str, lr, lg, lb, vr, vg, vb);
+	row++;
+
+	/* Row 6: Load average */
+	draw_label_value_row(cr, layout, row * LINE_H, w, "Load",
+	                     data->load_str, lr, lg, lb, vr, vg, vb);
+	row++;
+
+	/* Per-core rows */
+	if (cfg->sysinfo_popup_per_core) {
+		int n = data->per_core_count;
+		if (n > MAX_PER_CORE_ROWS)
+			n = MAX_PER_CORE_ROWS;
+		for (int i = 0; i < n; i++) {
+			char label[16];
+			char value[24];
+			snprintf(label, sizeof(label), "cpu%d", i);
+			snprintf(value, sizeof(value), "%.2f GHz",
+			         data->per_core_khz[i] / 1000000.0);
+			draw_label_value_row(cr, layout, row * LINE_H, w, label,
+			                     value, lr, lg, lb, vr, vg, vb);
+			row++;
+		}
+	}
+
+	g_object_unref(layout);
+}
+
+static void
+sysinfo_on_hover(barny_module_t *self, bool hovering, int x, int y)
+{
+	sysinfo_data_t *data = self->data;
+	(void)x;
+	(void)y;
+
+	if (hovering) {
+		if (!data->popup) {
+			barny_popup_callbacks_t cb = {
+				.content_height = sysinfo_popup_height,
+				.content_width  = NULL,
+				.render         = sysinfo_popup_render,
+				.userdata       = data,
+			};
+			data->popup = barny_popup_create(
+			        data->state, self, &cb,
+			        data->state->config.sysinfo_popup_gap);
+		}
+	} else {
+		if (data->popup) {
+			barny_popup_destroy(data->popup);
+			data->popup = NULL;
+		}
+	}
+}
+
 static int
 sysinfo_init(barny_module_t *self, barny_state_t *state)
 {
@@ -223,11 +547,25 @@ sysinfo_init(barny_module_t *self, barny_state_t *state)
 
 	data->font_desc      = pango_font_description_from_string(
                 state->config.font ? state->config.font : "Sans 10");
+	data->popup_font_desc = pango_font_description_from_string(
+	        state->config.font ? state->config.font : "Sans 10");
+
+	int base_size = pango_font_description_get_size(data->popup_font_desc);
+	if (base_size > 0) {
+		pango_font_description_set_size(data->popup_font_desc,
+		                                base_size * 85 / 100);
+	} else {
+		pango_font_description_set_size(data->popup_font_desc,
+		                                9 * PANGO_SCALE);
+	}
 
 	strcpy(data->freq_str, "-- GHz");
 	strcpy(data->power_str, "-- W");
 	strcpy(data->temp_str, "-- C");
-	data->current_temp = -1;
+	data->current_temp   = -1;
+	data->uptime_seconds = -1;
+	snprintf(data->uptime_str, sizeof(data->uptime_str), "--");
+	snprintf(data->load_str, sizeof(data->load_str), "-- / -- / --");
 
 	detect_core_counts(data);
 	find_temp_path(data, &state->config);
@@ -242,8 +580,17 @@ sysinfo_destroy(barny_module_t *self)
 	if (!data)
 		return;
 
+	if (data->state && data->state->hover_module == self)
+		data->state->hover_module = NULL;
+
+	barny_popup_destroy(data->popup);
+	data->popup = NULL;
+
 	if (data->font_desc) {
 		pango_font_description_free(data->font_desc);
+	}
+	if (data->popup_font_desc) {
+		pango_font_description_free(data->popup_font_desc);
 	}
 
 	free(data);
@@ -426,6 +773,53 @@ sysinfo_update(barny_module_t *self)
 			fclose(f);
 		}
 	}
+
+	/* Popup-only data: only refresh if popup visible */
+	bool popup_changed = false;
+
+	long up = read_uptime_seconds();
+	if (up >= 0 && up != data->uptime_seconds) {
+		long old_min = data->uptime_seconds / 60;
+		long new_min = up / 60;
+		data->uptime_seconds = up;
+		if (new_min != old_min) {
+			format_uptime(up, data->uptime_str,
+			              sizeof(data->uptime_str));
+			popup_changed = true;
+		}
+	}
+
+	double load[3];
+	if (read_loadavg(load)) {
+		if (load[0] != data->load_avg[0]
+		    || load[1] != data->load_avg[1]
+		    || load[2] != data->load_avg[2]) {
+			data->load_avg[0] = load[0];
+			data->load_avg[1] = load[1];
+			data->load_avg[2] = load[2];
+			format_loadavg(load, data->load_str,
+			               sizeof(data->load_str));
+			popup_changed = true;
+		}
+	}
+
+	if (cfg->sysinfo_popup_per_core) {
+		int  new_freqs[MAX_PER_CORE_ROWS];
+		int  n = read_per_core_freqs(new_freqs, MAX_PER_CORE_ROWS);
+		bool diff = (n != data->per_core_count);
+		for (int i = 0; !diff && i < n; i++)
+			if (new_freqs[i] != data->per_core_khz[i])
+				diff = true;
+		if (diff) {
+			data->per_core_count = n;
+			for (int i = 0; i < n; i++)
+				data->per_core_khz[i] = new_freqs[i];
+			popup_changed = true;
+		}
+	}
+
+	if (popup_changed && barny_popup_visible(data->popup))
+		barny_popup_redraw(data->popup);
 }
 
 /* Helper to render text with shadow */
@@ -540,6 +934,7 @@ barny_module_sysinfo_create(void)
 	mod->destroy  = sysinfo_destroy;
 	mod->update   = sysinfo_update;
 	mod->render   = sysinfo_render;
+	mod->on_hover = sysinfo_on_hover;
 	mod->data     = data;
 	mod->width    = 180;
 	mod->dirty    = true;

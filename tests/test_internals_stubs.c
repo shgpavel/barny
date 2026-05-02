@@ -72,3 +72,37 @@ barny_output_destroy(barny_output_t *output)
 {
 	(void)output;
 }
+
+/* Popup helper stubs — real impl in src/modules/popup.c pulls in
+ * wayland protocol symbols not linked into this test binary. */
+#include "../src/modules/popup.h"
+
+barny_popup_t *
+barny_popup_create(barny_state_t *state, barny_module_t *owner,
+                   const barny_popup_callbacks_t *cb, int gap_px)
+{
+	(void)state;
+	(void)owner;
+	(void)cb;
+	(void)gap_px;
+	return NULL;
+}
+
+void
+barny_popup_destroy(barny_popup_t *popup)
+{
+	(void)popup;
+}
+
+void
+barny_popup_redraw(barny_popup_t *popup)
+{
+	(void)popup;
+}
+
+bool
+barny_popup_visible(const barny_popup_t *popup)
+{
+	(void)popup;
+	return false;
+}

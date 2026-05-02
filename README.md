@@ -161,6 +161,38 @@ You can add proportional spacer tokens in these CSV lists:
 
 Note: the shipped `config/barny.conf` sets a different example list (BTC, ETH, SOL, BZ, ADA, POL, OP, TON, TRX); the default above is the built-in fallback used when no config is provided.
 
+### Sysinfo Module
+
+Hovering the sysinfo module shows a popup with summary CPU info, uptime, load average, and (optionally) per-core frequencies.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `sysinfo_popup_gap` | `0` | Pixels between bar and hover popup (0-64). 0 = flush |
+| `sysinfo_popup_per_core` | `false` | Append one row per CPU core (capped at 32) showing live frequency |
+
+### Network Module
+
+Hovering the network module shows a popup with interface details, IP addresses, and live throughput.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `network_popup_gap` | `0` | Pixels between bar and hover popup (0-64). 0 = flush |
+| `network_popup_show_ssid` | `true` | Show SSID row for wifi interfaces |
+| `network_popup_show_ipv6` | `false` | Show IPv6 address row in addition to IPv4 |
+| `network_popup_show_mac` | `false` | Show MAC address row |
+
+### Weather Module
+
+Hovering the weather module shows a popup with location, condition, and optional detail rows.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `weather_popup_gap` | `0` | Pixels between bar and hover popup (0-64). 0 = flush |
+| `weather_popup_show_humidity` | `true` | Humidity row |
+| `weather_popup_show_wind` | `true` | Wind speed + compass direction row |
+| `weather_popup_show_pressure` | `false` | Atmospheric pressure row |
+| `weather_popup_show_feels_like` | `true` | "Feels like" temperature row |
+
 ### Graphical Layout Editor
 
 Run:
