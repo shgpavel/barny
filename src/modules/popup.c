@@ -445,3 +445,26 @@ barny_popup_visible(const barny_popup_t *p)
 {
 	return p && p->configured && p->buffer != NULL;
 }
+
+int
+barny_popup_measure_text(PangoFontDescription *font_desc, const char *text)
+{
+	if (!font_desc || !text || !*text)
+		return 0;
+
+	cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_A8, 1,
+	                                                   1);
+	cairo_t         *cr   = cairo_create(surf);
+	PangoLayout     *layout = pango_cairo_create_layout(cr);
+	int              w = 0;
+	int              h = 0;
+
+	pango_layout_set_font_description(layout, font_desc);
+	pango_layout_set_text(layout, text, -1);
+	pango_layout_get_pixel_size(layout, &w, &h);
+
+	g_object_unref(layout);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surf);
+	return w;
+}

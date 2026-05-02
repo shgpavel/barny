@@ -35,4 +35,9 @@ barny_popup_redraw(barny_popup_t *popup);
 bool
 barny_popup_visible(const barny_popup_t *popup);
 
+/* Measure text width in pixels using the given Pango font description.
+ * Used by content_width callbacks to size the popup to fit its rows. */
+int
+barny_popup_measure_text(PangoFontDescription *font_desc, const char *text);
+
 #endif /* BARNY_POPUP_H */

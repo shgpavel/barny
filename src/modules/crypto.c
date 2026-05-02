@@ -167,6 +167,30 @@ crypto_popup_height(void *ud)
 	return popup_row_count(data) * POPUP_LINE_H;
 }
 
+static int
+crypto_popup_width(void *ud)
+{
+	crypto_data_t *data = ud;
+	int            max_label = 0;
+	int            max_value = 0;
+
+	for (int i = 1; i < data->pair_count; i++) {
+		int lw = barny_popup_measure_text(data->popup_font_desc,
+		                                  data->pairs[i].name);
+		int vw = barny_popup_measure_text(data->popup_font_desc,
+		                                  data->pairs[i].price_str);
+		if (lw > max_label)
+			max_label = lw;
+		if (vw > max_value)
+			max_value = vw;
+	}
+	int content = max_label + 24 + max_value;
+	int total   = content + 2 * BARNY_POPUP_PAD_X;
+	if (total < 180)
+		total = 180;
+	return total;
+}
+
 static void
 crypto_popup_render(void *ud, cairo_t *cr, int w, int h)
 {
@@ -233,7 +257,7 @@ crypto_on_hover(barny_module_t *self, bool hovering, int x, int y)
 		if (!data->popup && popup_row_count(data) > 0) {
 			barny_popup_callbacks_t cb = {
 				.content_height = crypto_popup_height,
-				.content_width  = NULL,
+				.content_width  = crypto_popup_width,
 				.render         = crypto_popup_render,
 				.userdata       = data,
 			};

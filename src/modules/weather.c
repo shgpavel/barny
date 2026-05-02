@@ -198,6 +198,73 @@ weather_popup_height(void *ud)
 	return popup_active_rows(d) * POPUP_LINE_H;
 }
 
+static int
+weather_popup_width(void *ud)
+{
+	weather_data_t       *d   = ud;
+	const barny_config_t *cfg = &d->state->config;
+	int                   max_label = 0;
+	int                   max_value = 0;
+	char                  buf[64];
+
+#define MEASURE_LABEL(s) do {                                              \
+	int _w = barny_popup_measure_text(d->popup_font_desc, (s));        \
+	if (_w > max_label) max_label = _w;                                \
+} while (0)
+#define MEASURE_VALUE(s) do {                                              \
+	int _w = barny_popup_measure_text(d->popup_font_desc, (s));        \
+	if (_w > max_value) max_value = _w;                                \
+} while (0)
+
+	if (d->have_location) {
+		MEASURE_LABEL("Location");
+		MEASURE_VALUE(d->location);
+	}
+	if (d->have_description) {
+		MEASURE_LABEL("Condition");
+		MEASURE_VALUE(d->description);
+	} else if (d->condition[0]) {
+		MEASURE_LABEL("Condition");
+		MEASURE_VALUE(d->condition);
+	}
+	if (d->have_temp) {
+		MEASURE_LABEL("Temperature");
+		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0" "C", d->temperature);
+		MEASURE_VALUE(buf);
+	}
+	if (cfg->weather_popup_show_feels_like && d->have_feels_like) {
+		MEASURE_LABEL("Feels like");
+		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0" "C", d->feels_like);
+		MEASURE_VALUE(buf);
+	}
+	if (cfg->weather_popup_show_humidity && d->have_humidity) {
+		MEASURE_LABEL("Humidity");
+		snprintf(buf, sizeof(buf), "%d%%", d->humidity);
+		MEASURE_VALUE(buf);
+	}
+	if (cfg->weather_popup_show_wind && d->have_wind) {
+		MEASURE_LABEL("Wind");
+		if (d->wind_dir[0])
+			snprintf(buf, sizeof(buf), "%.1f m/s %s", d->wind_speed,
+			         d->wind_dir);
+		else
+			snprintf(buf, sizeof(buf), "%.1f m/s", d->wind_speed);
+		MEASURE_VALUE(buf);
+	}
+	if (cfg->weather_popup_show_pressure && d->have_pressure) {
+		MEASURE_LABEL("Pressure");
+		snprintf(buf, sizeof(buf), "%d hPa", d->pressure);
+		MEASURE_VALUE(buf);
+	}
+#undef MEASURE_LABEL
+#undef MEASURE_VALUE
+
+	int total = max_label + 24 + max_value + 2 * BARNY_POPUP_PAD_X;
+	if (total < 200)
+		total = 200;
+	return total;
+}
+
 static void
 draw_row(cairo_t *cr, PangoLayout *layout, const barny_config_t *cfg,
          int line_idx, int width, const char *label, const char *value)
@@ -305,7 +372,7 @@ weather_on_hover(barny_module_t *self, bool hovering, int x, int y)
 		if (!data->popup && popup_active_rows(data) > 0) {
 			barny_popup_callbacks_t cb = {
 				.content_height = weather_popup_height,
-				.content_width  = NULL,
+				.content_width  = weather_popup_width,
 				.render         = weather_popup_render,
 				.userdata       = data,
 			};

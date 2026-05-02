@@ -353,6 +353,60 @@ sysinfo_popup_height(void *ud)
 	return sysinfo_popup_row_count(data) * LINE_H;
 }
 
+static int
+sysinfo_popup_width(void *ud)
+{
+	sysinfo_data_t       *data = ud;
+	const barny_config_t *cfg  = &data->state->config;
+	int                   max_label = 0;
+	int                   max_value = 0;
+	char                  buf[96];
+
+	const char *labels[] = { "CPU", "P/E avg", "Power", "Temp",
+	                         "Uptime", "Load" };
+	for (size_t i = 0; i < sizeof(labels) / sizeof(*labels); i++) {
+		int w = barny_popup_measure_text(data->popup_font_desc,
+		                                 labels[i]);
+		if (w > max_label)
+			max_label = w;
+	}
+
+	/* CPU summary row value (worst-case typical width). */
+	const char *power_fmt = cfg->sysinfo_power_decimals == 2 ? "%.2fW"
+	                       : cfg->sysinfo_power_decimals == 1 ? "%.1fW"
+	                                                          : "%.0fW";
+	char power_buf[32];
+	snprintf(power_buf, sizeof(power_buf), power_fmt, data->power);
+	const char *temp_unit = cfg->sysinfo_temp_show_unit ? "C" : "";
+	snprintf(buf, sizeof(buf), "%.2fGHz  %s  %d%s",
+	         data->p_freq > 0 ? data->p_freq : 4.0, power_buf,
+	         data->current_temp, temp_unit);
+	int w = barny_popup_measure_text(data->popup_font_desc, buf);
+	if (w > max_value)
+		max_value = w;
+
+	w = barny_popup_measure_text(data->popup_font_desc, data->uptime_str);
+	if (w > max_value)
+		max_value = w;
+	w = barny_popup_measure_text(data->popup_font_desc, data->load_str);
+	if (w > max_value)
+		max_value = w;
+
+	if (cfg->sysinfo_popup_per_core) {
+		w = barny_popup_measure_text(data->popup_font_desc, "9.99 GHz");
+		if (w > max_value)
+			max_value = w;
+		w = barny_popup_measure_text(data->popup_font_desc, "cpu99");
+		if (w > max_label)
+			max_label = w;
+	}
+
+	int total = max_label + 24 + max_value + 2 * BARNY_POPUP_PAD_X;
+	if (total < 200)
+		total = 200;
+	return total;
+}
+
 static void
 draw_label_value_row(cairo_t *cr, PangoLayout *layout, int row_y, int w,
                      const char *label, const char *value, double lr,
@@ -523,7 +577,7 @@ sysinfo_on_hover(barny_module_t *self, bool hovering, int x, int y)
 		if (!data->popup) {
 			barny_popup_callbacks_t cb = {
 				.content_height = sysinfo_popup_height,
-				.content_width  = NULL,
+				.content_width  = sysinfo_popup_width,
 				.render         = sysinfo_popup_render,
 				.userdata       = data,
 			};

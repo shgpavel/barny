@@ -76,6 +76,23 @@ barny_test_ipc = executable(
 
 test('barny_test_ipc', barny_test_ipc)
 
+# --- Module performance benchmarks (separate suite, not run by default) ---
+barny_test_perf = executable(
+    'barny_test_perf',
+    files('test_perf.c', 'test_stubs.c'),
+    test_support_sources,
+    wl_protocol_sources,
+    dependencies: all_deps,
+    include_directories: test_inc_dirs,
+    build_by_default: false,
+)
+
+test('barny_test_perf', barny_test_perf,
+    suite: 'perf',
+    timeout: 120,
+    is_parallel: false,
+    verbose: true)
+
 # --- Session launcher script regressions ---
 test('barny_session_script',
     find_program('sh'),
