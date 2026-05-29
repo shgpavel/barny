@@ -195,6 +195,10 @@ barny_config_defaults(barny_config_t *config)
 	config->battery_show_status      = true;
 	config->battery_unit_space       = false;
 
+	/* Window title module defaults */
+	config->windowtitle_max_length     = 64;
+	config->windowtitle_empty_text     = NULL;
+
 	/* Weather module defaults */
 	config->weather_popup_gap          = 0;
 	config->weather_popup_show_humidity   = true;
@@ -513,6 +517,11 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->battery_show_status = parse_bool(value);
 	} else if (strcmp(key, "battery_unit_space") == 0) {
 		config->battery_unit_space = parse_bool(value);
+	} else if (strcmp(key, "windowtitle_max_length") == 0) {
+		config->windowtitle_max_length = parse_int_clamped(value, 0, 256);
+	} else if (strcmp(key, "windowtitle_empty_text") == 0) {
+		free(config->windowtitle_empty_text);
+		config->windowtitle_empty_text = strdup(value);
 	} else if (strcmp(key, "weather_popup_gap") == 0) {
 		config->weather_popup_gap = parse_int_clamped(value, 0, 64);
 	} else if (strcmp(key, "weather_popup_show_humidity") == 0) {
@@ -618,6 +627,7 @@ barny_config_cleanup(barny_config_t *config)
 	free(config->fileread_path);
 	free(config->fileread_title);
 	free(config->battery_path);
+	free(config->windowtitle_empty_text);
 
 	if (config->workspace_names) {
 		barny_free_string_array(config->workspace_names,

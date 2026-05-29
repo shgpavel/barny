@@ -174,6 +174,10 @@ struct barny_config {
 	bool   battery_show_status; /* Show Charging/Discharging/Full prefix */
 	bool   battery_unit_space;  /* "85 %" vs "85%" */
 
+	/* Window title module */
+	int   windowtitle_max_length;  /* Max characters before truncation (0 = unlimited) */
+	char *windowtitle_empty_text;  /* Text to show when no window is focused */
+
 	/* Weather module */
 	int  weather_popup_gap;          /* px between bar and hover popup */
 	bool weather_popup_show_humidity;
@@ -353,6 +357,10 @@ barny_module_t *
 barny_module_fileread_create(void);
 barny_module_t *
 barny_module_battery_create(void);
+barny_module_t *
+barny_module_windowtitle_create(void);
+void
+barny_windowtitle_refresh(barny_module_t *mod);
 
 /* Module layout */
 void

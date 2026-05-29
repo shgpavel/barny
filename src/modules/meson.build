@@ -14,5 +14,6 @@ barny_sources += files(
     'sysinfo.c',
     'tray.c',
     'weather.c',
+    'windowtitle.c',
     'workspace.c',
 )

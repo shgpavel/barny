@@ -23,6 +23,7 @@ static const module_factory_entry_t module_factories[] = {
 	{ "crypto",    barny_module_crypto_create    },
 	{ "tray",      barny_module_tray_create      },
 	{ "battery",   barny_module_battery_create   },
+	{ "windowtitle", barny_module_windowtitle_create },
 };
 
 static barny_module_t *

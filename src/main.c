@@ -79,12 +79,26 @@ find_workspace_module(barny_state_t *s)
 	return NULL;
 }
 
+/* Find windowtitle module */
+static barny_module_t *
+find_windowtitle_module(barny_state_t *s)
+{
+	for (int i = 0; i < s->module_count; i++) {
+		if (s->modules[i]
+		    && strcmp(s->modules[i]->name, "windowtitle") == 0) {
+			return s->modules[i];
+		}
+	}
+	return NULL;
+}
+
 static void
 run_event_loop(barny_state_t *s)
 {
 	struct epoll_event events[16];
-	int                wayland_fd    = wl_display_get_fd(s->display);
-	barny_module_t    *workspace_mod = find_workspace_module(s);
+	int                wayland_fd      = wl_display_get_fd(s->display);
+	barny_module_t    *workspace_mod   = find_workspace_module(s);
+	barny_module_t    *windowtitle_mod = find_windowtitle_module(s);
 
 	while (s->running) {
 		/* Dispatch any pending Wayland events first */
@@ -156,6 +170,9 @@ run_event_loop(barny_state_t *s)
 		/* Refresh workspace data when IPC events arrive */
 		if (need_workspace_refresh && workspace_mod) {
 			barny_workspace_refresh(workspace_mod);
+		}
+		if (need_workspace_refresh && windowtitle_mod) {
+			barny_windowtitle_refresh(windowtitle_mod);
 		}
 
 		/* Full module I/O update only on 500ms timeout — avoids

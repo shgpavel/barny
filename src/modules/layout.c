@@ -23,6 +23,7 @@ static const module_catalog_entry_t module_catalog[] = {
 	{ "crypto",    BARNY_POS_RIGHT },
 	{ "tray",      BARNY_POS_RIGHT },
 	{ "battery",   BARNY_POS_RIGHT },
+	{ "windowtitle", BARNY_POS_CENTER },
 };
 
 static int
