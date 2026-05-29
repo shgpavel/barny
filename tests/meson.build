@@ -24,6 +24,7 @@ test_support_sources = files(
     '../src/modules/ram.c',
     '../src/modules/sysinfo.c',
     '../src/modules/weather.c',
+    '../src/modules/windowtitle.c',
     '../src/modules/workspace.c',
 )
 

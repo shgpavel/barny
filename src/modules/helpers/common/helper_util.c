@@ -35,7 +35,7 @@ helper_free_string_array(char **arr, size_t count)
 		return;
 	for (size_t i = 0; i < count; i++)
 		free(arr[i]);
-	free(arr);
+	free((void *)arr);
 }
 
 char **
@@ -54,13 +54,13 @@ helper_parse_csv(const char *input, size_t *out_count)
 			max_tokens++;
 	}
 
-	char **result = calloc(max_tokens, sizeof(*result));
+	char **result = (char **)calloc(max_tokens, sizeof(*result));
 	if (!result)
 		return NULL;
 
 	char *tmp = strdup(input);
 	if (!tmp) {
-		free(result);
+		free((void *)result);
 		return NULL;
 	}
 
@@ -84,7 +84,7 @@ helper_parse_csv(const char *input, size_t *out_count)
 	free(tmp);
 
 	if (count == 0) {
-		free(result);
+		free((void *)result);
 		return NULL;
 	}
 

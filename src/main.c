@@ -7,6 +7,7 @@
 #include <errno.h>
 
 #include "barny.h"
+#include "util.h"
 
 static barny_state_t state = { 0 };
 
@@ -99,8 +100,15 @@ run_event_loop(barny_state_t *s)
 	int                wayland_fd      = wl_display_get_fd(s->display);
 	barny_module_t    *workspace_mod   = find_workspace_module(s);
 	barny_module_t    *windowtitle_mod = find_windowtitle_module(s);
+	uint64_t           last_update     = 0;
 
 	while (s->running) {
+		uint64_t now = barny_now_ms();
+		if (now - last_update >= 500) {
+			barny_modules_update(s);
+			last_update = now;
+		}
+
 		/* Dispatch any pending Wayland events first */
 		while (wl_display_prepare_read(s->display) != 0) {
 			wl_display_dispatch_pending(s->display);
@@ -175,14 +183,10 @@ run_event_loop(barny_state_t *s)
 			barny_windowtitle_refresh(windowtitle_mod);
 		}
 
-		/* Full module I/O update only on 500ms timeout — avoids
-		 * expensive file reads (sysinfo, ram, disk, network) during
-		 * latency-sensitive workspace switches and tray events */
-		if (nfds == 0) {
-			barny_modules_update(s);
-		} else {
-			/* For workspace/dbus events, just render dirty modules
-			 * without polling all modules for data changes */
+		/* For workspace/dbus events, just render dirty modules
+		 * without polling all modules for data changes.
+		 * Full module I/O update is handled periodically based on elapsed time. */
+		if (nfds > 0) {
 			bool needs_redraw = false;
 			for (int i = 0; i < s->module_count; i++) {
 				if (s->modules[i] && s->modules[i]->dirty) {
@@ -238,6 +242,43 @@ main(int argc, char *argv[])
 		if (state.wallpaper) {
 			int w = cairo_image_surface_get_width(state.wallpaper);
 			int h = cairo_image_surface_get_height(state.wallpaper);
+
+			/* Crop wallpaper to the maximum height needed by active monitors */
+			int max_needed_height = 0;
+			int crop_y_offset = 0;
+			if (state.outputs) {
+				for (barny_output_t *out = state.outputs; out; out = out->next) {
+					if (out->width > 0 && out->height > 0) {
+						double scale_x = (double)w / out->width;
+						double scale_y = (double)h / out->height;
+						double scale = scale_x < scale_y ? scale_x : scale_y;
+						int needed = (int)(out->height * scale) +
+						             (int)state.config.blur_radius * 2 +
+						             (int)state.config.displacement_scale * 2 + 64;
+						if (needed > max_needed_height) {
+							max_needed_height = needed;
+						}
+					}
+				}
+				if (max_needed_height > 0 && max_needed_height < h) {
+					if (!state.config.position_top) {
+						crop_y_offset = h - max_needed_height;
+					}
+					h = max_needed_height;
+
+					cairo_surface_t *cropped = cairo_image_surface_create(
+					        CAIRO_FORMAT_ARGB32, w, h);
+					cairo_t *cr = cairo_create(cropped);
+					cairo_set_source_surface(cr, state.wallpaper, 0, -crop_y_offset);
+					cairo_paint(cr);
+					cairo_destroy(cr);
+
+					cairo_surface_destroy(state.wallpaper);
+					state.wallpaper = cropped;
+					printf("barny: cropped wallpaper from %dx%d to %dx%d (y-offset=%d) for startup optimization\n",
+					       w, h + crop_y_offset, w, h, crop_y_offset);
+				}
+			}
 
 			/* Step 1: Create blurred copy */
 			state.blurred_wallpaper = cairo_image_surface_create(

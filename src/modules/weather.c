@@ -4,6 +4,7 @@
 
 #include "barny.h"
 #include "popup.h"
+#include "util.h"
 
 #define POPUP_LINE_H 26
 #define WEATHER_FILE "/opt/barny/modules/weather"
@@ -27,6 +28,7 @@ typedef struct {
 	char                  location[64];
 	char                  wind_dir[8];
 
+	/* Flags */
 	bool                  have_temp;
 	bool                  have_feels_like;
 	bool                  have_humidity;
@@ -43,19 +45,10 @@ typedef struct {
 
 /* ---------- file parsing ---------- */
 
-static char *
+static inline char *
 trim(char *s)
 {
-	if (!s)
-		return s;
-	while (*s == ' ' || *s == '\t')
-		s++;
-	size_t n = strlen(s);
-	while (n > 0
-	       && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\r'
-	           || s[n - 1] == '\n'))
-		s[--n] = '\0';
-	return s;
+	return s ? barny_trim(s) : NULL;
 }
 
 static void

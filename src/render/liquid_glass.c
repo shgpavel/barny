@@ -16,13 +16,12 @@
 
 /* Stack blur implementation for efficient Gaussian-like blur */
 static void
-stack_blur_line(uint8_t *src, uint8_t *dst, int width, int radius)
+stack_blur_line(uint8_t *src, uint8_t *dst, int width, int radius, int *stack)
 {
 	if (radius < 1)
 		return;
 
 	int  div   = radius * 2 + 1;
-	int *stack = malloc(div * sizeof(int) * 4);
 	int  sum_r, sum_g, sum_b, sum_a;
 	int  sum_in_r, sum_in_g, sum_in_b, sum_in_a;
 	int  sum_out_r, sum_out_g, sum_out_b, sum_out_a;
@@ -116,8 +115,6 @@ stack_blur_line(uint8_t *src, uint8_t *dst, int width, int radius)
 		sum_in_b  -= stack[sp * 4 + 2];
 		sum_in_a  -= stack[sp * 4 + 3];
 	}
-
-	free(stack);
 }
 
 void
@@ -136,38 +133,50 @@ barny_blur_surface(cairo_surface_t *surface, int radius)
 	int      stride = cairo_image_surface_get_stride(surface);
 	uint8_t *data   = cairo_image_surface_get_data(surface);
 
+	int  div   = radius * 2 + 1;
+	int *stack = malloc(div * sizeof(int) * 4);
+	if (!stack)
+		return;
+
 	uint8_t *temp   = malloc(width * 4);
+	if (!temp) {
+		free(stack);
+		return;
+	}
 
 	/* Horizontal pass */
 	for (int y = 0; y < height; y++) {
 		uint8_t *row = data + y * stride;
 		memcpy(temp, row, width * 4);
-		stack_blur_line(temp, row, width, radius);
+		stack_blur_line(temp, row, width, radius, stack);
 	}
 
 	/* Vertical pass (transpose, blur, transpose back) */
 	uint8_t *col     = malloc(height * 4);
 	uint8_t *col_out = malloc(height * 4);
 
-	for (int x = 0; x < width; x++) {
-		for (int y = 0; y < height; y++) {
-			col[y * 4 + 0] = data[y * stride + x * 4 + 0];
-			col[y * 4 + 1] = data[y * stride + x * 4 + 1];
-			col[y * 4 + 2] = data[y * stride + x * 4 + 2];
-			col[y * 4 + 3] = data[y * stride + x * 4 + 3];
-		}
-		stack_blur_line(col, col_out, height, radius);
-		for (int y = 0; y < height; y++) {
-			data[y * stride + x * 4 + 0] = col_out[y * 4 + 0];
-			data[y * stride + x * 4 + 1] = col_out[y * 4 + 1];
-			data[y * stride + x * 4 + 2] = col_out[y * 4 + 2];
-			data[y * stride + x * 4 + 3] = col_out[y * 4 + 3];
+	if (col && col_out) {
+		for (int x = 0; x < width; x++) {
+			for (int y = 0; y < height; y++) {
+				col[y * 4 + 0] = data[y * stride + x * 4 + 0];
+				col[y * 4 + 1] = data[y * stride + x * 4 + 1];
+				col[y * 4 + 2] = data[y * stride + x * 4 + 2];
+				col[y * 4 + 3] = data[y * stride + x * 4 + 3];
+			}
+			stack_blur_line(col, col_out, height, radius, stack);
+			for (int y = 0; y < height; y++) {
+				data[y * stride + x * 4 + 0] = col_out[y * 4 + 0];
+				data[y * stride + x * 4 + 1] = col_out[y * 4 + 1];
+				data[y * stride + x * 4 + 2] = col_out[y * 4 + 2];
+				data[y * stride + x * 4 + 3] = col_out[y * 4 + 3];
+			}
 		}
 	}
 
 	free(col);
 	free(col_out);
 	free(temp);
+	free(stack);
 
 	cairo_surface_mark_dirty(surface);
 }

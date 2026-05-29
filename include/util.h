@@ -2,6 +2,7 @@
 #define BARNY_UTIL_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /*
  * Trim leading and trailing ASCII whitespace from `s` in-place.
@@ -42,5 +43,8 @@ barny_parse_csv(const char *input, size_t *out_count);
  */
 void
 barny_free_string_array(char **arr, size_t count);
+
+uint64_t
+barny_now_ms(void);
 
 #endif /* BARNY_UTIL_H */

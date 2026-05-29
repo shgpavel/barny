@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 char *
 barny_trim(char *s)
@@ -32,7 +33,7 @@ barny_free_string_array(char **arr, size_t count)
 	for (size_t i = 0; i < count; i++) {
 		free(arr[i]);
 	}
-	free(arr);
+	free((void *)arr);
 }
 
 char **
@@ -60,7 +61,7 @@ barny_parse_csv(const char *input, size_t *out_count)
 
 	char *tmp = strdup(input);
 	if (!tmp) {
-		free(items);
+		free((void *)items);
 		return NULL;
 	}
 
@@ -76,7 +77,7 @@ barny_parse_csv(const char *input, size_t *out_count)
 				for (size_t i = 0; i < idx; i++) {
 					free(items[i]);
 				}
-				free(items);
+				free((void *)items);
 				free(tmp);
 				return NULL;
 			}
@@ -88,7 +89,7 @@ barny_parse_csv(const char *input, size_t *out_count)
 	free(tmp);
 
 	if (idx == 0) {
-		free(items);
+		free((void *)items);
 		return NULL;
 	}
 
@@ -97,4 +98,12 @@ barny_parse_csv(const char *input, size_t *out_count)
 		*out_count = idx;
 	}
 	return items;
+}
+
+uint64_t
+barny_now_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }

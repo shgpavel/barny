@@ -4,14 +4,7 @@
 #include <time.h>
 
 #include "barny.h"
-
-static uint64_t
-now_ms(void)
-{
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
-}
+#include "util.h"
 
 void
 barny_module_register(barny_state_t *state, barny_module_t *module)
@@ -46,7 +39,7 @@ barny_modules_init(barny_state_t *state)
 void
 barny_modules_update(barny_state_t *state)
 {
-	uint64_t t = now_ms();
+	uint64_t t = barny_now_ms();
 	for (int i = 0; i < state->module_count; i++) {
 		barny_module_t *mod = state->modules[i];
 		if (!mod || !mod->update)
