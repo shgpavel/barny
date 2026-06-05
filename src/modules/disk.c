@@ -4,6 +4,7 @@
 #include <sys/statvfs.h>
 
 #include "barny.h"
+#include "util.h"
 
 typedef struct {
 	barny_state_t        *state;
@@ -17,60 +18,20 @@ static void
 format_bytes(char *buf, size_t buflen, unsigned long long bytes, int decimals,
              bool unit_space)
 {
-	const char *sp = unit_space ? " " : "";
-	double      gb = bytes / (1024.0 * 1024.0 * 1024.0);
-
-	if (gb >= 1000.0) {
-		double tb = gb / 1024.0;
-		switch (decimals) {
-		case 0:
-			snprintf(buf, buflen, "%.0f%sT", tb, sp);
-			break;
-		case 2:
-			snprintf(buf, buflen, "%.2f%sT", tb, sp);
-			break;
-		default:
-			snprintf(buf, buflen, "%.1f%sT", tb, sp);
-			break;
-		}
-	} else if (gb >= 1.0) {
-		switch (decimals) {
-		case 0:
-			snprintf(buf, buflen, "%.0f%sG", gb, sp);
-			break;
-		case 2:
-			snprintf(buf, buflen, "%.2f%sG", gb, sp);
-			break;
-		default:
-			snprintf(buf, buflen, "%.1f%sG", gb, sp);
-			break;
-		}
-	} else {
-		double mb = bytes / (1024.0 * 1024.0);
-		switch (decimals) {
-		case 0:
-			snprintf(buf, buflen, "%.0f%sM", mb, sp);
-			break;
-		case 2:
-			snprintf(buf, buflen, "%.2f%sM", mb, sp);
-			break;
-		default:
-			snprintf(buf, buflen, "%.1f%sM", mb, sp);
-			break;
-		}
-	}
+	barny_format_bytes(buf, buflen, bytes, decimals, unit_space);
 }
 
 static int
 disk_init(barny_module_t *self, barny_state_t *state)
 {
 	disk_data_t *data = self->data;
+
 	data->state       = state;
 	data->total_bytes = 0;
 	data->used_bytes  = 0;
 
 	data->font_desc   = pango_font_description_from_string(
-                state->config.font ? state->config.font : "Sans 10");
+	        state->config.font ? state->config.font : "Sans 10");
 
 	strcpy(data->display_str, "-- DISK");
 
@@ -81,6 +42,7 @@ static void
 disk_destroy(barny_module_t *self)
 {
 	disk_data_t *data = self->data;
+
 	if (!data)
 		return;
 
@@ -95,31 +57,41 @@ disk_destroy(barny_module_t *self)
 static void
 disk_update(barny_module_t *self)
 {
-	disk_data_t    *data = self->data;
-	barny_config_t *cfg  = &data->state->config;
+	disk_data_t       *data;
+	barny_config_t    *cfg;
+	const char        *path;
+	struct statvfs     st;
+	unsigned long long total;
+	unsigned long long avail;
+	unsigned long long used;
+	const char        *mode;
+	int                percent;
+	const char        *fmt;
+	char               used_str[16];
+	char               total_str[16];
 
-	const char     *path = cfg->disk_path ? cfg->disk_path : "/";
+	data = self->data;
+	cfg  = &data->state->config;
+	path = cfg->disk_path ? cfg->disk_path : "/";
 
-	struct statvfs  st;
 	if (statvfs(path, &st) != 0)
 		return;
 
-	unsigned long long total = (unsigned long long)st.f_blocks * st.f_frsize;
-	unsigned long long avail = (unsigned long long)st.f_bavail * st.f_frsize;
-	unsigned long long used  = total - avail;
+	total = (unsigned long long)st.f_blocks * st.f_frsize;
+	avail = (unsigned long long)st.f_bavail * st.f_frsize;
+	used  = total - avail;
 
-	/* Check if values changed */
 	if (used != data->used_bytes || total != data->total_bytes) {
 		data->used_bytes  = used;
 		data->total_bytes = total;
 
-		const char *mode  = cfg->disk_mode ? cfg->disk_mode : "used_total";
+		mode              = cfg->disk_mode ? cfg->disk_mode : "used_total";
 
 		if (strcmp(mode, "percentage") == 0) {
-			int percent = 0;
+			percent = 0;
 			if (total > 0)
 				percent = (int)((used * 100) / total);
-			const char *fmt = cfg->disk_unit_space ? "%d %%" : "%d%%";
+			fmt = cfg->disk_unit_space ? "%d %%" : "%d%%";
 			snprintf(data->display_str, sizeof(data->display_str), fmt,
 			         percent);
 		} else if (strcmp(mode, "free") == 0) {
@@ -127,9 +99,6 @@ disk_update(barny_module_t *self)
 			             avail, cfg->disk_decimals,
 			             cfg->disk_unit_space);
 		} else {
-			/* "used_total" (default) */
-			char used_str[16];
-			char total_str[16];
 			format_bytes(used_str, sizeof(used_str), used,
 			             cfg->disk_decimals, cfg->disk_unit_space);
 			format_bytes(total_str, sizeof(total_str), total,
@@ -146,31 +115,13 @@ static void
 disk_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
 	disk_data_t *data = self->data;
+	int          tw;
+
 	(void)w;
 
-	PangoLayout *layout = pango_cairo_create_layout(cr);
-	pango_layout_set_font_description(layout, data->font_desc);
-	pango_layout_set_text(layout, data->display_str, -1);
-
-	int tw, th;
-	pango_layout_get_pixel_size(layout, &tw, &th);
-
-	/* Draw with shadow */
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_move_to(cr, x + 1, y + (h - th) / 2 + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	barny_config_t *cfg = &data->state->config;
-	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
-		                      cfg->text_color_b, 0.9);
-	else
-		cairo_set_source_rgba(cr, 1, 0.8, 0.9, 0.9);
-	cairo_move_to(cr, x, y + (h - th) / 2);
-	pango_cairo_show_layout(cr, layout);
-
-	g_object_unref(layout);
-
+	tw          = barny_module_render_text(cr, data->font_desc, data->display_str,
+	                                       x, y, h, &data->state->config,
+	                                       1, 0.8, 0.9, 0.9);
 	self->width = tw + 8;
 }
 
@@ -186,16 +137,16 @@ barny_module_disk_create(void)
 		return NULL;
 	}
 
-	mod->name     = "disk";
-	mod->position = BARNY_POS_RIGHT;
-	mod->init     = disk_init;
-	mod->destroy  = disk_destroy;
-	mod->update   = disk_update;
-	mod->update_interval_ms = 5000; /* disk usage changes slowly */
-	mod->render   = disk_render;
-	mod->data     = data;
-	mod->width    = 80;
-	mod->dirty    = true;
+	mod->name               = "disk";
+	mod->position           = BARNY_POS_RIGHT;
+	mod->init               = disk_init;
+	mod->destroy            = disk_destroy;
+	mod->update             = disk_update;
+	mod->update_interval_ms = 5000;
+	mod->render             = disk_render;
+	mod->data               = data;
+	mod->width              = 80;
+	mod->dirty              = true;
 
 	return mod;
 }

@@ -7,8 +7,8 @@
 #include "barny.h"
 #include "popup.h"
 
-#define LINE_H              26
-#define MAX_PER_CORE_ROWS   32
+#define LINE_H            26
+#define MAX_PER_CORE_ROWS 32
 
 typedef struct {
 	barny_state_t        *state;
@@ -20,14 +20,13 @@ typedef struct {
 	double                power;
 	int                   p_core_count;
 	int                   e_core_count;
-	/* Temperature */
+
 	char                  temp_path[256];
 	int                   current_temp;
 	bool                  temp_path_found;
 	PangoFontDescription *font_desc;
 	PangoFontDescription *popup_font_desc;
 
-	/* Popup state */
 	barny_popup_t        *popup;
 	long                  uptime_seconds;
 	char                  uptime_str[32];
@@ -40,42 +39,52 @@ typedef struct {
 static int
 read_int_file(const char *path)
 {
-	FILE *f = fopen(path, "r");
+	FILE *f;
+	int   val;
+
+	f = fopen(path, "r");
 	if (!f)
 		return -1;
-	int val;
+
 	if (fscanf(f, "%d", &val) != 1)
 		val = -1;
 	fclose(f);
+
 	return val;
 }
 
 static void
 detect_core_counts(sysinfo_data_t *data)
 {
-	DIR *dir = opendir("/sys/devices/system/cpu");
-	if (!dir)
-		return;
-
+	DIR           *dir;
 	int            max_freqs[256];
 	int            cpu_count    = 0;
 	int            highest_freq = 0;
 	int            lowest_freq  = 0;
-
 	struct dirent *entry;
+	int            cpu_id;
+	char           path[256];
+	int            max_freq;
+	int            gap;
+	int            threshold;
+	int            i;
+
+	dir = opendir("/sys/devices/system/cpu");
+	if (!dir)
+		return;
+
 	while ((entry = readdir(dir)) != NULL && cpu_count < 256) {
 		if (strncmp(entry->d_name, "cpu", 3) != 0)
 			continue;
 		if (!isdigit(entry->d_name[3]))
 			continue;
 
-		int  cpu_id = atoi(entry->d_name + 3);
-		char path[256];
+		cpu_id = atoi(entry->d_name + 3);
 
 		snprintf(path, sizeof(path),
 		         "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq",
 		         cpu_id);
-		int max_freq = read_int_file(path);
+		max_freq = read_int_file(path);
 		if (max_freq < 0)
 			continue;
 
@@ -90,11 +99,10 @@ detect_core_counts(sysinfo_data_t *data)
 	}
 	closedir(dir);
 
-	/* Classify P vs E cores based on max frequency gap */
-	int gap       = highest_freq - lowest_freq;
-	int threshold = (gap > 100000) ? lowest_freq + 100000 : 0;
+	gap       = highest_freq - lowest_freq;
+	threshold = (gap > 100000) ? lowest_freq + 100000 : 0;
 
-	for (int i = 0; i < cpu_count; i++) {
+	for (i = 0; i < cpu_count; i++) {
 		if (max_freqs[i] >= threshold)
 			data->p_core_count++;
 		else
@@ -102,25 +110,25 @@ detect_core_counts(sysinfo_data_t *data)
 	}
 }
 
-/* Temperature detection functions */
 static bool
 try_thermal_zone(char *path, size_t pathlen, int zone)
 {
-	char type_path[256];
+	char  type_path[256];
+	FILE *f;
+	char  type[64] = "";
+
 	snprintf(type_path, sizeof(type_path),
 	         "/sys/class/thermal/thermal_zone%d/type", zone);
 
-	FILE *f = fopen(type_path, "r");
+	f = fopen(type_path, "r");
 	if (!f)
 		return false;
 
-	char type[64] = "";
 	if (fgets(type, sizeof(type), f)) {
 		type[strcspn(type, "\n")] = '\0';
 	}
 	fclose(f);
 
-	/* Look for common CPU thermal zone names */
 	if (strstr(type, "cpu")
 	    || strstr(type, "CPU")
 	    || strstr(type, "x86_pkg")
@@ -138,11 +146,15 @@ try_thermal_zone(char *path, size_t pathlen, int zone)
 static bool
 try_hwmon(char *path, size_t pathlen)
 {
-	DIR *dir = opendir("/sys/class/hwmon");
+	DIR           *dir;
+	struct dirent *ent;
+	char           name_path[256];
+	FILE          *f;
+
+	dir = opendir("/sys/class/hwmon");
 	if (!dir)
 		return false;
 
-	struct dirent *ent;
 	while ((ent = readdir(dir)) != NULL) {
 		if (strncmp(ent->d_name, "hwmon", 5) != 0)
 			continue;
@@ -150,11 +162,10 @@ try_hwmon(char *path, size_t pathlen)
 		if (strlen(ent->d_name) > 64)
 			continue;
 
-		char name_path[256];
 		snprintf(name_path, sizeof(name_path), "/sys/class/hwmon/%s/name",
 		         ent->d_name);
 
-		FILE *f = fopen(name_path, "r");
+		f = fopen(name_path, "r");
 		if (!f)
 			continue;
 
@@ -164,7 +175,6 @@ try_hwmon(char *path, size_t pathlen)
 		}
 		fclose(f);
 
-		/* Look for CPU-related hwmon devices */
 		if (strstr(name, "coretemp")
 		    || strstr(name, "k10temp")
 		    || strstr(name, "cpu")
@@ -188,9 +198,10 @@ try_hwmon(char *path, size_t pathlen)
 static void
 find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 {
+	int i;
+
 	data->temp_path_found = false;
 
-	/* Priority 1: User-specified path */
 	if (cfg->sysinfo_temp_path && cfg->sysinfo_temp_path[0]) {
 		strncpy(data->temp_path, cfg->sysinfo_temp_path,
 		        sizeof(data->temp_path) - 1);
@@ -199,7 +210,6 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 		return;
 	}
 
-	/* Priority 2: User-specified thermal zone */
 	if (cfg->sysinfo_temp_zone >= 0) {
 		if (try_thermal_zone(data->temp_path, sizeof(data->temp_path),
 		                     cfg->sysinfo_temp_zone)) {
@@ -208,8 +218,7 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 		}
 	}
 
-	/* Priority 3: Auto-detect thermal zones */
-	for (int i = 0; i < 16; i++) {
+	for (i = 0; i < 16; i++) {
 		if (try_thermal_zone(data->temp_path, sizeof(data->temp_path),
 		                     i)) {
 			data->temp_path_found = true;
@@ -217,13 +226,11 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 		}
 	}
 
-	/* Priority 4: Try hwmon fallback */
 	if (try_hwmon(data->temp_path, sizeof(data->temp_path))) {
 		data->temp_path_found = true;
 		return;
 	}
 
-	/* Last resort: try zone 0 anyway */
 	snprintf(data->temp_path, sizeof(data->temp_path),
 	         "/sys/class/thermal/thermal_zone0/temp");
 	data->temp_path_found = true;
@@ -232,40 +239,56 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 static long
 read_uptime_seconds(void)
 {
-	FILE *f = fopen("/proc/uptime", "r");
+	FILE  *f;
+	double up = 0.0;
+
+	f         = fopen("/proc/uptime", "r");
 	if (!f)
 		return -1;
-	double up = 0.0;
+
 	if (fscanf(f, "%lf", &up) != 1) {
 		fclose(f);
 		return -1;
 	}
 	fclose(f);
+
 	return (long)up;
 }
 
 static bool
 read_loadavg(double load[3])
 {
-	FILE *f = fopen("/proc/loadavg", "r");
+	FILE *f;
+	bool  ok;
+
+	f = fopen("/proc/loadavg", "r");
 	if (!f)
 		return false;
-	bool ok = (fscanf(f, "%lf %lf %lf", &load[0], &load[1], &load[2]) == 3);
+
+	ok = (fscanf(f, "%lf %lf %lf", &load[0], &load[1], &load[2]) == 3);
 	fclose(f);
+
 	return ok;
 }
 
 static int
 read_per_core_freqs(int *out_khz, int max)
 {
-	DIR *dir = opendir("/sys/devices/system/cpu");
+	DIR           *dir;
+	int            ids[256];
+	int            id_count = 0;
+	struct dirent *entry;
+	int            i;
+	int            key;
+	int            j;
+	int            out = 0;
+	char           path[256];
+	int            khz;
+
+	dir = opendir("/sys/devices/system/cpu");
 	if (!dir)
 		return 0;
 
-	int  ids[256];
-	int  id_count = 0;
-
-	struct dirent *entry;
 	while ((entry = readdir(dir)) != NULL && id_count < 256) {
 		if (strncmp(entry->d_name, "cpu", 3) != 0)
 			continue;
@@ -275,10 +298,9 @@ read_per_core_freqs(int *out_khz, int max)
 	}
 	closedir(dir);
 
-	/* Simple insertion sort to keep core ids ordered */
-	for (int i = 1; i < id_count; i++) {
-		int key = ids[i];
-		int j   = i - 1;
+	for (i = 1; i < id_count; i++) {
+		key = ids[i];
+		j   = i - 1;
 		while (j >= 0 && ids[j] > key) {
 			ids[j + 1] = ids[j];
 			j--;
@@ -286,30 +308,31 @@ read_per_core_freqs(int *out_khz, int max)
 		ids[j + 1] = key;
 	}
 
-	int out = 0;
-	for (int i = 0; i < id_count && out < max; i++) {
-		char path[256];
+	for (i = 0; i < id_count && out < max; i++) {
 		snprintf(path, sizeof(path),
 		         "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq",
 		         ids[i]);
-		int khz = read_int_file(path);
+		khz = read_int_file(path);
 		if (khz < 0)
 			continue;
 		out_khz[out++] = khz;
 	}
+
 	return out;
 }
 
 static void
 format_uptime(long secs, char *buf, size_t buf_size)
 {
+	long days  = secs / 86400;
+	long hours = (secs % 86400) / 3600;
+	long mins  = (secs % 3600) / 60;
+
 	if (secs < 0) {
 		snprintf(buf, buf_size, "--");
 		return;
 	}
-	long days  = secs / 86400;
-	long hours = (secs % 86400) / 3600;
-	long mins  = (secs % 3600) / 60;
+
 	if (days > 0)
 		snprintf(buf, buf_size, "%ldd %ldh %ldm", days, hours, mins);
 	else
@@ -325,19 +348,20 @@ format_loadavg(const double load[3], char *buf, size_t buf_size)
 static int
 sysinfo_popup_row_count(const sysinfo_data_t *data)
 {
-	const barny_config_t *cfg = &data->state->config;
-	int rows = 0;
+	const barny_config_t *cfg  = &data->state->config;
+	int                   rows = 0;
+	int                   n;
 
-	rows++; /* CPU summary (avg freq + power + temp) */
+	rows++;
 	if (data->p_core_count > 0 && data->e_core_count > 0)
-		rows++; /* P/E avg */
-	rows++; /* Power */
-	rows++; /* Temperature */
-	rows++; /* Uptime */
-	rows++; /* Load average */
+		rows++;
+	rows++;
+	rows++;
+	rows++;
+	rows++;
 
 	if (cfg->sysinfo_popup_per_core) {
-		int n = data->per_core_count;
+		n = data->per_core_count;
 		if (n > MAX_PER_CORE_ROWS)
 			n = MAX_PER_CORE_ROWS;
 		rows += n;
@@ -356,32 +380,32 @@ sysinfo_popup_height(void *ud)
 static int
 sysinfo_popup_width(void *ud)
 {
-	sysinfo_data_t       *data = ud;
-	const barny_config_t *cfg  = &data->state->config;
+	sysinfo_data_t       *data      = ud;
+	const barny_config_t *cfg       = &data->state->config;
 	int                   max_label = 0;
 	int                   max_value = 0;
 	char                  buf[96];
+	const char           *labels[] = { "CPU", "P/E avg", "Power", "Temp",
+		                           "Uptime", "Load" };
+	size_t                i;
+	int                   w;
+	const char           *power_fmt = cfg->sysinfo_power_decimals == 2 ? "%.2fW" : cfg->sysinfo_power_decimals == 1 ? "%.1fW" :
+	                                                                                                                  "%.0fW";
+	char                  power_buf[32];
+	const char           *temp_unit = cfg->sysinfo_temp_show_unit ? "C" : "";
+	int                   total;
 
-	const char *labels[] = { "CPU", "P/E avg", "Power", "Temp",
-	                         "Uptime", "Load" };
-	for (size_t i = 0; i < sizeof(labels) / sizeof(*labels); i++) {
-		int w = barny_popup_measure_text(data->popup_font_desc,
-		                                 labels[i]);
+	for (i = 0; i < sizeof(labels) / sizeof(*labels); i++) {
+		w = barny_popup_measure_text(data->popup_font_desc, labels[i]);
 		if (w > max_label)
 			max_label = w;
 	}
 
-	/* CPU summary row value (worst-case typical width). */
-	const char *power_fmt = cfg->sysinfo_power_decimals == 2 ? "%.2fW"
-	                       : cfg->sysinfo_power_decimals == 1 ? "%.1fW"
-	                                                          : "%.0fW";
-	char power_buf[32];
 	snprintf(power_buf, sizeof(power_buf), power_fmt, data->power);
-	const char *temp_unit = cfg->sysinfo_temp_show_unit ? "C" : "";
 	snprintf(buf, sizeof(buf), "%.2fGHz  %s  %d%s",
 	         data->p_freq > 0 ? data->p_freq : 4.0, power_buf,
 	         data->current_temp, temp_unit);
-	int w = barny_popup_measure_text(data->popup_font_desc, buf);
+	w = barny_popup_measure_text(data->popup_font_desc, buf);
 	if (w > max_value)
 		max_value = w;
 
@@ -401,9 +425,10 @@ sysinfo_popup_width(void *ud)
 			max_label = w;
 	}
 
-	int total = max_label + 24 + max_value + 2 * BARNY_POPUP_PAD_X;
+	total = max_label + 24 + max_value + 2 * BARNY_POPUP_PAD_X;
 	if (total < 200)
 		total = 200;
+
 	return total;
 }
 
@@ -412,45 +437,19 @@ draw_label_value_row(cairo_t *cr, PangoLayout *layout, int row_y, int w,
                      const char *label, const char *value, double lr,
                      double lg, double lb, double vr, double vg, double vb)
 {
-	int tw, th, text_y;
-
-	/* Label, left-aligned */
-	pango_layout_set_text(layout, label, -1);
-	pango_layout_get_pixel_size(layout, &tw, &th);
-	text_y = row_y + (LINE_H - th) / 2;
-
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-	cairo_move_to(cr, 1, text_y + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	cairo_set_source_rgba(cr, lr, lg, lb, 0.9);
-	cairo_move_to(cr, 0, text_y);
-	pango_cairo_show_layout(cr, layout);
-
-	/* Value, right-aligned */
-	pango_layout_set_text(layout, value, -1);
-	pango_layout_get_pixel_size(layout, &tw, &th);
-	text_y = row_y + (LINE_H - th) / 2;
-	int x  = w - tw;
-
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-	cairo_move_to(cr, x + 1, text_y + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	cairo_set_source_rgba(cr, vr, vg, vb, 0.9);
-	cairo_move_to(cr, x, text_y);
-	pango_cairo_show_layout(cr, layout);
+	barny_popup_draw_row(cr, layout, row_y, LINE_H, w, label, value, lr, lg,
+	                     lb, vr, vg, vb, 0.9);
 }
 
 static void
 sysinfo_popup_render(void *ud, cairo_t *cr, int w, int h)
 {
-	sysinfo_data_t  *data = ud;
-	barny_config_t  *cfg  = &data->state->config;
-	PangoLayout     *layout;
-	int              row    = 0;
-	double           lr = 0.6, lg = 0.7, lb = 0.65;
-	double           vr = 0.85, vg = 0.95, vb = 0.85;
+	sysinfo_data_t *data = ud;
+	barny_config_t *cfg  = &data->state->config;
+	PangoLayout    *layout;
+	int             row = 0;
+	double          lr = 0.6, lg = 0.7, lb = 0.65;
+	double          vr = 0.85, vg = 0.95, vb = 0.85;
 
 	(void)h;
 
@@ -463,32 +462,37 @@ sysinfo_popup_render(void *ud, cairo_t *cr, int w, int h)
 	layout = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, data->popup_font_desc);
 
-	/* Row 1: CPU summary */
 	{
-		double avg = 0.0;
-		bool   hybrid = (data->p_core_count > 0 && data->e_core_count > 0);
+		double      avg    = 0.0;
+		bool        hybrid = (data->p_core_count > 0 && data->e_core_count > 0);
+		char        value[96];
+		const char *power_fmt;
+		char        power_buf[32];
+		const char *temp_unit = cfg->sysinfo_temp_show_unit ? "C" : "";
+
 		if (hybrid) {
 			int total = data->p_core_count + data->e_core_count;
-			avg = (total > 0) ? (data->p_freq * data->p_core_count
-			                     + data->e_freq * data->e_core_count)
-			                            / total
-			                  : 0.0;
+			avg       = (total > 0) ? (data->p_freq * data->p_core_count
+			                           + data->e_freq * data->e_core_count)
+			                                  / total :
+			                          0.0;
 		} else {
 			avg = data->p_freq;
 		}
 
-		char value[96];
-		const char *power_fmt;
 		switch (cfg->sysinfo_power_decimals) {
-		case 1:  power_fmt = "%.1fW"; break;
-		case 2:  power_fmt = "%.2fW"; break;
-		default: power_fmt = "%.0fW"; break;
+		case 1:
+			power_fmt = "%.1fW";
+			break;
+		case 2:
+			power_fmt = "%.2fW";
+			break;
+		default:
+			power_fmt = "%.0fW";
+			break;
 		}
 
-		char power_buf[32];
 		snprintf(power_buf, sizeof(power_buf), power_fmt, data->power);
-
-		const char *temp_unit = cfg->sysinfo_temp_show_unit ? "C" : "";
 		snprintf(value, sizeof(value), "%.2fGHz  %s  %d%s", avg, power_buf,
 		         data->current_temp, temp_unit);
 
@@ -497,7 +501,6 @@ sysinfo_popup_render(void *ud, cairo_t *cr, int w, int h)
 		row++;
 	}
 
-	/* Row 2: P/E avg if heterogeneous */
 	if (data->p_core_count > 0 && data->e_core_count > 0) {
 		char value[64];
 		snprintf(value, sizeof(value), "P:%.2f  E:%.2f GHz", data->p_freq,
@@ -507,22 +510,28 @@ sysinfo_popup_render(void *ud, cairo_t *cr, int w, int h)
 		row++;
 	}
 
-	/* Row 3: Power */
 	{
 		const char *fmt;
+		char        value[32];
+
 		switch (cfg->sysinfo_power_decimals) {
-		case 1:  fmt = "%.1f W"; break;
-		case 2:  fmt = "%.2f W"; break;
-		default: fmt = "%.0f W"; break;
+		case 1:
+			fmt = "%.1f W";
+			break;
+		case 2:
+			fmt = "%.2f W";
+			break;
+		default:
+			fmt = "%.0f W";
+			break;
 		}
-		char value[32];
+
 		snprintf(value, sizeof(value), fmt, data->power);
 		draw_label_value_row(cr, layout, row * LINE_H, w, "Power",
 		                     value, lr, lg, lb, vr, vg, vb);
 		row++;
 	}
 
-	/* Row 4: Temperature */
 	{
 		char value[32];
 		if (cfg->sysinfo_temp_show_unit) {
@@ -536,22 +545,22 @@ sysinfo_popup_render(void *ud, cairo_t *cr, int w, int h)
 		row++;
 	}
 
-	/* Row 5: Uptime */
 	draw_label_value_row(cr, layout, row * LINE_H, w, "Uptime",
 	                     data->uptime_str, lr, lg, lb, vr, vg, vb);
 	row++;
 
-	/* Row 6: Load average */
 	draw_label_value_row(cr, layout, row * LINE_H, w, "Load",
 	                     data->load_str, lr, lg, lb, vr, vg, vb);
 	row++;
 
-	/* Per-core rows */
 	if (cfg->sysinfo_popup_per_core) {
 		int n = data->per_core_count;
+		int i;
+
 		if (n > MAX_PER_CORE_ROWS)
 			n = MAX_PER_CORE_ROWS;
-		for (int i = 0; i < n; i++) {
+
+		for (i = 0; i < n; i++) {
 			char label[16];
 			char value[24];
 			snprintf(label, sizeof(label), "cpu%d", i);
@@ -600,18 +609,9 @@ sysinfo_init(barny_module_t *self, barny_state_t *state)
 	data->state          = state;
 
 	data->font_desc      = pango_font_description_from_string(
-                state->config.font ? state->config.font : "Sans 10");
-	data->popup_font_desc = pango_font_description_from_string(
 	        state->config.font ? state->config.font : "Sans 10");
-
-	int base_size = pango_font_description_get_size(data->popup_font_desc);
-	if (base_size > 0) {
-		pango_font_description_set_size(data->popup_font_desc,
-		                                base_size * 85 / 100);
-	} else {
-		pango_font_description_set_size(data->popup_font_desc,
-		                                9 * PANGO_SCALE);
-	}
+	data->popup_font_desc
+	        = barny_popup_font_from(state->config.font, "Sans 10");
 
 	strcpy(data->freq_str, "-- GHz");
 	strcpy(data->power_str, "-- W");
@@ -656,9 +656,12 @@ sysinfo_update(barny_module_t *self)
 {
 	sysinfo_data_t *data = self->data;
 	barny_config_t *cfg  = &data->state->config;
+	FILE           *f;
+	bool            popup_changed = false;
+	long            up;
+	double          load[3];
 
-	/* Read CPU frequency */
-	FILE           *f    = fopen("/opt/barny/modules/cpu_freq", "r");
+	f = fopen("/opt/barny/modules/cpu_freq", "r");
 	if (f) {
 		char line[64];
 		if (fgets(line, sizeof(line), f)) {
@@ -671,7 +674,6 @@ sysinfo_update(barny_module_t *self)
 				hybrid = true;
 				parsed = true;
 			} else if (sscanf(line, "%lf", &p_freq) == 1) {
-				/* Homogeneous CPU: single frequency value */
 				e_freq = 0;
 				parsed = true;
 			}
@@ -689,12 +691,12 @@ sysinfo_update(barny_module_t *self)
 					} else {
 						int total = data->p_core_count
 						            + data->e_core_count;
-						avg = (total > 0) ?
-						              (p_freq * data->p_core_count
-						               + e_freq
-						                         * data->e_core_count)
-						                      / total :
-						              0.0;
+						avg       = (total > 0) ?
+						                    (p_freq * data->p_core_count
+						                     + e_freq
+						                               * data->e_core_count)
+						                            / total :
+						                    0.0;
 					}
 					if (cfg->sysinfo_freq_show_unit) {
 						const char *fmt
@@ -712,7 +714,6 @@ sysinfo_update(barny_module_t *self)
 						        "%.2f", avg);
 					}
 				} else {
-					/* Build format based on label_space and show_unit */
 					const char *label_sep
 					        = cfg->sysinfo_freq_label_space ?
 					                  " " :
@@ -750,7 +751,6 @@ sysinfo_update(barny_module_t *self)
 		fclose(f);
 	}
 
-	/* Read power consumption */
 	f = fopen("/opt/barny/modules/cpu_power", "r");
 	if (f) {
 		char line[64];
@@ -797,7 +797,6 @@ sysinfo_update(barny_module_t *self)
 		fclose(f);
 	}
 
-	/* Read CPU temperature */
 	if (data->temp_path_found) {
 		f = fopen(data->temp_path, "r");
 		if (f) {
@@ -828,13 +827,10 @@ sysinfo_update(barny_module_t *self)
 		}
 	}
 
-	/* Popup-only data: only refresh if popup visible */
-	bool popup_changed = false;
-
-	long up = read_uptime_seconds();
+	up = read_uptime_seconds();
 	if (up >= 0 && up != data->uptime_seconds) {
-		long old_min = data->uptime_seconds / 60;
-		long new_min = up / 60;
+		long old_min         = data->uptime_seconds / 60;
+		long new_min         = up / 60;
 		data->uptime_seconds = up;
 		if (new_min != old_min) {
 			format_uptime(up, data->uptime_str,
@@ -843,7 +839,6 @@ sysinfo_update(barny_module_t *self)
 		}
 	}
 
-	double load[3];
 	if (read_loadavg(load)) {
 		if (load[0] != data->load_avg[0]
 		    || load[1] != data->load_avg[1]
@@ -859,14 +854,16 @@ sysinfo_update(barny_module_t *self)
 
 	if (cfg->sysinfo_popup_per_core) {
 		int  new_freqs[MAX_PER_CORE_ROWS];
-		int  n = read_per_core_freqs(new_freqs, MAX_PER_CORE_ROWS);
+		int  n    = read_per_core_freqs(new_freqs, MAX_PER_CORE_ROWS);
 		bool diff = (n != data->per_core_count);
-		for (int i = 0; !diff && i < n; i++)
+		int  i;
+
+		for (i = 0; !diff && i < n; i++)
 			if (new_freqs[i] != data->per_core_khz[i])
 				diff = true;
 		if (diff) {
 			data->per_core_count = n;
-			for (int i = 0; i < n; i++)
+			for (i = 0; i < n; i++)
 				data->per_core_khz[i] = new_freqs[i];
 			popup_changed = true;
 		}
@@ -876,24 +873,23 @@ sysinfo_update(barny_module_t *self)
 		barny_popup_redraw(data->popup);
 }
 
-/* Helper to render text with shadow */
 static int
 render_text(cairo_t *cr, PangoLayout *layout, const char *text, int x, int y,
             int h, double r, double g, double b)
 {
+	int tw, th;
+	int text_y;
+
 	pango_layout_set_text(layout, text, -1);
 
-	int tw, th;
 	pango_layout_get_pixel_size(layout, &tw, &th);
 
-	int text_y = y + (h - th) / 2;
+	text_y = y + (h - th) / 2;
 
-	/* Shadow */
 	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
 	cairo_move_to(cr, x + 1, text_y + 1);
 	pango_cairo_show_layout(cr, layout);
 
-	/* Text */
 	cairo_set_source_rgba(cr, r, g, b, 0.9);
 	cairo_move_to(cr, x, text_y);
 	pango_cairo_show_layout(cr, layout);
@@ -906,16 +902,16 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
 	sysinfo_data_t *data = self->data;
 	barny_config_t *cfg  = &data->state->config;
+	PangoLayout    *layout;
+	int             total_width  = 0;
+	int             item_spacing = cfg->sysinfo_item_spacing;
+	double          r, g, b;
+
 	(void)w;
 
-	PangoLayout *layout = pango_cairo_create_layout(cr);
+	layout = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, data->font_desc);
 
-	int    total_width  = 0;
-	int    item_spacing = cfg->sysinfo_item_spacing;
-	double r, g, b;
-
-	/* Render frequency */
 	if (cfg->text_color_set) {
 		r = cfg->text_color_r;
 		g = cfg->text_color_g;
@@ -929,7 +925,6 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	                           h, r, g, b);
 	total_width += item_spacing;
 
-	/* Render power */
 	if (cfg->text_color_set) {
 		r = cfg->text_color_r;
 		g = cfg->text_color_g;
@@ -943,7 +938,6 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	                           h, r, g, b);
 	total_width += item_spacing;
 
-	/* Render temperature with color coding */
 	if (cfg->text_color_set) {
 		r = cfg->text_color_r;
 		g = cfg->text_color_g;
@@ -955,11 +949,11 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 		if (data->current_temp >= 80) {
 			r = 1.0;
 			g = 0.4;
-			b = 0.4; /* Hot - red */
+			b = 0.4;
 		} else if (data->current_temp >= 60) {
 			r = 1.0;
 			g = 0.7;
-			b = 0.4; /* Warm - orange */
+			b = 0.4;
 		}
 	}
 	total_width += render_text(cr, layout, data->temp_str, x + total_width, y,
@@ -982,17 +976,17 @@ barny_module_sysinfo_create(void)
 		return NULL;
 	}
 
-	mod->name     = "sysinfo";
-	mod->position = BARNY_POS_RIGHT;
-	mod->init     = sysinfo_init;
-	mod->destroy  = sysinfo_destroy;
-	mod->update   = sysinfo_update;
-	mod->update_interval_ms = 0; /* every tick (200ms) — fast freq/temp updates */
-	mod->render   = sysinfo_render;
-	mod->on_hover = sysinfo_on_hover;
-	mod->data     = data;
-	mod->width    = 180;
-	mod->dirty    = true;
+	mod->name               = "sysinfo";
+	mod->position           = BARNY_POS_RIGHT;
+	mod->init               = sysinfo_init;
+	mod->destroy            = sysinfo_destroy;
+	mod->update             = sysinfo_update;
+	mod->update_interval_ms = 0;
+	mod->render             = sysinfo_render;
+	mod->on_hover           = sysinfo_on_hover;
+	mod->data               = data;
+	mod->width              = 180;
+	mod->dirty              = true;
 
 	return mod;
 }

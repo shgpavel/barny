@@ -1,10 +1,3 @@
-/*
- * Micro-benchmarks for module update + render hot paths and config parse.
- *
- * Goal: catch regressions in CPU cost. Numbers are informational; the
- * test never fails on slow runs (CI variance is real). The harness
- * prints ns/op for each benchmark; eyeball them on PR diffs.
- */
 #include "barny.h"
 #include "../src/modules/popup.h"
 
@@ -21,22 +14,28 @@ static double
 now_ns(void)
 {
 	struct timespec ts;
+
 	clock_gettime(CLOCK_MONOTONIC, &ts);
+
 	return (double)ts.tv_sec * 1.0e9 + (double)ts.tv_nsec;
 }
 
 static void
 report(const char *name, int iters, double total_ns)
 {
-	double per = total_ns / (double)iters;
-	const char *unit = "ns";
-	double scaled = per;
+	double      per;
+	const char *unit;
+	double      scaled;
+
+	per    = total_ns / (double)iters;
+	unit   = "ns";
+	scaled = per;
 	if (scaled >= 1e6) {
 		scaled /= 1e6;
-		unit = "ms";
+		unit    = "ms";
 	} else if (scaled >= 1e3) {
 		scaled /= 1e3;
-		unit = "us";
+		unit    = "us";
 	}
 	printf("  %-32s %8d iters  %9.2f %s/op  (total %.2f ms)\n",
 	       name, iters, scaled, unit, total_ns / 1e6);
@@ -45,9 +44,11 @@ report(const char *name, int iters, double total_ns)
 static cairo_t *
 make_cairo(cairo_surface_t **out_surf)
 {
-	cairo_surface_t *surf
-	        = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BAR_W, BAR_H);
+	cairo_surface_t *surf;
+
+	surf      = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BAR_W, BAR_H);
 	*out_surf = surf;
+
 	return cairo_create(surf);
 }
 
@@ -55,10 +56,19 @@ static void
 bench_module(const char *name, barny_module_t *(*create)(void), int update_iters,
              int render_iters)
 {
-	barny_state_t state = { 0 };
+	barny_state_t    state;
+	barny_module_t  *mod;
+	double           t0;
+	double           t1;
+	char             label[64];
+	cairo_surface_t *surf;
+	cairo_t         *cr;
+	int              i;
+
+	state = (barny_state_t){ 0 };
 	barny_config_defaults(&state.config);
 
-	barny_module_t *mod = create();
+	mod = create();
 	if (!mod || !mod->init || mod->init(mod, &state) != 0) {
 		printf("  %-32s SKIP (init failed)\n", name);
 		if (mod && mod->destroy)
@@ -68,24 +78,21 @@ bench_module(const char *name, barny_module_t *(*create)(void), int update_iters
 	}
 
 	if (mod->update) {
-		double t0 = now_ns();
-		for (int i = 0; i < update_iters; i++)
+		t0 = now_ns();
+		for (i = 0; i < update_iters; i++)
 			mod->update(mod);
-		double t1 = now_ns();
-		char    label[64];
+		t1 = now_ns();
 		snprintf(label, sizeof(label), "%s update", name);
 		report(label, update_iters, t1 - t0);
 	}
 
 	if (mod->render) {
-		cairo_surface_t *surf;
-		cairo_t         *cr = make_cairo(&surf);
-		double           t0 = now_ns();
-		for (int i = 0; i < render_iters; i++)
+		cr = make_cairo(&surf);
+		t0 = now_ns();
+		for (i = 0; i < render_iters; i++)
 			mod->render(mod, cr, 0, 0, mod->width > 0 ? mod->width : 100,
 			            BAR_H);
-		double t1 = now_ns();
-		char    label[64];
+		t1 = now_ns();
 		snprintf(label, sizeof(label), "%s render", name);
 		report(label, render_iters, t1 - t0);
 		cairo_destroy(cr);
@@ -101,8 +108,14 @@ bench_module(const char *name, barny_module_t *(*create)(void), int update_iters
 static void
 bench_config_parse(int iters)
 {
-	const char *path = "/tmp/barny_perf_config.conf";
-	FILE       *f    = fopen(path, "w");
+	const char *path;
+	FILE       *f;
+	double      t0;
+	double      t1;
+	int         i;
+
+	path = "/tmp/barny_perf_config.conf";
+	f    = fopen(path, "w");
 	if (!f)
 		return;
 	fputs("position = bottom\n"
@@ -126,14 +139,14 @@ bench_config_parse(int iters)
 	      f);
 	fclose(f);
 
-	double t0 = now_ns();
-	for (int i = 0; i < iters; i++) {
+	t0 = now_ns();
+	for (i = 0; i < iters; i++) {
 		barny_config_t cfg;
 		barny_config_defaults(&cfg);
 		barny_config_load(&cfg, path);
 		barny_config_cleanup(&cfg);
 	}
-	double t1 = now_ns();
+	t1 = now_ns();
 	report("config load+cleanup", iters, t1 - t0);
 	unlink(path);
 }
@@ -141,22 +154,29 @@ bench_config_parse(int iters)
 static void
 bench_text_measure(int iters)
 {
-	PangoFontDescription *fd
-	        = pango_font_description_from_string("Sans 11");
-	cairo_surface_t *surf
-	        = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
-	cairo_t *cr = cairo_create(surf);
+	PangoFontDescription *fd;
+	cairo_surface_t      *surf;
+	cairo_t              *cr;
+	double                t0;
+	double                t1;
+	int                   i;
 
-	double t0 = now_ns();
-	for (int i = 0; i < iters; i++) {
+	fd   = pango_font_description_from_string("Sans 11");
+	surf = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+	cr   = cairo_create(surf);
+
+	t0   = now_ns();
+	for (i = 0; i < iters; i++) {
 		PangoLayout *layout = pango_cairo_create_layout(cr);
+		int          w;
+		int          h;
+
 		pango_layout_set_font_description(layout, fd);
 		pango_layout_set_text(layout, "BTC-USDT-SWAP $109234.56", -1);
-		int w, h;
 		pango_layout_get_pixel_size(layout, &w, &h);
 		g_object_unref(layout);
 	}
-	double t1 = now_ns();
+	t1 = now_ns();
 	report("pango measure", iters, t1 - t0);
 
 	cairo_destroy(cr);
@@ -174,13 +194,18 @@ main(void)
 	bench_text_measure(5000);
 
 	{
-		PangoFontDescription *fd
-		        = pango_font_description_from_string("Sans 11");
-		int    iters = 5000;
-		double t0    = now_ns();
-		for (int i = 0; i < iters; i++)
+		PangoFontDescription *fd;
+		int                   iters;
+		double                t0;
+		double                t1;
+		int                   i;
+
+		fd    = pango_font_description_from_string("Sans 11");
+		iters = 5000;
+		t0    = now_ns();
+		for (i = 0; i < iters; i++)
 			(void)barny_popup_measure_text(fd, "BTC-USDT-SWAP $109234.56");
-		double t1 = now_ns();
+		t1 = now_ns();
 		report("popup_measure_text (cached)", iters, t1 - t0);
 		pango_font_description_free(fd);
 	}

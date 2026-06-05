@@ -11,6 +11,8 @@
 char *
 helper_trim(char *s)
 {
+	char *end;
+
 	if (!s)
 		return NULL;
 
@@ -20,7 +22,7 @@ helper_trim(char *s)
 	if (*s == '\0')
 		return s;
 
-	char *end = s + strlen(s) - 1;
+	end = s + strlen(s) - 1;
 	while (end > s && isspace((unsigned char)*end))
 		end--;
 	end[1] = '\0';
@@ -31,9 +33,12 @@ helper_trim(char *s)
 void
 helper_free_string_array(char **arr, size_t count)
 {
+	size_t i;
+
 	if (!arr)
 		return;
-	for (size_t i = 0; i < count; i++)
+
+	for (i = 0; i < count; i++)
 		free(arr[i]);
 	free((void *)arr);
 }
@@ -41,34 +46,43 @@ helper_free_string_array(char **arr, size_t count)
 char **
 helper_parse_csv(const char *input, size_t *out_count)
 {
+	size_t      max_tokens;
+	char      **result;
+	char       *tmp;
+	size_t      count;
+	char       *saveptr;
+	char       *token;
+	char       *trimmed;
+
+	const char *p;
+
 	if (out_count)
 		*out_count = 0;
 
 	if (!input || !*input)
 		return NULL;
 
-	/* Upper bound on token count: commas + 1. */
-	size_t max_tokens = 1;
-	for (const char *p = input; *p; p++) {
+	max_tokens = 1;
+	for (p = input; *p; p++) {
 		if (*p == ',')
 			max_tokens++;
 	}
 
-	char **result = (char **)calloc(max_tokens, sizeof(*result));
+	result = (char **)calloc(max_tokens, sizeof(*result));
 	if (!result)
 		return NULL;
 
-	char *tmp = strdup(input);
+	tmp = strdup(input);
 	if (!tmp) {
 		free((void *)result);
 		return NULL;
 	}
 
-	size_t count   = 0;
-	char  *saveptr = NULL;
-	char  *token   = strtok_r(tmp, ",", &saveptr);
+	count   = 0;
+	saveptr = NULL;
+	token   = strtok_r(tmp, ",", &saveptr);
 	while (token) {
-		char *trimmed = helper_trim(token);
+		trimmed = helper_trim(token);
 		if (*trimmed) {
 			result[count] = strdup(trimmed);
 			if (!result[count]) {
@@ -101,10 +115,11 @@ struct helper_response_buf {
 static size_t
 helper_write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
-	size_t                       realsize = size * nmemb;
-	struct helper_response_buf  *buf      = userdata;
+	size_t                      realsize = size * nmemb;
+	struct helper_response_buf *buf      = userdata;
+	char                       *new_data;
 
-	char *new_data = realloc(buf->data, buf->size + realsize + 1);
+	new_data = realloc(buf->data, buf->size + realsize + 1);
 	if (!new_data)
 		return 0;
 
@@ -118,14 +133,19 @@ helper_write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
 char *
 helper_http_fetch(const char *url, long timeout_seconds)
 {
+	CURL                      *curl;
+	struct helper_response_buf buf;
+	CURLcode                   res;
+
 	if (!url)
 		return NULL;
 
-	CURL *curl = curl_easy_init();
+	curl = curl_easy_init();
 	if (!curl)
 		return NULL;
 
-	struct helper_response_buf buf = { .data = NULL, .size = 0 };
+	buf.data = NULL;
+	buf.size = 0;
 
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, helper_write_callback);
@@ -133,7 +153,7 @@ helper_http_fetch(const char *url, long timeout_seconds)
 	if (timeout_seconds > 0)
 		curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
 
-	CURLcode res = curl_easy_perform(curl);
+	res = curl_easy_perform(curl);
 	curl_easy_cleanup(curl);
 
 	if (res != CURLE_OK) {
@@ -143,7 +163,6 @@ helper_http_fetch(const char *url, long timeout_seconds)
 	}
 
 	if (!buf.data) {
-		/* Successful zero-byte response: return an empty C-string. */
 		buf.data = calloc(1, 1);
 	}
 
@@ -153,11 +172,14 @@ helper_http_fetch(const char *url, long timeout_seconds)
 cJSON *
 helper_fetch_json(const char *url, long timeout_seconds)
 {
-	char *body = helper_http_fetch(url, timeout_seconds);
+	char  *body;
+	cJSON *json;
+
+	body = helper_http_fetch(url, timeout_seconds);
 	if (!body)
 		return NULL;
 
-	cJSON *json = cJSON_Parse(body);
+	json = cJSON_Parse(body);
 	free(body);
 	return json;
 }

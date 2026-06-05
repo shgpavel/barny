@@ -13,10 +13,8 @@ typedef struct {
 	barny_state_t        *state;
 	barny_module_t       *self;
 
-	/* Bar text */
 	char                  weather_str[128];
 
-	/* Parsed fields */
 	double                temperature;
 	double                feels_like;
 	double                wind_speed;
@@ -28,7 +26,6 @@ typedef struct {
 	char                  location[64];
 	char                  wind_dir[8];
 
-	/* Flags */
 	bool                  have_temp;
 	bool                  have_feels_like;
 	bool                  have_humidity;
@@ -42,8 +39,6 @@ typedef struct {
 
 	barny_popup_t        *popup;
 } weather_data_t;
-
-/* ---------- file parsing ---------- */
 
 static inline char *
 trim(char *s)
@@ -70,26 +65,29 @@ weather_reset(weather_data_t *d)
 static bool
 weather_parse_file(weather_data_t *d, char *bar_str, size_t bar_str_size)
 {
-	FILE *f = fopen(WEATHER_FILE, "r");
+	FILE *f;
+	char  line[256];
+	bool  legacy_first_line;
+
+	f = fopen(WEATHER_FILE, "r");
 	if (!f)
 		return false;
 
 	weather_reset(d);
 
-	char line[256];
-	bool legacy_first_line = true;
+	legacy_first_line = true;
 
 	while (fgets(line, sizeof(line), f)) {
-		char *p   = trim(line);
+		char *p = trim(line);
+		char *eq;
+		char *key;
+		char *value;
+
 		if (!*p)
 			continue;
 
-		char *eq = strchr(p, '=');
+		eq = strchr(p, '=');
 		if (!eq) {
-			/*
-			 * Legacy format: first non-empty line is "<temp> <weather>".
-			 * Tolerate it so the bar shows something during a stale read.
-			 */
 			if (legacy_first_line) {
 				double temp = 0.0;
 				char   tail[128];
@@ -108,9 +106,9 @@ weather_parse_file(weather_data_t *d, char *bar_str, size_t bar_str_size)
 		}
 		legacy_first_line = false;
 
-		*eq           = '\0';
-		char *key     = trim(p);
-		char *value   = trim(eq + 1);
+		*eq               = '\0';
+		key               = trim(p);
+		value             = trim(eq + 1);
 
 		if (strcmp(key, "temp") == 0) {
 			d->temperature = strtod(value, NULL);
@@ -148,10 +146,12 @@ weather_parse_file(weather_data_t *d, char *bar_str, size_t bar_str_size)
 	if (d->have_temp) {
 		if (d->condition[0])
 			snprintf(bar_str, bar_str_size,
-			         "%.0f\xc2\xb0" "C %s",
+			         "%.0f\xc2\xb0"
+			         "C %s",
 			         d->temperature, d->condition);
 		else
-			snprintf(bar_str, bar_str_size, "%.0f\xc2\xb0" "C",
+			snprintf(bar_str, bar_str_size, "%.0f\xc2\xb0"
+			                                "C",
 			         d->temperature);
 	} else {
 		snprintf(bar_str, bar_str_size, "--");
@@ -159,12 +159,10 @@ weather_parse_file(weather_data_t *d, char *bar_str, size_t bar_str_size)
 	return true;
 }
 
-/* ---------- popup ---------- */
-
 static int
 popup_active_rows(const weather_data_t *d)
 {
-	const barny_config_t *cfg = &d->state->config;
+	const barny_config_t *cfg  = &d->state->config;
 	int                   rows = 0;
 
 	if (d->have_location)
@@ -194,20 +192,25 @@ weather_popup_height(void *ud)
 static int
 weather_popup_width(void *ud)
 {
-	weather_data_t       *d   = ud;
-	const barny_config_t *cfg = &d->state->config;
+	weather_data_t       *d         = ud;
+	const barny_config_t *cfg       = &d->state->config;
 	int                   max_label = 0;
 	int                   max_value = 0;
 	char                  buf[64];
+	int                   total;
 
-#define MEASURE_LABEL(s) do {                                              \
-	int _w = barny_popup_measure_text(d->popup_font_desc, (s));        \
-	if (_w > max_label) max_label = _w;                                \
-} while (0)
-#define MEASURE_VALUE(s) do {                                              \
-	int _w = barny_popup_measure_text(d->popup_font_desc, (s));        \
-	if (_w > max_value) max_value = _w;                                \
-} while (0)
+#define MEASURE_LABEL(s)                                                    \
+	do {                                                                \
+		int _w = barny_popup_measure_text(d->popup_font_desc, (s)); \
+		if (_w > max_label)                                         \
+			max_label = _w;                                     \
+	} while (0)
+#define MEASURE_VALUE(s)                                                    \
+	do {                                                                \
+		int _w = barny_popup_measure_text(d->popup_font_desc, (s)); \
+		if (_w > max_value)                                         \
+			max_value = _w;                                     \
+	} while (0)
 
 	if (d->have_location) {
 		MEASURE_LABEL("Location");
@@ -222,12 +225,16 @@ weather_popup_width(void *ud)
 	}
 	if (d->have_temp) {
 		MEASURE_LABEL("Temperature");
-		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0" "C", d->temperature);
+		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0"
+		                           "C",
+		         d->temperature);
 		MEASURE_VALUE(buf);
 	}
 	if (cfg->weather_popup_show_feels_like && d->have_feels_like) {
 		MEASURE_LABEL("Feels like");
-		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0" "C", d->feels_like);
+		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0"
+		                           "C",
+		         d->feels_like);
 		MEASURE_VALUE(buf);
 	}
 	if (cfg->weather_popup_show_humidity && d->have_humidity) {
@@ -252,9 +259,10 @@ weather_popup_width(void *ud)
 #undef MEASURE_LABEL
 #undef MEASURE_VALUE
 
-	int total = max_label + 24 + max_value + 2 * BARNY_POPUP_PAD_X;
+	total = max_label + 24 + max_value + 2 * BARNY_POPUP_PAD_X;
 	if (total < 200)
 		total = 200;
+
 	return total;
 }
 
@@ -262,37 +270,15 @@ static void
 draw_row(cairo_t *cr, PangoLayout *layout, const barny_config_t *cfg,
          int line_idx, int width, const char *label, const char *value)
 {
-	int line_y = line_idx * POPUP_LINE_H;
-	int tw, th;
-	int text_y;
-
-	pango_layout_set_text(layout, label, -1);
-	pango_layout_get_pixel_size(layout, &tw, &th);
-	text_y = line_y + (POPUP_LINE_H - th) / 2;
-
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-	cairo_move_to(cr, 1, text_y + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	cairo_set_source_rgba(cr, 0.7, 0.75, 0.85, 0.9);
-	cairo_move_to(cr, 0, text_y);
-	pango_cairo_show_layout(cr, layout);
-
-	pango_layout_set_text(layout, value, -1);
-	pango_layout_get_pixel_size(layout, &tw, &th);
-	int value_x = width - tw;
-
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-	cairo_move_to(cr, value_x + 1, text_y + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
-		                      cfg->text_color_b, 0.95);
-	else
-		cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
-	cairo_move_to(cr, value_x, text_y);
-	pango_cairo_show_layout(cr, layout);
+	double vr = 1.0, vg = 1.0, vb = 1.0;
+	if (cfg->text_color_set) {
+		vr = cfg->text_color_r;
+		vg = cfg->text_color_g;
+		vb = cfg->text_color_b;
+	}
+	barny_popup_draw_row(cr, layout, line_idx * POPUP_LINE_H, POPUP_LINE_H,
+	                     width, label, value, 0.7, 0.75, 0.85, vr, vg, vb,
+	                     0.95);
 }
 
 static void
@@ -323,12 +309,16 @@ weather_popup_render(void *ud, cairo_t *cr, int w, int h)
 	}
 
 	if (d->have_temp) {
-		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0" "C", d->temperature);
+		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0"
+		                           "C",
+		         d->temperature);
 		draw_row(cr, layout, cfg, row++, w, "Temperature", buf);
 	}
 
 	if (cfg->weather_popup_show_feels_like && d->have_feels_like) {
-		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0" "C", d->feels_like);
+		snprintf(buf, sizeof(buf), "%.1f\xc2\xb0"
+		                           "C",
+		         d->feels_like);
 		draw_row(cr, layout, cfg, row++, w, "Feels like", buf);
 	}
 
@@ -381,28 +371,18 @@ weather_on_hover(barny_module_t *self, bool hovering, int x, int y)
 	}
 }
 
-/* ---------- module lifecycle ---------- */
-
 static int
 weather_init(barny_module_t *self, barny_state_t *state)
 {
 	weather_data_t *data = self->data;
+
 	data->state          = state;
 	data->self           = self;
 
 	data->font_desc      = pango_font_description_from_string(
-	             state->config.font ? state->config.font : "Sans 11");
-	data->popup_font_desc = pango_font_description_from_string(
 	        state->config.font ? state->config.font : "Sans 11");
-
-	int base_size = pango_font_description_get_size(data->popup_font_desc);
-	if (base_size > 0) {
-		pango_font_description_set_size(data->popup_font_desc,
-		                                base_size * 85 / 100);
-	} else {
-		pango_font_description_set_size(data->popup_font_desc,
-		                                9 * PANGO_SCALE);
-	}
+	data->popup_font_desc
+	        = barny_popup_font_from(state->config.font, "Sans 11");
 
 	if (!weather_parse_file(data, data->weather_str,
 	                        sizeof(data->weather_str))) {
@@ -440,6 +420,7 @@ weather_update(barny_module_t *self)
 	weather_data_t *data = self->data;
 	char            old_bar[128];
 	weather_data_t  prev = *data;
+	bool            popup_changed;
 
 	memcpy(old_bar, data->weather_str, sizeof(old_bar));
 
@@ -450,22 +431,21 @@ weather_update(barny_module_t *self)
 	if (strcmp(old_bar, data->weather_str) != 0)
 		self->dirty = true;
 
-	bool popup_changed =
-	        (prev.have_temp != data->have_temp)
-	        || (prev.temperature != data->temperature)
-	        || (prev.have_feels_like != data->have_feels_like)
-	        || (prev.feels_like != data->feels_like)
-	        || (prev.have_humidity != data->have_humidity)
-	        || (prev.humidity != data->humidity)
-	        || (prev.have_wind != data->have_wind)
-	        || (prev.wind_speed != data->wind_speed)
-	        || (prev.wind_deg != data->wind_deg)
-	        || (prev.have_pressure != data->have_pressure)
-	        || (prev.pressure != data->pressure)
-	        || (strcmp(prev.location, data->location) != 0)
-	        || (strcmp(prev.condition, data->condition) != 0)
-	        || (strcmp(prev.description, data->description) != 0)
-	        || (strcmp(prev.wind_dir, data->wind_dir) != 0);
+	popup_changed = (prev.have_temp != data->have_temp)
+	                || (prev.temperature != data->temperature)
+	                || (prev.have_feels_like != data->have_feels_like)
+	                || (prev.feels_like != data->feels_like)
+	                || (prev.have_humidity != data->have_humidity)
+	                || (prev.humidity != data->humidity)
+	                || (prev.have_wind != data->have_wind)
+	                || (prev.wind_speed != data->wind_speed)
+	                || (prev.wind_deg != data->wind_deg)
+	                || (prev.have_pressure != data->have_pressure)
+	                || (prev.pressure != data->pressure)
+	                || (strcmp(prev.location, data->location) != 0)
+	                || (strcmp(prev.condition, data->condition) != 0)
+	                || (strcmp(prev.description, data->description) != 0)
+	                || (strcmp(prev.wind_dir, data->wind_dir) != 0);
 
 	if (popup_changed && barny_popup_visible(data->popup))
 		barny_popup_redraw(data->popup);
@@ -475,32 +455,12 @@ static void
 weather_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
 	weather_data_t *data = self->data;
+	int             tw;
 	(void)w;
 
-	PangoLayout *layout = pango_cairo_create_layout(cr);
-	pango_layout_set_font_description(layout, data->font_desc);
-	pango_layout_set_text(layout, data->weather_str, -1);
-
-	int tw, th;
-	pango_layout_get_pixel_size(layout, &tw, &th);
-
-	/* Shadow */
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_move_to(cr, x + 1, y + (h - th) / 2 + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	/* Text */
-	barny_config_t *cfg = &data->state->config;
-	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
-		                      cfg->text_color_b, 0.9);
-	else
-		cairo_set_source_rgba(cr, 1, 1, 1, 0.9);
-	cairo_move_to(cr, x, y + (h - th) / 2);
-	pango_cairo_show_layout(cr, layout);
-
-	g_object_unref(layout);
-
+	tw          = barny_module_render_text(cr, data->font_desc, data->weather_str,
+	                                       x, y, h, &data->state->config,
+	                                       1, 1, 1, 0.9);
 	self->width = tw + 8;
 }
 
@@ -516,17 +476,17 @@ barny_module_weather_create(void)
 		return NULL;
 	}
 
-	mod->name     = "weather";
-	mod->position = BARNY_POS_RIGHT;
-	mod->init     = weather_init;
-	mod->destroy  = weather_destroy;
-	mod->update   = weather_update;
-	mod->update_interval_ms = 30000; /* helper writes every ~10min */
-	mod->render   = weather_render;
-	mod->on_hover = weather_on_hover;
-	mod->data     = data;
-	mod->width    = 100;
-	mod->dirty    = true;
+	mod->name               = "weather";
+	mod->position           = BARNY_POS_RIGHT;
+	mod->init               = weather_init;
+	mod->destroy            = weather_destroy;
+	mod->update             = weather_update;
+	mod->update_interval_ms = 30000;
+	mod->render             = weather_render;
+	mod->on_hover           = weather_on_hover;
+	mod->data               = data;
+	mod->width              = 100;
+	mod->dirty              = true;
 
 	return mod;
 }

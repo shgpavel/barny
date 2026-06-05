@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <signal.h>
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -30,21 +29,20 @@ setup_signals(void)
 static int
 setup_epoll(barny_state_t *s)
 {
+	struct epoll_event ev;
+
 	s->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
 	if (s->epoll_fd < 0) {
 		fprintf(stderr, "barny: failed to create epoll fd\n");
 		return -1;
 	}
 
-	/* Add Wayland display fd */
-	struct epoll_event ev
-	        = { .events = EPOLLIN, .data.fd = wl_display_get_fd(s->display) };
+	ev = (struct epoll_event){ .events = EPOLLIN, .data.fd = wl_display_get_fd(s->display) };
 	if (epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, ev.data.fd, &ev) < 0) {
 		fprintf(stderr, "barny: failed to add wayland fd to epoll\n");
 		return -1;
 	}
 
-	/* Add Sway IPC fd if connected */
 	if (s->sway_ipc_fd >= 0) {
 		ev.data.fd = s->sway_ipc_fd;
 		if (epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, ev.data.fd, &ev) < 0) {
@@ -54,7 +52,6 @@ setup_epoll(barny_state_t *s)
 		}
 	}
 
-	/* Add D-Bus fd if connected */
 	if (s->dbus_fd >= 0) {
 		ev.data.fd = s->dbus_fd;
 		if (epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, ev.data.fd, &ev) < 0) {
@@ -67,49 +64,36 @@ setup_epoll(barny_state_t *s)
 	return 0;
 }
 
-/* Find workspace module */
-static barny_module_t *
-find_workspace_module(barny_state_t *s)
-{
-	for (int i = 0; i < s->module_count; i++) {
-		if (s->modules[i]
-		    && strcmp(s->modules[i]->name, "workspace") == 0) {
-			return s->modules[i];
-		}
-	}
-	return NULL;
-}
-
-/* Find windowtitle module */
-static barny_module_t *
-find_windowtitle_module(barny_state_t *s)
-{
-	for (int i = 0; i < s->module_count; i++) {
-		if (s->modules[i]
-		    && strcmp(s->modules[i]->name, "windowtitle") == 0) {
-			return s->modules[i];
-		}
-	}
-	return NULL;
-}
-
 static void
 run_event_loop(barny_state_t *s)
 {
 	struct epoll_event events[16];
-	int                wayland_fd      = wl_display_get_fd(s->display);
-	barny_module_t    *workspace_mod   = find_workspace_module(s);
-	barny_module_t    *windowtitle_mod = find_windowtitle_module(s);
-	uint64_t           last_update     = 0;
+	int                wayland_fd;
+	barny_module_t    *workspace_mod;
+	barny_module_t    *windowtitle_mod;
+	uint64_t           last_update;
+	uint64_t           now;
+	int                nfds;
+	bool               wayland_readable;
+	bool               need_workspace_refresh;
+	bool               dbus_readable;
+	int                i;
+	uint32_t           type;
+	char              *payload;
+	barny_output_t    *out;
+
+	wayland_fd      = wl_display_get_fd(s->display);
+	workspace_mod   = barny_module_find(s, "workspace");
+	windowtitle_mod = barny_module_find(s, "windowtitle");
+	last_update     = 0;
 
 	while (s->running) {
-		uint64_t now = barny_now_ms();
+		now = barny_now_ms();
 		if (now - last_update >= 500) {
 			barny_modules_update(s);
 			last_update = now;
 		}
 
-		/* Dispatch any pending Wayland events first */
 		while (wl_display_prepare_read(s->display) != 0) {
 			wl_display_dispatch_pending(s->display);
 		}
@@ -120,7 +104,7 @@ run_event_loop(barny_state_t *s)
 			break;
 		}
 
-		int nfds = epoll_wait(s->epoll_fd, events, 16, 200);
+		nfds = epoll_wait(s->epoll_fd, events, 16, 200);
 
 		if (nfds < 0) {
 			wl_display_cancel_read(s->display);
@@ -132,21 +116,16 @@ run_event_loop(barny_state_t *s)
 			break;
 		}
 
-		/* Handle events */
-		bool wayland_readable       = false;
-		bool need_workspace_refresh = false;
-		bool dbus_readable          = false;
+		wayland_readable       = false;
+		need_workspace_refresh = false;
+		dbus_readable          = false;
 
-		for (int i = 0; i < nfds; i++) {
+		for (i = 0; i < nfds; i++) {
 			if (events[i].data.fd == wayland_fd) {
 				wayland_readable = true;
 			} else if (events[i].data.fd == s->sway_ipc_fd) {
-				/* Drain all pending IPC messages to avoid
-				 * multiple refreshes during rapid switching */
 				for (;;) {
-					uint32_t type;
-					char    *payload
-					        = barny_sway_ipc_recv(s, &type);
+					payload = barny_sway_ipc_recv(s, &type);
 					if (!payload)
 						break;
 					free(payload);
@@ -157,7 +136,6 @@ run_event_loop(barny_state_t *s)
 			}
 		}
 
-		/* Complete Wayland read BEFORE any other operations */
 		if (wayland_readable) {
 			if (wl_display_read_events(s->display) < 0) {
 				fprintf(stderr, "barny: wayland read failed\n");
@@ -167,15 +145,12 @@ run_event_loop(barny_state_t *s)
 			wl_display_cancel_read(s->display);
 		}
 
-		/* Dispatch events that were just read */
 		wl_display_dispatch_pending(s->display);
 
-		/* Process D-Bus messages */
 		if (dbus_readable) {
 			barny_dbus_dispatch(s);
 		}
 
-		/* Refresh workspace data when IPC events arrive */
 		if (need_workspace_refresh && workspace_mod) {
 			barny_workspace_refresh(workspace_mod);
 		}
@@ -183,23 +158,10 @@ run_event_loop(barny_state_t *s)
 			barny_windowtitle_refresh(windowtitle_mod);
 		}
 
-		/* For workspace/dbus events, just render dirty modules
-		 * without polling all modules for data changes.
-		 * Full module I/O update is handled periodically based on elapsed time. */
-		if (nfds > 0) {
-			bool needs_redraw = false;
-			for (int i = 0; i < s->module_count; i++) {
-				if (s->modules[i] && s->modules[i]->dirty) {
-					needs_redraw = true;
-					break;
-				}
-			}
-			if (needs_redraw) {
-				for (barny_output_t *out = s->outputs; out;
-				     out                 = out->next) {
-					if (out->configured)
-						barny_render_frame(out);
-				}
+		if (nfds > 0 && barny_modules_any_dirty(s)) {
+			for (out = s->outputs; out; out = out->next) {
+				if (out->configured)
+					barny_render_frame(out);
 			}
 		}
 	}
@@ -208,67 +170,73 @@ run_event_loop(barny_state_t *s)
 int
 main(int argc, char *argv[])
 {
+	char                  config_path[512];
+	const char           *home;
+	int                   w;
+	int                   h;
+	int                   max_needed_height;
+	int                   crop_y_offset;
+	barny_output_t       *out;
+	double                scale_x;
+	double                scale_y;
+	double                scale;
+	int                   needed;
+	cairo_surface_t      *cropped;
+	cairo_t              *cr;
+	barny_module_layout_t layout;
+
 	(void)argc;
 	(void)argv;
 
 	printf("barny %s - liquid glass status bar\n", BARNY_VERSION);
 
-	/* Load configuration */
 	barny_config_defaults(&state.config);
 	barny_config_load(&state.config, "/etc/barny/barny.conf");
 
-	/* Try user config */
-	char        config_path[512];
-	const char *home = getenv("HOME");
+	home = getenv("HOME");
 	if (home) {
 		snprintf(config_path, sizeof(config_path),
 		         "%s/.config/barny/barny.conf", home);
 		barny_config_load(&state.config, config_path);
 	}
 
-	/* Validate font configuration */
 	barny_config_validate_font(&state.config);
 
-	/* Initialize Wayland connection */
 	if (barny_wayland_init(&state) < 0) {
 		fprintf(stderr, "barny: failed to initialize wayland\n");
 		return 1;
 	}
 
-	/* Load wallpaper for liquid glass effect */
 	if (state.config.wallpaper_path) {
 		state.wallpaper
 		        = barny_load_wallpaper(state.config.wallpaper_path);
 		if (state.wallpaper) {
-			int w = cairo_image_surface_get_width(state.wallpaper);
-			int h = cairo_image_surface_get_height(state.wallpaper);
+			w                 = cairo_image_surface_get_width(state.wallpaper);
+			h                 = cairo_image_surface_get_height(state.wallpaper);
+			max_needed_height = 0;
+			crop_y_offset     = 0;
 
-			/* Crop wallpaper to the maximum height needed by active monitors */
-			int max_needed_height = 0;
-			int crop_y_offset = 0;
 			if (state.outputs) {
-				for (barny_output_t *out = state.outputs; out; out = out->next) {
-					if (out->width > 0 && out->height > 0) {
-						double scale_x = (double)w / out->width;
-						double scale_y = (double)h / out->height;
-						double scale = scale_x < scale_y ? scale_x : scale_y;
-						int needed = (int)(out->height * scale) +
-						             (int)state.config.blur_radius * 2 +
-						             (int)state.config.displacement_scale * 2 + 64;
+				for (out = state.outputs; out; out = out->next) {
+					if (out->width > 0 && out->mode_height > 0) {
+						scale_x = (double)w / out->width;
+						scale_y = (double)h / out->mode_height;
+						scale   = scale_x < scale_y ? scale_x : scale_y;
+						needed  = (int)(out->mode_height * scale) + (int)state.config.blur_radius * 2 + (int)state.config.displacement_scale * 2 + 64;
 						if (needed > max_needed_height) {
 							max_needed_height = needed;
 						}
 					}
 				}
+
 				if (max_needed_height > 0 && max_needed_height < h) {
 					if (!state.config.position_top) {
 						crop_y_offset = h - max_needed_height;
 					}
-					h = max_needed_height;
-
-					cairo_surface_t *cropped = cairo_image_surface_create(
+					h       = max_needed_height;
+					cropped = cairo_image_surface_create(
 					        CAIRO_FORMAT_ARGB32, w, h);
-					cairo_t *cr = cairo_create(cropped);
+					cr = cairo_create(cropped);
 					cairo_set_source_surface(cr, state.wallpaper, 0, -crop_y_offset);
 					cairo_paint(cr);
 					cairo_destroy(cr);
@@ -280,10 +248,9 @@ main(int argc, char *argv[])
 				}
 			}
 
-			/* Step 1: Create blurred copy */
 			state.blurred_wallpaper = cairo_image_surface_create(
 			        CAIRO_FORMAT_ARGB32, w, h);
-			cairo_t *cr = cairo_create(state.blurred_wallpaper);
+			cr = cairo_create(state.blurred_wallpaper);
 			cairo_set_source_surface(cr, state.wallpaper, 0, 0);
 			cairo_paint(cr);
 			cairo_destroy(cr);
@@ -292,7 +259,6 @@ main(int argc, char *argv[])
 			barny_apply_brightness(state.blurred_wallpaper,
 			                       state.config.brightness);
 
-			/* Step 2: Create displacement map if refraction is enabled */
 			if (state.config.refraction_mode != BARNY_REFRACT_NONE) {
 				printf("barny: creating liquid glass displacement map...\n");
 				state.displacement_map
@@ -303,7 +269,6 @@ main(int argc, char *argv[])
 				                state.config.noise_scale,
 				                state.config.noise_octaves);
 
-				/* Step 3: Apply displacement to create final wallpaper */
 				if (state.displacement_map) {
 					state.displaced_wallpaper
 					        = cairo_image_surface_create(
@@ -326,38 +291,30 @@ main(int argc, char *argv[])
 		}
 	}
 
-	/* Initialize Sway IPC */
 	state.sway_ipc_fd = -1;
 	barny_sway_ipc_init(&state);
 
-	/* Initialize D-Bus (for system tray) */
 	state.dbus_fd = -1;
 	if (barny_dbus_init(&state) < 0) {
 		fprintf(stderr, "barny: D-Bus init failed, tray disabled\n");
 	}
 
-	/* Initialize modules */
-	barny_module_layout_t layout;
 	barny_module_layout_init(&layout);
 	barny_module_layout_load_from_config(&state.config, &layout);
 	barny_module_layout_apply_to_state(&layout, &state);
 	barny_module_layout_destroy(&layout);
 	barny_modules_init(&state);
 
-	/* Setup signal handlers */
 	setup_signals();
 	state.running = true;
 
-	/* Setup epoll */
 	if (setup_epoll(&state) < 0) {
 		barny_wayland_cleanup(&state);
 		return 1;
 	}
 
-	/* Run event loop */
 	run_event_loop(&state);
 
-	/* Cleanup */
 	barny_modules_destroy(&state);
 	barny_dbus_cleanup(&state);
 	barny_sway_ipc_cleanup(&state);

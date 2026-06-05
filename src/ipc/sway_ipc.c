@@ -22,7 +22,10 @@ typedef struct {
 int
 barny_sway_ipc_init(barny_state_t *state)
 {
-	const char *socket_path = getenv("SWAYSOCK");
+	const char        *socket_path = getenv("SWAYSOCK");
+	struct sockaddr_un addr;
+	int                flags;
+
 	if (!socket_path) {
 		fprintf(stderr, "barny: SWAYSOCK not set, sway IPC unavailable\n");
 		state->sway_ipc_fd = -1;
@@ -36,7 +39,7 @@ barny_sway_ipc_init(barny_state_t *state)
 		return -1;
 	}
 
-	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	addr = (struct sockaddr_un){ .sun_family = AF_UNIX };
 	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 
 	if (connect(state->sway_ipc_fd, (struct sockaddr *)&addr, sizeof(addr))
@@ -48,7 +51,7 @@ barny_sway_ipc_init(barny_state_t *state)
 		return -1;
 	}
 
-	int flags = fcntl(state->sway_ipc_fd, F_GETFL, 0);
+	flags = fcntl(state->sway_ipc_fd, F_GETFL, 0);
 	fcntl(state->sway_ipc_fd, F_SETFL, flags | O_NONBLOCK);
 
 	printf("barny: connected to sway IPC\n");
@@ -67,30 +70,37 @@ barny_sway_ipc_cleanup(barny_state_t *state)
 int
 barny_sway_ipc_send(barny_state_t *state, uint32_t type, const char *payload)
 {
+	uint32_t      len;
+	size_t        total;
+	char         *buf;
+	ssize_t       offset;
+	ssize_t       remaining;
+	ssize_t       written;
+	struct pollfd pfd;
+
 	if (state->sway_ipc_fd < 0) {
 		return -1;
 	}
 
-	uint32_t len   = payload ? strlen(payload) : 0;
-	size_t   total = SWAY_IPC_HEADER_SIZE + len;
-	char    *buf   = malloc(total);
+	len   = payload ? strlen(payload) : 0;
+	total = SWAY_IPC_HEADER_SIZE + len;
+	buf   = malloc(total);
 
-	memcpy(buf, SWAY_IPC_MAGIC, 6); // NOLINT(bugprone-not-null-terminated-result)
+	memcpy(buf, SWAY_IPC_MAGIC, 6);
 	memcpy(buf + 6, &len, 4);
 	memcpy(buf + 10, &type, 4);
 	if (payload && len > 0) {
-		memcpy(buf + 14, payload, len); // NOLINT(bugprone-not-null-terminated-result)
+		memcpy(buf + 14, payload, len);
 	}
 
-	ssize_t offset    = 0;
-	ssize_t remaining = total;
+	offset    = 0;
+	remaining = total;
 	while (remaining > 0) {
-		ssize_t written
-		        = write(state->sway_ipc_fd, buf + offset, remaining);
+		written = write(state->sway_ipc_fd, buf + offset, remaining);
 		if (written < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				struct pollfd pfd = { .fd     = state->sway_ipc_fd,
-					              .events = POLLOUT };
+				pfd = (struct pollfd){ .fd     = state->sway_ipc_fd,
+					               .events = POLLOUT };
 				poll(&pfd, 1, 100);
 				continue;
 			}
@@ -110,25 +120,32 @@ barny_sway_ipc_send(barny_state_t *state, uint32_t type, const char *payload)
 char *
 barny_sway_ipc_recv(barny_state_t *state, uint32_t *type)
 {
+	sway_ipc_header_t header;
+	ssize_t           hdr_offset;
+	char             *payload;
+	ssize_t           remaining;
+	ssize_t           offset;
+	ssize_t           n;
+	struct pollfd     pfd;
+
 	if (state->sway_ipc_fd < 0) {
 		return NULL;
 	}
 
-	sway_ipc_header_t header;
-	ssize_t           hdr_offset = 0;
+	hdr_offset = 0;
 	while (hdr_offset < (ssize_t)sizeof(header)) {
-		ssize_t n = read(state->sway_ipc_fd,
-		                 (char *)&header + hdr_offset,
-		                 sizeof(header) - hdr_offset);
+		n = read(state->sway_ipc_fd,
+		         (char *)&header + hdr_offset,
+		         sizeof(header) - hdr_offset);
 		if (n <= 0) {
 			if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
 				if (hdr_offset == 0) {
-					return NULL; /* No data available yet */
+					return NULL;
 				}
-				struct pollfd pfd = { .fd     = state->sway_ipc_fd,
-					              .events = POLLIN };
+				pfd = (struct pollfd){ .fd     = state->sway_ipc_fd,
+					               .events = POLLIN };
 				poll(&pfd, 1, 100);
-				continue; /* Partial header, keep reading */
+				continue;
 			}
 			if (n < 0) {
 				fprintf(stderr, "barny: sway IPC read error: %s\n",
@@ -150,16 +167,16 @@ barny_sway_ipc_recv(barny_state_t *state, uint32_t *type)
 		return strdup("");
 	}
 
-	char   *payload   = malloc(header.length + 1);
-	ssize_t remaining = header.length;
-	ssize_t offset    = 0;
+	payload   = malloc(header.length + 1);
+	remaining = header.length;
+	offset    = 0;
 
 	while (remaining > 0) {
-		ssize_t n = read(state->sway_ipc_fd, payload + offset, remaining);
+		n = read(state->sway_ipc_fd, payload + offset, remaining);
 		if (n <= 0) {
 			if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-				struct pollfd pfd = { .fd     = state->sway_ipc_fd,
-					              .events = POLLIN };
+				pfd = (struct pollfd){ .fd     = state->sway_ipc_fd,
+					               .events = POLLIN };
 				poll(&pfd, 1, 100);
 				continue;
 			}
@@ -177,12 +194,15 @@ barny_sway_ipc_recv(barny_state_t *state, uint32_t *type)
 char *
 barny_sway_ipc_recv_sync(barny_state_t *state, uint32_t *type, int timeout_ms)
 {
+	struct pollfd pfd;
+	int           ret;
+
 	if (state->sway_ipc_fd < 0) {
 		return NULL;
 	}
 
-	struct pollfd pfd = { .fd = state->sway_ipc_fd, .events = POLLIN };
-	int           ret = poll(&pfd, 1, timeout_ms);
+	pfd = (struct pollfd){ .fd = state->sway_ipc_fd, .events = POLLIN };
+	ret = poll(&pfd, 1, timeout_ms);
 	if (ret <= 0) {
 		return NULL;
 	}

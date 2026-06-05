@@ -15,6 +15,9 @@ typedef struct {
 static void
 build_time_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 {
+	int         hour;
+	const char *ampm;
+
 	buf[0] = '\0';
 
 	if (!cfg->clock_show_time)
@@ -29,10 +32,10 @@ build_time_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 			         tm->tm_min);
 		}
 	} else {
-		int hour = tm->tm_hour % 12;
+		hour = tm->tm_hour % 12;
 		if (hour == 0)
 			hour = 12;
-		const char *ampm = tm->tm_hour >= 12 ? "PM" : "AM";
+		ampm = tm->tm_hour >= 12 ? "PM" : "AM";
 
 		if (cfg->clock_show_seconds) {
 			snprintf(buf, buflen, "%d:%02d:%02d %s", hour, tm->tm_min,
@@ -47,16 +50,27 @@ build_time_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 static void
 build_date_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 {
+	char        weekday[16];
+	char        day[16];
+	char        month[16];
+	char        year[16];
+	char        sep[2];
+	char        date_part[64];
+	size_t      dp_off;
+	const char *parts[3];
+	int         i;
+
 	buf[0] = '\0';
 
 	if (!cfg->clock_show_date)
 		return;
 
-	char weekday[16] = "";
-	char day[16]     = "";
-	char month[16]   = "";
-	char year[16]    = "";
-	char sep[2]      = { cfg->clock_date_separator, '\0' };
+	weekday[0] = '\0';
+	day[0]     = '\0';
+	month[0]   = '\0';
+	year[0]    = '\0';
+	sep[0]     = cfg->clock_date_separator;
+	sep[1]     = '\0';
 
 	if (cfg->clock_show_weekday) {
 		strftime(weekday, sizeof(weekday), "%a ", tm);
@@ -74,13 +88,14 @@ build_date_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 		snprintf(year, sizeof(year), "%d", tm->tm_year + 1900);
 	}
 
-	/* Build date based on order preference */
-	char        date_part[64] = "";
-	size_t      dp_off        = 0;
-	const char *parts[3]      = { NULL, NULL, NULL };
+	date_part[0] = '\0';
+	dp_off       = 0;
+	parts[0]     = NULL;
+	parts[1]     = NULL;
+	parts[2]     = NULL;
 
 	switch (cfg->clock_date_order) {
-	case 0: /* dd/mm/yyyy */
+	case 0:
 		if (cfg->clock_show_day)
 			parts[0] = day;
 		if (cfg->clock_show_month)
@@ -88,7 +103,7 @@ build_date_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 		if (cfg->clock_show_year)
 			parts[2] = year;
 		break;
-	case 1: /* mm/dd/yyyy */
+	case 1:
 		if (cfg->clock_show_month)
 			parts[0] = month;
 		if (cfg->clock_show_day)
@@ -96,7 +111,7 @@ build_date_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 		if (cfg->clock_show_year)
 			parts[2] = year;
 		break;
-	case 2: /* yyyy/mm/dd */
+	case 2:
 		if (cfg->clock_show_year)
 			parts[0] = year;
 		if (cfg->clock_show_month)
@@ -108,7 +123,7 @@ build_date_string(char *buf, size_t buflen, struct tm *tm, barny_config_t *cfg)
 		break;
 	}
 
-	for (int i = 0; i < 3; i++) {
+	for (i = 0; i < 3; i++) {
 		if (!parts[i] || !parts[i][0])
 			continue;
 		if (dp_off > 0) {
@@ -129,9 +144,8 @@ clock_init(barny_module_t *self, barny_state_t *state)
 	data->state        = state;
 	data->last_update  = 0;
 
-	/* Create font description */
 	data->font_desc    = pango_font_description_from_string(
-                state->config.font ? state->config.font : "Sans 12");
+	        state->config.font ? state->config.font : "Sans 12");
 
 	return 0;
 }
@@ -154,23 +168,25 @@ clock_destroy(barny_module_t *self)
 static void
 clock_update(barny_module_t *self)
 {
-	clock_data_t   *data = self->data;
-	barny_config_t *cfg  = &data->state->config;
-	time_t          now  = time(NULL);
+	clock_data_t   *data;
+	barny_config_t *cfg;
+	time_t          now;
+	struct tm      *tm;
+	char            time_str[64];
+	char            date_str[64];
 
-	/* Update every second */
+	data = self->data;
+	cfg  = &data->state->config;
+	now  = time(NULL);
+
 	if (now != data->last_update) {
 		data->last_update = now;
 
-		struct tm *tm     = localtime(&now);
-
-		char       time_str[64];
-		char       date_str[64];
+		tm                = localtime(&now);
 
 		build_time_string(time_str, sizeof(time_str), tm, cfg);
 		build_date_string(date_str, sizeof(date_str), tm, cfg);
 
-		/* Combine time and date */
 		if (time_str[0] && date_str[0]) {
 			snprintf(data->display_str, sizeof(data->display_str),
 			         "%s  %s", time_str, date_str);
@@ -191,7 +207,10 @@ clock_update(barny_module_t *self)
 static void
 clock_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
-	clock_data_t *data = self->data;
+	clock_data_t *data;
+	int           tw;
+
+	data = self->data;
 	(void)w;
 
 	if (data->display_str[0] == '\0') {
@@ -199,33 +218,10 @@ clock_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 		return;
 	}
 
-	/* Create Pango layout */
-	PangoLayout *layout = pango_cairo_create_layout(cr);
-	pango_layout_set_font_description(layout, data->font_desc);
-	pango_layout_set_text(layout, data->display_str, -1);
-
-	/* Get text dimensions */
-	int text_width, text_height;
-	pango_layout_get_pixel_size(layout, &text_width, &text_height);
-
-	/* Draw text with shadow */
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_move_to(cr, x + 1, y + (h - text_height) / 2 + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	barny_config_t *cfg = &data->state->config;
-	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
-		                      cfg->text_color_b, 1);
-	else
-		cairo_set_source_rgba(cr, 1, 1, 1, 1);
-	cairo_move_to(cr, x, y + (h - text_height) / 2);
-	pango_cairo_show_layout(cr, layout);
-
-	g_object_unref(layout);
-
-	/* Update module width based on rendered content */
-	self->width = text_width + 8;
+	tw          = barny_module_render_text(cr, data->font_desc, data->display_str,
+	                                       x, y, h, &data->state->config,
+	                                       1, 1, 1, 1.0);
+	self->width = tw + 8;
 }
 
 barny_module_t *
@@ -240,16 +236,16 @@ barny_module_clock_create(void)
 		return NULL;
 	}
 
-	mod->name     = "clock";
-	mod->position = BARNY_POS_RIGHT;
-	mod->init     = clock_init;
-	mod->destroy  = clock_destroy;
-	mod->update   = clock_update;
-	mod->update_interval_ms = 0; /* every tick — second-precision clock */
-	mod->render   = clock_render;
-	mod->data     = data;
-	mod->width    = 80;
-	mod->dirty    = true;
+	mod->name               = "clock";
+	mod->position           = BARNY_POS_RIGHT;
+	mod->init               = clock_init;
+	mod->destroy            = clock_destroy;
+	mod->update             = clock_update;
+	mod->update_interval_ms = 0;
+	mod->render             = clock_render;
+	mod->data               = data;
+	mod->width              = 80;
+	mod->dirty              = true;
 
 	return mod;
 }

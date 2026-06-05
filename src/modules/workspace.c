@@ -31,32 +31,41 @@ typedef struct {
 static void
 parse_workspaces(workspace_data_t *data, const char *json_str)
 {
-	/* Clear existing */
-	for (int i = 0; i < data->workspace_count; i++) {
+	cJSON *json;
+	cJSON *ws;
+	int    i;
+
+	for (i = 0; i < data->workspace_count; i++) {
 		free(data->workspaces[i].name);
 		data->workspaces[i].name = NULL;
 	}
 	data->workspace_count = 0;
 
-	cJSON *json           = cJSON_Parse(json_str);
+	json                  = cJSON_Parse(json_str);
 	if (!json)
 		return;
 
-	cJSON *ws;
 	cJSON_ArrayForEach(ws, json)
 	{
+		workspace_info_t *info;
+		cJSON            *num;
+		cJSON            *name;
+		cJSON            *focused;
+		cJSON            *visible;
+		cJSON            *urgent;
+
 		if (data->workspace_count >= MAX_WORKSPACES)
 			break;
 
-		workspace_info_t *info = &data->workspaces[data->workspace_count];
+		info          = &data->workspaces[data->workspace_count];
 
-		cJSON            *num  = cJSON_GetObjectItem(ws, "num");
-		cJSON            *name = cJSON_GetObjectItem(ws, "name");
-		cJSON            *focused = cJSON_GetObjectItem(ws, "focused");
-		cJSON            *visible = cJSON_GetObjectItem(ws, "visible");
-		cJSON            *urgent  = cJSON_GetObjectItem(ws, "urgent");
+		num           = cJSON_GetObjectItem(ws, "num");
+		name          = cJSON_GetObjectItem(ws, "name");
+		focused       = cJSON_GetObjectItem(ws, "focused");
+		visible       = cJSON_GetObjectItem(ws, "visible");
+		urgent        = cJSON_GetObjectItem(ws, "urgent");
 
-		info->num                 = num ? num->valueint : 0;
+		info->num     = num ? num->valueint : 0;
 		info->name    = name ? strdup(name->valuestring) : strdup("?");
 		info->focused = focused ? cJSON_IsTrue(focused) : false;
 		info->visible = visible ? cJSON_IsTrue(visible) : false;
@@ -72,23 +81,22 @@ static int
 workspace_init(barny_module_t *self, barny_state_t *state)
 {
 	workspace_data_t *data = self->data;
-	data->state            = state;
+	uint32_t          type;
+	char             *reply;
 
-	/* Create font description */
-	data->font_desc        = pango_font_description_from_string(
-                state->config.font ? state->config.font : "Sans Bold 10");
+	data->state     = state;
 
-	/* Get initial workspace list (blocking) */
+	data->font_desc = pango_font_description_from_string(
+	        state->config.font ? state->config.font : "Sans Bold 10");
+
 	if (state->sway_ipc_fd >= 0) {
-		barny_sway_ipc_send(state, 1, ""); /* GET_WORKSPACES */
-		uint32_t type;
-		char    *reply = barny_sway_ipc_recv_sync(state, &type, 500);
+		barny_sway_ipc_send(state, 1, "");
+		reply = barny_sway_ipc_recv_sync(state, &type, 500);
 		if (reply) {
 			parse_workspaces(data, reply);
 			free(reply);
 		}
 
-		/* Subscribe to workspace events */
 		barny_sway_ipc_subscribe(state, "[\"workspace\"]");
 	}
 
@@ -99,10 +107,12 @@ static void
 workspace_destroy(barny_module_t *self)
 {
 	workspace_data_t *data = self->data;
+	int               i;
+
 	if (!data)
 		return;
 
-	for (int i = 0; i < data->workspace_count; i++) {
+	for (i = 0; i < data->workspace_count; i++) {
 		free(data->workspaces[i].name);
 	}
 
@@ -117,30 +127,25 @@ workspace_destroy(barny_module_t *self)
 static void
 workspace_update(barny_module_t *self)
 {
-	/* Workspace updates come from IPC events in the main loop */
 	(void)self;
 }
 
-/* Helper to get display label for a workspace */
 static const char *
 get_workspace_label(workspace_data_t *data, workspace_info_t *ws, char *buf,
                     size_t buf_size)
 {
 	barny_config_t *config = &data->state->config;
 
-	/* If we have configured names and workspace number is within range */
 	if (config->workspace_names
 	    && ws->num >= 1
 	    && ws->num <= config->workspace_name_count) {
 		return config->workspace_names[ws->num - 1];
 	}
 
-	/* Fallback to workspace number */
 	snprintf(buf, buf_size, "%d", ws->num);
 	return buf;
 }
 
-/* Helper to check if shape is square */
 static bool
 is_square_shape(barny_config_t *config)
 {
@@ -148,20 +153,24 @@ is_square_shape(barny_config_t *config)
 	       && strcmp(config->workspace_shape, "square") == 0;
 }
 
-/* Helper to draw shape (circle or square) */
 static void
 draw_shape(cairo_t *cr, int cx, int cy, int size, bool square, int corner_radius,
            bool fill)
 {
 	int half = size / 2 - 2;
+	int left;
+	int top;
+	int w;
+	int h;
+
 	if (half < 1)
 		half = 1;
 
 	if (square) {
-		int left = cx - half;
-		int top  = cy - half;
-		int w    = half * 2;
-		int h    = half * 2;
+		left = cx - half;
+		top  = cy - half;
+		w    = half * 2;
+		h    = half * 2;
 
 		if (corner_radius > 0) {
 			double r = corner_radius;
@@ -192,35 +201,33 @@ draw_shape(cairo_t *cr, int cx, int cy, int size, bool square, int corner_radius
 static void
 workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
-	workspace_data_t *data = self->data;
+	workspace_data_t *data           = self->data;
+	int               indicator_size = data->state->config.workspace_indicator_size;
+	int               spacing        = data->state->config.workspace_spacing;
+	int               total_width    = 0;
+	bool              square         = is_square_shape(&data->state->config);
+	int               corner_radius  = square ? data->state->config.workspace_corner_radius : 0;
+	PangoLayout      *layout;
+	int               i;
 	(void)w;
 
-	data->render_x      = x;
+	data->render_x = x;
 
-	int  indicator_size = data->state->config.workspace_indicator_size;
-	int  spacing        = data->state->config.workspace_spacing;
-	int  total_width    = 0;
-	bool square         = is_square_shape(&data->state->config);
-	int  corner_radius = square ? data->state->config.workspace_corner_radius :
-	                              0;
-
-	PangoLayout *layout = pango_cairo_create_layout(cr);
+	layout         = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, data->font_desc);
 
-	for (int i = 0; i < data->workspace_count; i++) {
+	for (i = 0; i < data->workspace_count; i++) {
 		workspace_info_t *ws = &data->workspaces[i];
 		int               cx = x + total_width + indicator_size / 2;
 		int               cy = y + h / 2;
-
-		/* Get workspace label (custom name or number) */
 		char              label_buf[16];
-		const char       *label = get_workspace_label(data, ws, label_buf,
-		                                              sizeof(label_buf));
-
-		/* Determine colors and style based on workspace state */
+		const char       *label;
 		double            bg_r, bg_g, bg_b, bg_a;
 		double            fg_r, fg_g, fg_b, fg_a;
 		bool              fill = true;
+		int               tw, th;
+
+		label = get_workspace_label(data, ws, label_buf, sizeof(label_buf));
 
 		if (ws->focused) {
 			bg_r = bg_g = bg_b = 1.0;
@@ -248,14 +255,11 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 			fg_a               = 0.9;
 		}
 
-		/* Draw shape */
 		cairo_set_source_rgba(cr, bg_r, bg_g, bg_b, bg_a);
 		draw_shape(cr, cx, cy, indicator_size, square, corner_radius,
 		           fill);
 
-		/* Draw label */
 		pango_layout_set_text(layout, label, -1);
-		int tw, th;
 		pango_layout_get_pixel_size(layout, &tw, &th);
 		cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, fg_a);
 		cairo_move_to(cr, cx - tw / 2.0, cy - th / 2.0);
@@ -266,40 +270,36 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 
 	g_object_unref(layout);
 
-	/* Update module width */
 	self->width = total_width > 0 ? total_width - spacing : 0;
 }
 
 static void
 workspace_click(barny_module_t *self, int button, int click_x, int click_y)
 {
-	workspace_data_t *data = self->data;
+	workspace_data_t *data           = self->data;
+	int               indicator_size = data->state->config.workspace_indicator_size;
+	int               spacing        = data->state->config.workspace_spacing;
+	int               rel_x          = click_x - data->render_x;
+	int               x              = 0;
+	int               i;
 	(void)click_y;
 
 	if (button != 272)
-		return; /* BTN_LEFT */
+		return;
 
-	int indicator_size = data->state->config.workspace_indicator_size;
-	int spacing        = data->state->config.workspace_spacing;
-
-	/* Convert absolute click_x to position relative to module */
-	int rel_x          = click_x - data->render_x;
-
-	/* Find which workspace was clicked */
-	int x              = 0;
-	for (int i = 0; i < data->workspace_count; i++) {
-		int cx   = x + indicator_size / 2;
-		int dist = abs(rel_x - cx);
+	for (i = 0; i < data->workspace_count; i++) {
+		int      cx   = x + indicator_size / 2;
+		int      dist = abs(rel_x - cx);
+		char     cmd[256];
+		uint32_t type;
+		char    *reply;
 
 		if (dist < indicator_size / 2) {
-			/* Switch to this workspace */
-			char cmd[256];
 			snprintf(cmd, sizeof(cmd), "workspace number %d",
 			         data->workspaces[i].num);
-			barny_sway_ipc_send(data->state, 0, cmd); /* RUN_COMMAND */
+			barny_sway_ipc_send(data->state, 0, cmd);
 
-			uint32_t type;
-			char    *reply = barny_sway_ipc_recv(data->state, &type);
+			reply = barny_sway_ipc_recv(data->state, &type);
 			free(reply);
 			break;
 		}
@@ -334,21 +334,23 @@ barny_module_workspace_create(void)
 	return mod;
 }
 
-/* Called from main loop when workspace events arrive */
 void
 barny_workspace_refresh(barny_module_t *mod)
 {
+	workspace_data_t *data;
+	uint32_t          type;
+	char             *reply;
+
 	if (!mod || strcmp(mod->name, "workspace") != 0)
 		return;
 
-	workspace_data_t *data = mod->data;
+	data = mod->data;
 	if (data->state->sway_ipc_fd < 0)
 		return;
 
-	barny_sway_ipc_send(data->state, 1, ""); /* GET_WORKSPACES */
-	uint32_t type;
-	/* Very short timeout - Sway responds almost instantly */
-	char    *reply = barny_sway_ipc_recv_sync(data->state, &type, 10);
+	barny_sway_ipc_send(data->state, 1, "");
+
+	reply = barny_sway_ipc_recv_sync(data->state, &type, 10);
 	if (reply) {
 		parse_workspaces(data, reply);
 		free(reply);

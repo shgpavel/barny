@@ -1,16 +1,9 @@
-/*
- * StatusNotifierHost implementation
- *
- * Registers as a host and manages the list of status notifier items.
- * Fetches icons and properties from registered apps.
- */
-
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h> /* For ntohl */
+#include <arpa/inet.h>
 
 #include "barny.h"
 
@@ -27,17 +20,15 @@ typedef struct {
 
 static sni_host_t *host = NULL;
 
-/*
- * Parse a service string like ":1.234/StatusNotifierItem" into
- * service name and object path components.
- */
 static void
 parse_service_string(const char *full, char **service, char **path)
 {
-	*service          = NULL;
-	*path             = NULL;
+	const char *slash;
 
-	const char *slash = strchr(full, '/');
+	*service = NULL;
+	*path    = NULL;
+
+	slash    = strchr(full, '/');
 	if (slash) {
 		*service = strndup(full, slash - full);
 		*path    = strdup(slash);
@@ -47,16 +38,25 @@ parse_service_string(const char *full, char **service, char **path)
 	}
 }
 
-/*
- * Convert IconPixmap data (big-endian ARGB) to Cairo surface
- * Format from D-Bus: a(iiay) - array of (width, height, pixel_data)
- */
 static cairo_surface_t *
 create_icon_from_pixmap(sd_bus_message *m, int target_size)
 {
 	int              r;
 	cairo_surface_t *best      = NULL;
 	int              best_size = 0;
+	int32_t          width, height;
+	const void      *pixels;
+	size_t           pixel_len;
+	size_t           expected;
+	int              size;
+	uint32_t        *dst;
+	const uint32_t  *src;
+	int              i;
+	int              w, h;
+	double           scale;
+	int              new_w, new_h;
+	cairo_surface_t *scaled;
+	cairo_t         *cr;
 
 	r = sd_bus_message_enter_container(m, 'a', "(iiay)");
 	if (r < 0) {
@@ -64,33 +64,26 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 	}
 
 	while (sd_bus_message_enter_container(m, 'r', "iiay") > 0) {
-		int32_t     width, height;
-		const void *pixels;
-		size_t      pixel_len;
-
 		r = sd_bus_message_read(m, "ii", &width, &height);
 		if (r < 0) {
 			sd_bus_message_exit_container(m);
 			continue;
 		}
 
-		/* Validate dimensions - reject bogus data from misbehaving apps */
 		if (width <= 0 || height <= 0 || width > 1024 || height > 1024) {
 			sd_bus_message_exit_container(m);
 			continue;
 		}
 
-		/* Check for integer overflow in pixel count */
-		size_t expected = (size_t)width * (size_t)height * 4;
+		expected = (size_t)width * (size_t)height * 4;
 
-		r = sd_bus_message_read_array(m, 'y', &pixels, &pixel_len);
+		r        = sd_bus_message_read_array(m, 'y', &pixels, &pixel_len);
 		if (r < 0 || pixel_len != expected) {
 			sd_bus_message_exit_container(m);
 			continue;
 		}
 
-		/* Pick the icon closest to target size */
-		int size = (width > height) ? width : height;
+		size = (width > height) ? width : height;
 		if (!best
 		    || (size >= target_size && size < best_size)
 		    || (best_size < target_size && size > best_size)) {
@@ -98,7 +91,6 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 				cairo_surface_destroy(best);
 			}
 
-			/* Create Cairo surface and convert from network byte order ARGB */
 			best = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 			                                  width, height);
 			if (cairo_surface_status(best) != CAIRO_STATUS_SUCCESS) {
@@ -108,12 +100,10 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 				continue;
 			}
 
-			uint32_t *dst
-			        = (uint32_t *)cairo_image_surface_get_data(best);
-			const uint32_t *src = pixels;
+			dst = (uint32_t *)cairo_image_surface_get_data(best);
+			src = pixels;
 
-			for (int i = 0; i < width * height; i++) {
-				/* Convert from network (big-endian) ARGB to native ARGB */
+			for (i = 0; i < width * height; i++) {
 				dst[i] = ntohl(src[i]);
 			}
 
@@ -126,34 +116,33 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 
 	sd_bus_message_exit_container(m);
 
-	/* Scale if needed */
 	if (best && best_size != target_size) {
-		int w = cairo_image_surface_get_width(best);
-		int h = cairo_image_surface_get_height(best);
+		w = cairo_image_surface_get_width(best);
+		h = cairo_image_surface_get_height(best);
 
 		if (w <= 0 || h <= 0 || best_size <= 0) {
 			cairo_surface_destroy(best);
 			return NULL;
 		}
 
-		double scale = (double)target_size / best_size;
-		int    new_w = (int)(w * scale);
-		int    new_h = (int)(h * scale);
+		scale = (double)target_size / best_size;
+		new_w = (int)(w * scale);
+		new_h = (int)(h * scale);
 
 		if (new_w <= 0 || new_h <= 0) {
 			cairo_surface_destroy(best);
 			return NULL;
 		}
 
-		cairo_surface_t *scaled = cairo_image_surface_create(
-		        CAIRO_FORMAT_ARGB32, new_w, new_h);
+		scaled = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, new_w,
+		                                    new_h);
 		if (cairo_surface_status(scaled) != CAIRO_STATUS_SUCCESS) {
 			cairo_surface_destroy(scaled);
 			cairo_surface_destroy(best);
 			return NULL;
 		}
 
-		cairo_t *cr = cairo_create(scaled);
+		cr = cairo_create(scaled);
 		cairo_scale(cr, scale, scale);
 		cairo_set_source_surface(cr, best, 0, 0);
 		cairo_paint(cr);
@@ -166,51 +155,52 @@ create_icon_from_pixmap(sd_bus_message *m, int target_size)
 	return best;
 }
 
-/*
- * Create a placeholder icon with the first letter of the app
- */
 static cairo_surface_t *
 create_placeholder_icon(const char *id, int size)
 {
+	cairo_surface_t     *surface;
+	cairo_t             *cr;
+	unsigned int         hash = 0;
+	const char          *p;
+	double               r, g, b;
+	char                 letter[2];
+	cairo_text_extents_t ext;
+
 	if (size <= 0 || size > 256)
 		size = 24;
 
-	cairo_surface_t *surface
-	        = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
+	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
 	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
 		cairo_surface_destroy(surface);
 		return NULL;
 	}
-	cairo_t     *cr   = cairo_create(surface);
+	cr = cairo_create(surface);
 
-	/* Draw colored circle based on id hash */
-	unsigned int hash = 0;
 	if (id) {
-		for (const char *p = id; *p; p++) {
+		for (p = id; *p; p++) {
 			hash = hash * 31 + *p;
 		}
 	}
 
-	double r = ((hash >> 16) & 0xFF) / 255.0 * 0.5 + 0.3;
-	double g = ((hash >> 8) & 0xFF) / 255.0 * 0.5 + 0.3;
-	double b = (hash & 0xFF) / 255.0 * 0.5 + 0.3;
+	r = ((hash >> 16) & 0xFF) / 255.0 * 0.5 + 0.3;
+	g = ((hash >> 8) & 0xFF) / 255.0 * 0.5 + 0.3;
+	b = (hash & 0xFF) / 255.0 * 0.5 + 0.3;
 
 	cairo_arc(cr, size / 2.0, size / 2.0, size / 2.0 - 2, 0, 2 * 3.14159);
 	cairo_set_source_rgba(cr, r, g, b, 0.8);
 	cairo_fill(cr);
 
-	/* Draw first letter */
 	if (id && id[0]) {
 		cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
 		                       CAIRO_FONT_WEIGHT_BOLD);
 		cairo_set_font_size(cr, size * 0.5);
 
-		char letter[2] = { id[0], '\0' };
+		letter[0] = id[0];
+		letter[1] = '\0';
 		if (letter[0] >= 'a' && letter[0] <= 'z') {
-			letter[0] -= 32; /* Uppercase */
+			letter[0] -= 32;
 		}
 
-		cairo_text_extents_t ext;
 		cairo_text_extents(cr, letter, &ext);
 		cairo_move_to(cr, (size - ext.width) / 2 - ext.x_bearing,
 		              (size - ext.height) / 2 - ext.y_bearing);
@@ -222,9 +212,6 @@ create_placeholder_icon(const char *id, int size)
 	return surface;
 }
 
-/*
- * Fetch icon for an SNI item
- */
 static void
 fetch_item_icon(sni_item_t *item, int icon_size)
 {
@@ -236,7 +223,6 @@ fetch_item_icon(sni_item_t *item, int icon_size)
 		return;
 	}
 
-	/* First try IconPixmap */
 	r = sd_bus_get_property(host->state->dbus,
 	                        item->service,
 	                        item->object_path,
@@ -258,15 +244,9 @@ fetch_item_icon(sni_item_t *item, int icon_size)
 	sd_bus_message_unref(reply);
 	reply      = NULL;
 
-	/* Fallback to IconName (would need icon theme lookup - skip for now) */
-
-	/* Create placeholder */
 	item->icon = create_placeholder_icon(item->id, icon_size);
 }
 
-/*
- * Fetch all properties for an SNI item
- */
 static void
 fetch_item_properties(sni_item_t *item, int icon_size)
 {
@@ -278,7 +258,6 @@ fetch_item_properties(sni_item_t *item, int icon_size)
 		return;
 	}
 
-	/* Get Id */
 	r = sd_bus_get_property_string(host->state->dbus,
 	                               item->service,
 	                               item->object_path,
@@ -293,7 +272,6 @@ fetch_item_properties(sni_item_t *item, int icon_size)
 	}
 	sd_bus_error_free(&error);
 
-	/* Get Title */
 	r = sd_bus_get_property_string(host->state->dbus,
 	                               item->service,
 	                               item->object_path,
@@ -308,7 +286,6 @@ fetch_item_properties(sni_item_t *item, int icon_size)
 	}
 	sd_bus_error_free(&error);
 
-	/* Get Status */
 	r = sd_bus_get_property_string(host->state->dbus,
 	                               item->service,
 	                               item->object_path,
@@ -323,7 +300,6 @@ fetch_item_properties(sni_item_t *item, int icon_size)
 	}
 	sd_bus_error_free(&error);
 
-	/* Get IconName */
 	r = sd_bus_get_property_string(host->state->dbus,
 	                               item->service,
 	                               item->object_path,
@@ -338,28 +314,25 @@ fetch_item_properties(sni_item_t *item, int icon_size)
 	}
 	sd_bus_error_free(&error);
 
-	/* Fetch icon */
 	fetch_item_icon(item, icon_size);
 }
 
-/*
- * Add a new SNI item
- */
 static sni_item_t *
 add_item(const char *service_string, int icon_size)
 {
+	sni_item_t *item;
+
 	if (!host || !service_string || !service_string[0]) {
 		return NULL;
 	}
 
-	/* Check for duplicates */
-	for (sni_item_t *item = host->items; item; item = item->next) {
+	for (item = host->items; item; item = item->next) {
 		if (item->service && strcmp(item->service, service_string) == 0) {
 			return item;
 		}
 	}
 
-	sni_item_t *item = calloc(1, sizeof(sni_item_t));
+	item = calloc(1, sizeof(sni_item_t));
 	if (!item) {
 		return NULL;
 	}
@@ -372,10 +345,8 @@ add_item(const char *service_string, int icon_size)
 		return NULL;
 	}
 
-	/* Fetch properties */
 	fetch_item_properties(item, icon_size);
 
-	/* Add to list */
 	item->next  = host->items;
 	host->items = item;
 
@@ -386,26 +357,27 @@ add_item(const char *service_string, int icon_size)
 	return item;
 }
 
-/*
- * Remove an SNI item
- */
 static void
 remove_item(const char *service)
 {
+	sni_item_t **pp;
+	sni_item_t  *item;
+	char        *item_service, *item_path;
+	bool         match;
+
 	if (!host) {
 		return;
 	}
 
-	sni_item_t **pp = &host->items;
+	pp = &host->items;
 	while (*pp) {
-		sni_item_t *item = *pp;
-		/* Match against service name (without path) */
-		char       *item_service, *item_path;
+		item = *pp;
+
 		parse_service_string(service, &item_service, &item_path);
 		free(item_path);
 
-		bool match = (strcmp(item->service, service) == 0
-		              || strcmp(item->service, item_service) == 0);
+		match = (strcmp(item->service, service) == 0
+		         || strcmp(item->service, item_service) == 0);
 		free(item_service);
 
 		if (match) {
@@ -429,34 +401,29 @@ remove_item(const char *service)
 	}
 }
 
-/*
- * Update the tray module's item count, width, and dirty flag immediately.
- * Called after any change to the item list so that the next render uses
- * correct layout values instead of waiting for the 500 ms tray_update tick.
- */
 static void
 notify_tray_module(void)
 {
+	barny_module_t *mod;
+
 	if (!host || !host->state)
 		return;
 
-	for (int i = 0; i < host->state->module_count; i++) {
-		barny_module_t *mod = host->state->modules[i];
-		if (mod && mod->name && strcmp(mod->name, "tray") == 0) {
-			if (mod->update)
-				mod->update(mod);
-			mod->dirty = true;
-			break;
-		}
+	mod = barny_module_find(host->state, "tray");
+	if (mod) {
+		if (mod->update)
+			mod->update(mod);
+		mod->dirty = true;
 	}
 }
 
-/*
- * Handle NewIcon signal from an item
- */
 static int
 handle_new_icon(sd_bus_message *m, void *userdata, sd_bus_error *error)
 {
+	const char *sender;
+	int         icon_size;
+	sni_item_t *item;
+
 	(void)userdata;
 	(void)error;
 
@@ -464,14 +431,13 @@ handle_new_icon(sd_bus_message *m, void *userdata, sd_bus_error *error)
 		return 0;
 	}
 
-	const char *sender = sd_bus_message_get_sender(m);
+	sender = sd_bus_message_get_sender(m);
 	if (!sender)
 		return 0;
 
-	int icon_size = host->state->config.tray_icon_size;
+	icon_size = host->state->config.tray_icon_size;
 
-	/* Find the item and refresh its icon */
-	for (sni_item_t *item = host->items; item; item = item->next) {
+	for (item = host->items; item; item = item->next) {
 		if (item->service && strstr(item->service, sender)) {
 			if (item->icon) {
 				cairo_surface_destroy(item->icon);
@@ -486,17 +452,16 @@ handle_new_icon(sd_bus_message *m, void *userdata, sd_bus_error *error)
 	return 0;
 }
 
-/*
- * Handle StatusNotifierItemRegistered signal
- */
 static int
 handle_item_registered(sd_bus_message *m, void *userdata, sd_bus_error *error)
 {
+	const char *service;
+	int         r;
+
 	(void)userdata;
 	(void)error;
 
-	const char *service;
-	int         r = sd_bus_message_read(m, "s", &service);
+	r = sd_bus_message_read(m, "s", &service);
 	if (r < 0) {
 		return r;
 	}
@@ -509,17 +474,16 @@ handle_item_registered(sd_bus_message *m, void *userdata, sd_bus_error *error)
 	return 0;
 }
 
-/*
- * Handle StatusNotifierItemUnregistered signal
- */
 static int
 handle_item_unregistered(sd_bus_message *m, void *userdata, sd_bus_error *error)
 {
+	const char *service;
+	int         r;
+
 	(void)userdata;
 	(void)error;
 
-	const char *service;
-	int         r = sd_bus_message_read(m, "s", &service);
+	r = sd_bus_message_read(m, "s", &service);
 	if (r < 0) {
 		return r;
 	}
@@ -530,15 +494,13 @@ handle_item_unregistered(sd_bus_message *m, void *userdata, sd_bus_error *error)
 	return 0;
 }
 
-/*
- * Fetch existing items from the watcher
- */
 static void
 fetch_existing_items(int icon_size)
 {
 	sd_bus_error    error = SD_BUS_ERROR_NULL;
 	sd_bus_message *reply = NULL;
 	int             r;
+	const char     *service;
 
 	if (!host || !host->state->dbus) {
 		return;
@@ -565,7 +527,6 @@ fetch_existing_items(int icon_size)
 		return;
 	}
 
-	const char *service;
 	while (sd_bus_message_read(reply, "s", &service) > 0) {
 		add_item(service, icon_size);
 	}
@@ -589,7 +550,6 @@ barny_sni_host_init(barny_state_t *state)
 	}
 	host->state = state;
 
-	/* Create unique host name */
 	if (asprintf(&host->host_name, "org.kde.StatusNotifierHost-%d", getpid())
 	    < 0) {
 		free(host);
@@ -597,7 +557,6 @@ barny_sni_host_init(barny_state_t *state)
 		return -1;
 	}
 
-	/* Request our host name */
 	r = sd_bus_request_name(state->dbus, host->host_name, 0);
 	if (r < 0) {
 		fprintf(stderr, "barny: failed to request host name %s: %s\n",
@@ -606,11 +565,6 @@ barny_sni_host_init(barny_state_t *state)
 		printf("barny: registered as %s\n", host->host_name);
 	}
 
-	/* Host registration with the watcher is handled by barny_dbus_init()
-	 * via barny_sni_watcher_set_host_registered() since both share the
-	 * same D-Bus connection (sd_bus_call_method to self returns ELOOP) */
-
-	/* Subscribe to item registered/unregistered signals */
 	r = sd_bus_match_signal(state->dbus,
 	                        &host->watcher_slot,
 	                        SNI_WATCHER_INTERFACE,
@@ -639,11 +593,10 @@ barny_sni_host_init(barny_state_t *state)
 		        strerror(-r));
 	}
 
-	/* Subscribe to NewIcon signals from all items */
 	r = sd_bus_match_signal(state->dbus,
 	                        NULL,
-	                        NULL, /* Any sender */
-	                        NULL, /* Any path */
+	                        NULL,
+	                        NULL,
 	                        SNI_ITEM_INTERFACE,
 	                        "NewIcon",
 	                        handle_new_icon,
@@ -653,7 +606,6 @@ barny_sni_host_init(barny_state_t *state)
 		        strerror(-r));
 	}
 
-	/* Fetch existing items */
 	fetch_existing_items(state->config.tray_icon_size);
 
 	return 0;
@@ -662,14 +614,16 @@ barny_sni_host_init(barny_state_t *state)
 void
 barny_sni_host_cleanup(barny_state_t *state)
 {
+	sni_item_t *item;
+	sni_item_t *next;
+
 	if (!host) {
 		return;
 	}
 
-	/* Free all items */
-	sni_item_t *item = host->items;
+	item = host->items;
 	while (item) {
-		sni_item_t *next = item->next;
+		next = item->next;
 		free(item->service);
 		free(item->object_path);
 		free(item->id);
@@ -706,17 +660,18 @@ barny_sni_host_get_items(barny_state_t *state)
 void
 barny_sni_item_activate(barny_state_t *state, sni_item_t *item, int x, int y)
 {
+	sd_bus_error error = SD_BUS_ERROR_NULL;
+	int          r;
+
 	if (!state->dbus || !item || !item->service) {
 		return;
 	}
 
-	sd_bus_error error = SD_BUS_ERROR_NULL;
-	int r = sd_bus_call_method(state->dbus, item->service, item->object_path,
-	                           SNI_ITEM_INTERFACE, "Activate", &error, NULL,
-	                           "ii", x, y);
+	r = sd_bus_call_method(state->dbus, item->service, item->object_path,
+	                       SNI_ITEM_INTERFACE, "Activate", &error, NULL, "ii",
+	                       x, y);
 
 	if (r < 0) {
-		/* Some apps don't implement Activate, try ContextMenu instead */
 		sd_bus_error_free(&error);
 	}
 	sd_bus_error_free(&error);
@@ -726,23 +681,22 @@ void
 barny_sni_item_secondary_activate(barny_state_t *state, sni_item_t *item, int x,
                                   int y)
 {
+	sd_bus_error error = SD_BUS_ERROR_NULL;
+	int          r;
+
 	if (!state->dbus || !item || !item->service) {
 		return;
 	}
 
-	sd_bus_error error = SD_BUS_ERROR_NULL;
-
-	/* Try ContextMenu first - most apps implement this for right-click */
-	int r = sd_bus_call_method(state->dbus, item->service, item->object_path,
-	                           SNI_ITEM_INTERFACE, "ContextMenu", &error, NULL,
-	                           "ii", x, y);
+	r = sd_bus_call_method(state->dbus, item->service, item->object_path,
+	                       SNI_ITEM_INTERFACE, "ContextMenu", &error, NULL,
+	                       "ii", x, y);
 
 	if (r >= 0) {
 		sd_bus_error_free(&error);
 		return;
 	}
 
-	/* Fall back to SecondaryActivate */
 	sd_bus_error_free(&error);
 	error = SD_BUS_ERROR_NULL;
 

@@ -29,7 +29,6 @@ barny_dbus_init(barny_state_t *state)
 
 	printf("barny: connected to D-Bus session bus (fd=%d)\n", state->dbus_fd);
 
-	/* Initialize SNI watcher and host */
 	if (barny_sni_watcher_init(state) < 0) {
 		fprintf(stderr, "barny: failed to initialize SNI watcher\n");
 	}
@@ -37,9 +36,6 @@ barny_dbus_init(barny_state_t *state)
 	if (barny_sni_host_init(state) < 0) {
 		fprintf(stderr, "barny: failed to initialize SNI host\n");
 	} else {
-		/* Set host_registered directly since watcher and host share
-		 * the same D-Bus connection - sd_bus_call_method() to self
-		 * fails with ELOOP through the daemon */
 		barny_sni_watcher_set_host_registered(true);
 	}
 
@@ -68,7 +64,6 @@ barny_dbus_dispatch(barny_state_t *state)
 		return 0;
 	}
 
-	/* Process all pending messages */
 	for (;;) {
 		r = sd_bus_process(state->dbus, NULL);
 		if (r < 0) {
@@ -77,7 +72,7 @@ barny_dbus_dispatch(barny_state_t *state)
 			return -1;
 		}
 		if (r == 0) {
-			break; /* No more messages to process */
+			break;
 		}
 	}
 

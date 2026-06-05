@@ -1,9 +1,3 @@
-/*
- * Stubs for barny_test_internals binary.
- * Since we #include source files directly, we need stubs for external
- * functions that those files depend on but aren't being tested.
- */
-
 #include "barny.h"
 #include <stdlib.h>
 #include <string.h>
@@ -60,7 +54,6 @@ barny_sway_ipc_cleanup(barny_state_t *state)
 	(void)state;
 }
 
-/* Output stubs (may be needed by some modules) */
 barny_output_t *
 barny_output_create(void)
 {
@@ -73,8 +66,6 @@ barny_output_destroy(barny_output_t *output)
 	(void)output;
 }
 
-/* Popup helper stubs — real impl in src/modules/popup.c pulls in
- * wayland protocol symbols not linked into this test binary. */
 #include "../src/modules/popup.h"
 
 barny_popup_t *
@@ -105,4 +96,54 @@ barny_popup_visible(const barny_popup_t *popup)
 {
 	(void)popup;
 	return false;
+}
+
+PangoFontDescription *
+barny_popup_font_from(const char *font, const char *fallback)
+{
+	(void)font;
+	(void)fallback;
+	return NULL;
+}
+
+void
+barny_popup_draw_row(cairo_t *cr, PangoLayout *layout, int row_y, int line_h,
+                     int width, const char *label, const char *value,
+                     double lr, double lg, double lb, double vr, double vg,
+                     double vb, double val_alpha)
+{
+	(void)cr;
+	(void)layout;
+	(void)row_y;
+	(void)line_h;
+	(void)width;
+	(void)label;
+	(void)value;
+	(void)lr;
+	(void)lg;
+	(void)lb;
+	(void)vr;
+	(void)vg;
+	(void)vb;
+	(void)val_alpha;
+}
+
+int
+barny_module_render_text(cairo_t *cr, PangoFontDescription *font,
+                         const char *text, int x, int y, int h,
+                         const barny_config_t *cfg, double fb_r, double fb_g,
+                         double fb_b, double alpha)
+{
+	(void)cr;
+	(void)font;
+	(void)text;
+	(void)x;
+	(void)y;
+	(void)h;
+	(void)cfg;
+	(void)fb_r;
+	(void)fb_g;
+	(void)fb_b;
+	(void)alpha;
+	return 0;
 }

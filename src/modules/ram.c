@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "barny.h"
+#include "util.h"
 
 typedef struct {
 	barny_state_t        *state;
@@ -16,47 +17,21 @@ static void
 format_size(char *buf, size_t buflen, unsigned long kb, int decimals,
             bool unit_space)
 {
-	const char *sp = unit_space ? " " : "";
-	double      gb = kb / 1048576.0;
-
-	if (gb >= 1.0) {
-		switch (decimals) {
-		case 0:
-			snprintf(buf, buflen, "%.0f%sG", gb, sp);
-			break;
-		case 2:
-			snprintf(buf, buflen, "%.2f%sG", gb, sp);
-			break;
-		default:
-			snprintf(buf, buflen, "%.1f%sG", gb, sp);
-			break;
-		}
-	} else {
-		double mb = kb / 1024.0;
-		switch (decimals) {
-		case 0:
-			snprintf(buf, buflen, "%.0f%sM", mb, sp);
-			break;
-		case 2:
-			snprintf(buf, buflen, "%.2f%sM", mb, sp);
-			break;
-		default:
-			snprintf(buf, buflen, "%.1f%sM", mb, sp);
-			break;
-		}
-	}
+	barny_format_bytes(buf, buflen, (unsigned long long)kb * 1024ULL,
+	                   decimals, unit_space);
 }
 
 static int
 ram_init(barny_module_t *self, barny_state_t *state)
 {
 	ram_data_t *data = self->data;
+
 	data->state      = state;
 	data->total_kb   = 0;
 	data->used_kb    = 0;
 
 	data->font_desc  = pango_font_description_from_string(
-                state->config.font ? state->config.font : "Sans 10");
+	        state->config.font ? state->config.font : "Sans 10");
 
 	strcpy(data->display_str, "-- RAM");
 
@@ -67,6 +42,7 @@ static void
 ram_destroy(barny_module_t *self)
 {
 	ram_data_t *data = self->data;
+
 	if (!data)
 		return;
 
@@ -81,20 +57,36 @@ ram_destroy(barny_module_t *self)
 static void
 ram_update(barny_module_t *self)
 {
-	ram_data_t     *data = self->data;
-	barny_config_t *cfg  = &data->state->config;
+	ram_data_t     *data;
+	barny_config_t *cfg;
+	FILE           *f;
+	unsigned long   mem_total;
+	unsigned long   mem_free;
+	unsigned long   mem_available;
+	unsigned long   buffers;
+	unsigned long   cached;
+	char            line[256];
+	unsigned long   used;
+	const char     *method;
+	unsigned long   free_kb;
+	const char     *mode;
+	int             percent;
+	const char     *fmt;
+	char            used_str[16];
+	char            total_str[16];
 
-	FILE           *f    = fopen("/proc/meminfo", "r");
+	data          = self->data;
+	cfg           = &data->state->config;
+	f             = fopen("/proc/meminfo", "r");
+	mem_total     = 0;
+	mem_free      = 0;
+	mem_available = 0;
+	buffers       = 0;
+	cached        = 0;
+
 	if (!f)
 		return;
 
-	unsigned long mem_total     = 0;
-	unsigned long mem_free      = 0;
-	unsigned long mem_available = 0;
-	unsigned long buffers       = 0;
-	unsigned long cached        = 0;
-
-	char          line[256];
 	while (fgets(line, sizeof(line), f)) {
 		if (strncmp(line, "MemTotal:", 9) == 0) {
 			sscanf(line, "MemTotal: %lu", &mem_total);
@@ -113,33 +105,27 @@ ram_update(barny_module_t *self)
 	if (mem_total == 0)
 		return;
 
-	/* Calculate used memory based on method */
-	unsigned long used;
-	const char   *method = cfg->ram_used_method;
+	method = cfg->ram_used_method;
 	if (method && strcmp(method, "free") == 0) {
-		/* Simple: total - free */
 		used = mem_total - mem_free;
 	} else {
-		/* Default (available): total - available */
 		if (mem_available > 0) {
 			used = mem_total - mem_available;
 		} else {
-			/* Fallback if MemAvailable not present */
 			used = mem_total - mem_free - buffers - cached;
 		}
 	}
 
-	/* Check if values changed */
 	if (used != data->used_kb || mem_total != data->total_kb) {
-		data->used_kb         = used;
-		data->total_kb        = mem_total;
+		data->used_kb  = used;
+		data->total_kb = mem_total;
 
-		unsigned long free_kb = mem_total - used;
-		const char   *mode = cfg->ram_mode ? cfg->ram_mode : "used_total";
+		free_kb        = mem_total - used;
+		mode           = cfg->ram_mode ? cfg->ram_mode : "used_total";
 
 		if (strcmp(mode, "percentage") == 0) {
-			int         percent = (int)((used * 100) / mem_total);
-			const char *fmt = cfg->ram_unit_space ? "%d %%" : "%d%%";
+			percent = (int)((used * 100) / mem_total);
+			fmt     = cfg->ram_unit_space ? "%d %%" : "%d%%";
 			snprintf(data->display_str, sizeof(data->display_str), fmt,
 			         percent);
 		} else if (strcmp(mode, "used") == 0) {
@@ -150,9 +136,6 @@ ram_update(barny_module_t *self)
 			            free_kb, cfg->ram_decimals,
 			            cfg->ram_unit_space);
 		} else {
-			/* "used_total" (default) */
-			char used_str[16];
-			char total_str[16];
 			format_size(used_str, sizeof(used_str), used,
 			            cfg->ram_decimals, cfg->ram_unit_space);
 			format_size(total_str, sizeof(total_str), mem_total,
@@ -169,31 +152,13 @@ static void
 ram_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
 	ram_data_t *data = self->data;
+	int         tw;
+
 	(void)w;
 
-	PangoLayout *layout = pango_cairo_create_layout(cr);
-	pango_layout_set_font_description(layout, data->font_desc);
-	pango_layout_set_text(layout, data->display_str, -1);
-
-	int tw, th;
-	pango_layout_get_pixel_size(layout, &tw, &th);
-
-	/* Draw with shadow */
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_move_to(cr, x + 1, y + (h - th) / 2 + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	barny_config_t *cfg = &data->state->config;
-	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
-		                      cfg->text_color_b, 0.9);
-	else
-		cairo_set_source_rgba(cr, 0.8, 1, 0.8, 0.9);
-	cairo_move_to(cr, x, y + (h - th) / 2);
-	pango_cairo_show_layout(cr, layout);
-
-	g_object_unref(layout);
-
+	tw          = barny_module_render_text(cr, data->font_desc, data->display_str,
+	                                       x, y, h, &data->state->config,
+	                                       0.8, 1, 0.8, 0.9);
 	self->width = tw + 8;
 }
 
@@ -209,16 +174,16 @@ barny_module_ram_create(void)
 		return NULL;
 	}
 
-	mod->name     = "ram";
-	mod->position = BARNY_POS_RIGHT;
-	mod->init     = ram_init;
-	mod->destroy  = ram_destroy;
-	mod->update   = ram_update;
+	mod->name               = "ram";
+	mod->position           = BARNY_POS_RIGHT;
+	mod->init               = ram_init;
+	mod->destroy            = ram_destroy;
+	mod->update             = ram_update;
 	mod->update_interval_ms = 1000;
-	mod->render   = ram_render;
-	mod->data     = data;
-	mod->width    = 80;
-	mod->dirty    = true;
+	mod->render             = ram_render;
+	mod->data               = data;
+	mod->width              = 80;
+	mod->dirty              = true;
 
 	return mod;
 }

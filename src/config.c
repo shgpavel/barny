@@ -13,21 +13,29 @@
 void
 barny_config_validate_font(const barny_config_t *config)
 {
-	const char *font_str = config->font;
+	const char           *font_str = config->font;
+	PangoFontDescription *desc;
+	const char           *requested_family;
+	PangoFontMap         *font_map;
+	PangoContext         *context;
+	PangoFont            *font;
+	PangoFontDescription *actual;
+	const char           *actual_family;
+
 	if (!font_str) {
 		fprintf(stderr,
 		        "barny: no font configured, modules will use built-in defaults\n");
 		return;
 	}
 
-	PangoFontDescription *desc = pango_font_description_from_string(font_str);
+	desc = pango_font_description_from_string(font_str);
 	if (!desc) {
 		fprintf(stderr, "barny: failed to parse font string: \"%s\"\n",
 		        font_str);
 		return;
 	}
 
-	const char *requested_family = pango_font_description_get_family(desc);
+	requested_family = pango_font_description_get_family(desc);
 	if (!requested_family) {
 		fprintf(stderr,
 		        "barny: font string \"%s\" has no family component\n",
@@ -36,10 +44,9 @@ barny_config_validate_font(const barny_config_t *config)
 		return;
 	}
 
-	/* Use a temporary PangoFontMap to check if the font actually resolves */
-	PangoFontMap *font_map = pango_cairo_font_map_get_default();
-	PangoContext *context  = pango_font_map_create_context(font_map);
-	PangoFont    *font     = pango_font_map_load_font(font_map, context, desc);
+	font_map = pango_cairo_font_map_get_default();
+	context  = pango_font_map_create_context(font_map);
+	font     = pango_font_map_load_font(font_map, context, desc);
 
 	if (!font) {
 		fprintf(stderr,
@@ -47,9 +54,8 @@ barny_config_validate_font(const barny_config_t *config)
 		        "text will render with fallback font\n",
 		        font_str);
 	} else {
-		PangoFontDescription *actual = pango_font_describe(font);
-		const char           *actual_family
-		        = pango_font_description_get_family(actual);
+		actual        = pango_font_describe(font);
+		actual_family = pango_font_description_get_family(actual);
 
 		if (actual_family
 		    && strcasecmp(actual_family, requested_family) != 0) {
@@ -74,133 +80,118 @@ barny_config_defaults(barny_config_t *config)
 {
 	memset(config, 0, sizeof(*config));
 
-	config->height                   = BARNY_DEFAULT_HEIGHT;
-	config->margin_top               = 0;
-	config->margin_bottom            = 0;
-	config->margin_left              = 0;
-	config->margin_right             = 0;
-	config->border_radius            = BARNY_BORDER_RADIUS;
-	config->position_top             = true;
-	config->font                     = NULL;
-	config->wallpaper_path           = NULL;
-	config->blur_radius              = BARNY_BLUR_RADIUS;
-	config->brightness               = 1.1;
+	config->height                        = BARNY_DEFAULT_HEIGHT;
+	config->margin_top                    = 0;
+	config->margin_bottom                 = 0;
+	config->margin_left                   = 0;
+	config->margin_right                  = 0;
+	config->border_radius                 = BARNY_BORDER_RADIUS;
+	config->position_top                  = true;
+	config->font                          = NULL;
+	config->wallpaper_path                = NULL;
+	config->blur_radius                   = BARNY_BLUR_RADIUS;
+	config->brightness                    = 1.1;
 
-	/* Global text color (NULL = use module defaults) */
-	config->text_color               = NULL;
-	config->text_color_r             = 0.0;
-	config->text_color_g             = 0.0;
-	config->text_color_b             = 0.0;
-	config->text_color_set           = false;
+	config->text_color                    = NULL;
+	config->text_color_r                  = 0.0;
+	config->text_color_g                  = 0.0;
+	config->text_color_b                  = 0.0;
+	config->text_color_set                = false;
 
-	/* Workspace module defaults */
-	config->workspace_indicator_size = 30;
-	config->workspace_spacing        = 10;
-	config->workspace_names          = NULL;
-	config->workspace_name_count     = 0;
-	config->workspace_shape          = NULL; /* NULL = circle (default) */
-	config->workspace_corner_radius  = 4;
+	config->workspace_indicator_size      = 30;
+	config->workspace_spacing             = 10;
+	config->workspace_names               = NULL;
+	config->workspace_name_count          = 0;
+	config->workspace_shape               = NULL;
+	config->workspace_corner_radius       = 4;
 
-	/* Module layout defaults */
-	config->module_spacing           = 16;
-	config->modules_left             = NULL;
-	config->modules_center           = NULL;
-	config->modules_right            = NULL;
-	config->crypto_pairs             = NULL;
-	config->crypto_pair_count        = 0;
-	config->crypto_popup_gap         = 0;
-	config->crypto_currency_symbol   = strdup("$");
-	config->crypto_symbol_suffix     = false;
-	config->crypto_decimals          = 0;
+	config->module_spacing                = 16;
+	config->modules_left                  = NULL;
+	config->modules_center                = NULL;
+	config->modules_right                 = NULL;
+	config->crypto_pairs                  = NULL;
+	config->crypto_pair_count             = 0;
+	config->crypto_popup_gap              = 0;
+	config->crypto_currency_symbol        = strdup("$");
+	config->crypto_symbol_suffix          = false;
+	config->crypto_decimals               = 0;
 
-	/* Sysinfo module defaults */
-	config->sysinfo_freq_combined    = true;
-	config->sysinfo_freq_decimals    = 2;
-	config->sysinfo_power_decimals   = 0;
-	config->sysinfo_p_cores          = 0; /* 0 = auto-detect */
-	config->sysinfo_e_cores          = 0; /* 0 = auto-detect */
-	config->sysinfo_item_spacing     = 8;
-	config->sysinfo_freq_show_unit   = true;
-	config->sysinfo_freq_label_space = true;
-	config->sysinfo_freq_unit_space  = true;
-	config->sysinfo_power_unit_space = true;
-	config->sysinfo_temp_unit_space  = true;
-	config->sysinfo_popup_gap        = 0;
-	config->sysinfo_popup_per_core   = false;
+	config->sysinfo_freq_combined         = true;
+	config->sysinfo_freq_decimals         = 2;
+	config->sysinfo_power_decimals        = 0;
+	config->sysinfo_p_cores               = 0;
+	config->sysinfo_e_cores               = 0;
+	config->sysinfo_item_spacing          = 8;
+	config->sysinfo_freq_show_unit        = true;
+	config->sysinfo_freq_label_space      = true;
+	config->sysinfo_freq_unit_space       = true;
+	config->sysinfo_power_unit_space      = true;
+	config->sysinfo_temp_unit_space       = true;
+	config->sysinfo_popup_gap             = 0;
+	config->sysinfo_popup_per_core        = false;
 
-	/* Tray module defaults */
-	config->tray_icon_size           = 24;
-	config->tray_icon_spacing        = 4;
-	config->tray_icon_shape          = NULL; /* NULL = "circle" */
-	config->tray_icon_corner_radius  = 4;
-	config->tray_icon_bg_r           = 0.0;
-	config->tray_icon_bg_g           = 0.0;
-	config->tray_icon_bg_b           = 0.0;
-	config->tray_icon_bg_opacity     = 0.3;
+	config->tray_icon_size                = 24;
+	config->tray_icon_spacing             = 4;
+	config->tray_icon_shape               = NULL;
+	config->tray_icon_corner_radius       = 4;
+	config->tray_icon_bg_r                = 0.0;
+	config->tray_icon_bg_g                = 0.0;
+	config->tray_icon_bg_b                = 0.0;
+	config->tray_icon_bg_opacity          = 0.3;
 
-	/* Liquid glass effect defaults */
-	config->refraction_mode          = BARNY_REFRACT_LENS;
-	config->displacement_scale       = 8.0;
-	config->chromatic_aberration     = 1.5;
-	config->edge_refraction          = 1.2;
-	config->noise_scale              = 0.02;
-	config->noise_octaves            = 2;
+	config->refraction_mode               = BARNY_REFRACT_LENS;
+	config->displacement_scale            = 8.0;
+	config->chromatic_aberration          = 1.5;
+	config->edge_refraction               = 1.2;
+	config->noise_scale                   = 0.02;
+	config->noise_octaves                 = 2;
 
-	/* Clock module defaults */
-	config->clock_show_time          = true;
-	config->clock_24h_format         = true;
-	config->clock_show_seconds       = true;
-	config->clock_show_date          = false;
-	config->clock_show_year          = true;
-	config->clock_show_month         = true;
-	config->clock_show_day           = true;
-	config->clock_show_weekday       = true;
-	config->clock_date_order         = 0; /* dd/mm/yyyy */
-	config->clock_date_separator     = '/';
+	config->clock_show_time               = true;
+	config->clock_24h_format              = true;
+	config->clock_show_seconds            = true;
+	config->clock_show_date               = false;
+	config->clock_show_year               = true;
+	config->clock_show_month              = true;
+	config->clock_show_day                = true;
+	config->clock_show_weekday            = true;
+	config->clock_date_order              = 0;
+	config->clock_date_separator          = '/';
 
-	/* Disk module defaults */
-	config->disk_path                = NULL; /* will use "/" as default */
-	config->disk_mode                = NULL; /* NULL = "used_total" */
-	config->disk_decimals            = 0;
-	config->disk_unit_space          = false;
+	config->disk_path                     = NULL;
+	config->disk_mode                     = NULL;
+	config->disk_decimals                 = 0;
+	config->disk_unit_space               = false;
 
-	/* Sysinfo temperature defaults */
-	config->sysinfo_temp_path        = NULL; /* auto-detect */
-	config->sysinfo_temp_zone        = -1;   /* -1 = auto-detect */
-	config->sysinfo_temp_show_unit   = true;
+	config->sysinfo_temp_path             = NULL;
+	config->sysinfo_temp_zone             = -1;
+	config->sysinfo_temp_show_unit        = true;
 
-	/* RAM module defaults */
-	config->ram_mode                 = NULL; /* NULL = "used_total" */
-	config->ram_decimals             = 1;
-	config->ram_used_method          = NULL; /* will use "available" */
-	config->ram_unit_space           = false;
+	config->ram_mode                      = NULL;
+	config->ram_decimals                  = 1;
+	config->ram_used_method               = NULL;
+	config->ram_unit_space                = false;
 
-	/* Network module defaults */
-	config->network_interface        = NULL; /* auto */
-	config->network_show_ip          = true;
-	config->network_show_interface   = false;
-	config->network_prefer_ipv4      = true;
-	config->network_popup_gap        = 0;
-	config->network_popup_show_ssid  = true;
-	config->network_popup_show_ipv6  = false;
-	config->network_popup_show_mac   = false;
+	config->network_interface             = NULL;
+	config->network_show_ip               = true;
+	config->network_show_interface        = false;
+	config->network_prefer_ipv4           = true;
+	config->network_popup_gap             = 0;
+	config->network_popup_show_ssid       = true;
+	config->network_popup_show_ipv6       = false;
+	config->network_popup_show_mac        = false;
 
-	/* File read module defaults */
-	config->fileread_path            = NULL;
-	config->fileread_title           = NULL;
-	config->fileread_max_chars       = 64;
+	config->fileread_path                 = NULL;
+	config->fileread_title                = NULL;
+	config->fileread_max_chars            = 64;
 
-	/* Battery module defaults */
-	config->battery_path             = NULL; /* auto-detect */
-	config->battery_show_status      = true;
-	config->battery_unit_space       = false;
+	config->battery_path                  = NULL;
+	config->battery_show_status           = true;
+	config->battery_unit_space            = false;
 
-	/* Window title module defaults */
-	config->windowtitle_max_length     = 64;
-	config->windowtitle_empty_text     = NULL;
+	config->windowtitle_max_length        = 64;
+	config->windowtitle_empty_text        = NULL;
 
-	/* Weather module defaults */
-	config->weather_popup_gap          = 0;
+	config->weather_popup_gap             = 0;
 	config->weather_popup_show_humidity   = true;
 	config->weather_popup_show_wind       = true;
 	config->weather_popup_show_pressure   = false;
@@ -210,7 +201,8 @@ barny_config_defaults(barny_config_t *config)
 static int
 parse_hex_color(const char *str, double *r, double *g, double *b)
 {
-	/* Handle common color names */
+	unsigned int rv, gv, bv;
+
 	if (strcasecmp(str, "black") == 0) {
 		*r = *g = *b = 0.0;
 		return 0;
@@ -220,11 +212,9 @@ parse_hex_color(const char *str, double *r, double *g, double *b)
 		return 0;
 	}
 
-	/* Parse #RRGGBB format */
 	if (str[0] != '#' || strlen(str) != 7)
 		return -1;
 
-	unsigned int rv, gv, bv;
 	if (sscanf(str + 1, "%02x%02x%02x", &rv, &gv, &bv) != 3)
 		return -1;
 
@@ -249,8 +239,10 @@ parse_bool(const char *value)
 static int
 parse_int_clamped(const char *value, int min, int max)
 {
-	errno  = 0;
-	long v = strtol(value, NULL, 10);
+	long v;
+
+	errno = 0;
+	v     = strtol(value, NULL, 10);
 	if (errno == ERANGE) {
 		return v < 0 ? min : max;
 	}
@@ -264,8 +256,12 @@ parse_int_clamped(const char *value, int min, int max)
 static void
 config_replace_string_array(char ***items, int *count, const char *value)
 {
+	size_t prev;
+	size_t new_count = 0;
+	char **parsed;
+
 	if (items && *items) {
-		size_t prev = (count && *count > 0) ? (size_t)*count : 0;
+		prev = (count && *count > 0) ? (size_t)*count : 0;
 		barny_free_string_array(*items, prev);
 		*items = NULL;
 	}
@@ -273,8 +269,7 @@ config_replace_string_array(char ***items, int *count, const char *value)
 		*count = 0;
 	}
 
-	size_t  new_count = 0;
-	char  **parsed    = barny_parse_csv(value, &new_count);
+	parsed = barny_parse_csv(value, &new_count);
 	if (items) {
 		*items = parsed;
 	} else {
@@ -430,7 +425,7 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		if (v > 1.0)
 			v = 1.0;
 		config->tray_icon_bg_opacity = v;
-	/* Clock module */
+
 	} else if (strcmp(key, "clock_show_time") == 0) {
 		config->clock_show_time = parse_bool(value);
 	} else if (strcmp(key, "clock_24h_format") == 0) {
@@ -452,7 +447,7 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 	} else if (strcmp(key, "clock_date_separator") == 0) {
 		if (strlen(value) > 0)
 			config->clock_date_separator = value[0];
-	/* Disk module */
+
 	} else if (strcmp(key, "disk_path") == 0) {
 		free(config->disk_path);
 		config->disk_path = strdup(value);
@@ -463,7 +458,7 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->disk_decimals = parse_int_clamped(value, 0, 2);
 	} else if (strcmp(key, "disk_unit_space") == 0) {
 		config->disk_unit_space = parse_bool(value);
-	/* Sysinfo temperature */
+
 	} else if (strcmp(key, "sysinfo_temp_path") == 0) {
 		free(config->sysinfo_temp_path);
 		config->sysinfo_temp_path = strdup(value);
@@ -471,7 +466,7 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->sysinfo_temp_zone = atoi(value);
 	} else if (strcmp(key, "sysinfo_temp_show_unit") == 0) {
 		config->sysinfo_temp_show_unit = parse_bool(value);
-	/* RAM module */
+
 	} else if (strcmp(key, "ram_mode") == 0) {
 		free(config->ram_mode);
 		config->ram_mode = strdup(value);
@@ -482,7 +477,7 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 	} else if (strcmp(key, "ram_used_method") == 0) {
 		free(config->ram_used_method);
 		config->ram_used_method = strdup(value);
-	/* Network module */
+
 	} else if (strcmp(key, "network_interface") == 0) {
 		free(config->network_interface);
 		config->network_interface = strdup(value);
@@ -500,7 +495,7 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->network_popup_show_ipv6 = parse_bool(value);
 	} else if (strcmp(key, "network_popup_show_mac") == 0) {
 		config->network_popup_show_mac = parse_bool(value);
-	/* File read module */
+
 	} else if (strcmp(key, "fileread_path") == 0) {
 		free(config->fileread_path);
 		config->fileread_path = strdup(value);
@@ -509,7 +504,7 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->fileread_title = strdup(value);
 	} else if (strcmp(key, "fileread_max_chars") == 0) {
 		config->fileread_max_chars = parse_int_clamped(value, 1, 256);
-	/* Battery module */
+
 	} else if (strcmp(key, "battery_path") == 0) {
 		free(config->battery_path);
 		config->battery_path = strdup(value);
@@ -538,40 +533,47 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 int
 barny_config_load(barny_config_t *config, const char *path)
 {
-	FILE *f = fopen(path, "r");
+	FILE  *f;
+	char   line[1024];
+	char  *trimmed;
+	char  *eq;
+	char  *key;
+	char  *value;
+	bool   in_quotes;
+	char  *p;
+	char  *end;
+	size_t vlen;
+
+	f = fopen(path, "r");
 	if (!f) {
 		return -1;
 	}
 
-	char line[1024];
 	while (fgets(line, sizeof(line), f)) {
-		char *trimmed = trim(line);
+		trimmed = trim(line);
 
-		/* Skip comments and empty lines */
 		if (*trimmed == '#' || *trimmed == '\0') {
 			continue;
 		}
 
-		/* Find = separator */
-		char *eq = strchr(trimmed, '=');
+		eq = strchr(trimmed, '=');
 		if (!eq)
 			continue;
 
-		*eq         = '\0';
-		char *key   = trim(trimmed);
-		char *value = trim(eq + 1);
+		*eq   = '\0';
+		key   = trim(trimmed);
+		value = trim(eq + 1);
 
-		/* Strip inline comments (# not inside quotes) */
 		{
-			bool in_quotes = false;
-			for (char *p = value; *p; p++) {
+			in_quotes = false;
+			for (p = value; *p; p++) {
 				if (*p == '"') {
 					in_quotes = !in_quotes;
 				} else if (*p == '#'
 				           && !in_quotes
 				           && p > value
 				           && isspace((unsigned char)*(p - 1))) {
-					char *end = p - 1;
+					end = p - 1;
 					while (end > value
 					       && isspace((unsigned char)*end))
 						end--;
@@ -581,8 +583,7 @@ barny_config_load(barny_config_t *config, const char *path)
 			}
 		}
 
-		/* Remove quotes from value */
-		size_t vlen = strlen(value);
+		vlen = strlen(value);
 		if (vlen >= 2 && value[0] == '"' && value[vlen - 1] == '"') {
 			value[vlen - 1] = '\0';
 			value++;
@@ -592,6 +593,7 @@ barny_config_load(barny_config_t *config, const char *path)
 	}
 
 	fclose(f);
+
 	return 0;
 }
 
@@ -632,7 +634,7 @@ barny_config_cleanup(barny_config_t *config)
 	if (config->workspace_names) {
 		barny_free_string_array(config->workspace_names,
 		                        (size_t)config->workspace_name_count);
-		config->workspace_names     = NULL;
+		config->workspace_names      = NULL;
 		config->workspace_name_count = 0;
 	}
 }
@@ -647,6 +649,11 @@ barny_config_write_module_layout(const char *path,
 	FILE *in  = fopen(path, "r");
 	FILE *out = NULL;
 	int   n;
+	char  line[2048];
+	char  keybuf[2048];
+	char *trimmed;
+	char *eq;
+	char *key;
 
 	n = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
 	if (n < 0 || (size_t)n >= sizeof(tmp_path)) {
@@ -665,26 +672,24 @@ barny_config_write_module_layout(const char *path,
 	}
 
 	if (in) {
-		char line[2048];
 		while (fgets(line, sizeof(line), in)) {
-			char keybuf[2048];
 			strncpy(keybuf, line, sizeof(keybuf) - 1);
 			keybuf[sizeof(keybuf) - 1] = '\0';
 
-			char *trimmed              = trim(keybuf);
+			trimmed                    = trim(keybuf);
 			if (*trimmed == '#' || *trimmed == '\0') {
 				fputs(line, out);
 				continue;
 			}
 
-			char *eq = strchr(trimmed, '=');
+			eq = strchr(trimmed, '=');
 			if (!eq) {
 				fputs(line, out);
 				continue;
 			}
 
-			*eq       = '\0';
-			char *key = trim(trimmed);
+			*eq = '\0';
+			key = trim(trimmed);
 			if (strcmp(key, "modules_left") == 0
 			    || strcmp(key, "modules_center") == 0
 			    || strcmp(key, "modules_right") == 0) {

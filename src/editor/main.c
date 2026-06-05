@@ -25,12 +25,6 @@
 #define DETAIL_CTRL_W      228.0f
 #define GAP_TOKEN_LEN      32
 
-/*
- * UI color palette. SDL3 uses 8-bit RGBA. Centralizing the values keeps the
- * editor's look-and-feel coherent and makes future re-skinning a one-stop
- * change. Naming mirrors usage rather than raw color so that intent reads
- * cleanly at the call sites.
- */
 typedef struct {
 	Uint8 r, g, b, a;
 } ui_color_t;
@@ -56,7 +50,8 @@ typedef struct {
 	SDL_FRect pool;
 } ui_regions_t;
 
-typedef enum { BLOCK_SRC_BAR, BLOCK_SRC_POOL } block_source_t;
+typedef enum { BLOCK_SRC_BAR,
+	       BLOCK_SRC_POOL } block_source_t;
 
 typedef struct {
 	const char    *name;
@@ -205,6 +200,8 @@ static void
 detail_field_add_options(detail_field_t *field, const detail_option_t *options,
                          int option_count)
 {
+	int i;
+
 	if (!field || !options || option_count <= 0) {
 		return;
 	}
@@ -212,7 +209,8 @@ detail_field_add_options(detail_field_t *field, const detail_option_t *options,
 	if (option_count > MAX_DETAIL_OPTIONS) {
 		option_count = MAX_DETAIL_OPTIONS;
 	}
-	for (int i = 0; i < option_count; i++) {
+
+	for (i = 0; i < option_count; i++) {
 		field->options[i] = options[i];
 	}
 	field->option_count = option_count;
@@ -298,6 +296,7 @@ static int
 detail_field_selected_index(const detail_field_t *field)
 {
 	const char *str_value;
+	int         i;
 
 	if (!field || field->option_count <= 0) {
 		return -1;
@@ -308,7 +307,7 @@ detail_field_selected_index(const detail_field_t *field)
 		if (!field->int_ptr) {
 			return -1;
 		}
-		for (int i = 0; i < field->option_count; i++) {
+		for (i = 0; i < field->option_count; i++) {
 			if (field->options[i].int_value == *field->int_ptr) {
 				return i;
 			}
@@ -318,7 +317,7 @@ detail_field_selected_index(const detail_field_t *field)
 		if (!field->char_ptr) {
 			return -1;
 		}
-		for (int i = 0; i < field->option_count; i++) {
+		for (i = 0; i < field->option_count; i++) {
 			if (field->options[i].char_value == *field->char_ptr) {
 				return i;
 			}
@@ -331,7 +330,7 @@ detail_field_selected_index(const detail_field_t *field)
 		str_value = (*field->str_ptr && **field->str_ptr) ?
 		                    *field->str_ptr :
 		                    field->default_str;
-		for (int i = 0; i < field->option_count; i++) {
+		for (i = 0; i < field->option_count; i++) {
 			if (field->options[i].str_value
 			    && str_value
 			    && strcmp(field->options[i].str_value, str_value)
@@ -396,10 +395,13 @@ detail_field_write_value(const detail_field_t *field, char *out, size_t out_len)
 static void
 module_details_close_dropdowns(module_details_t *details)
 {
+	int i;
+
 	if (!details) {
 		return;
 	}
-	for (int i = 0; i < details->field_count; i++) {
+
+	for (i = 0; i < details->field_count; i++) {
 		details->fields[i].dropdown_open = false;
 	}
 }
@@ -431,6 +433,14 @@ save_module_config_fields(const char *path, const module_details_t *details)
 	FILE *out                     = NULL;
 	bool  seen[MAX_DETAIL_FIELDS] = { 0 };
 	int   rc                      = -1;
+	char  line[2048];
+	char  keybuf[2048];
+	char  valuebuf[64];
+	bool  matched;
+	char *trimmed;
+	char *eq;
+	char *key;
+	int   i;
 
 	if (!path || !details) {
 		return -1;
@@ -457,30 +467,26 @@ save_module_config_fields(const char *path, const module_details_t *details)
 	}
 
 	if (in) {
-		char line[2048];
-
 		while (fgets(line, sizeof(line), in)) {
-			char keybuf[2048];
-			char valuebuf[64];
-			bool matched = false;
+			matched = false;
 
 			snprintf(keybuf, sizeof(keybuf), "%s", line);
-			char *trimmed = trim_local(keybuf);
+			trimmed = trim_local(keybuf);
 			if (*trimmed == '#' || *trimmed == '\0') {
 				fputs(line, out);
 				continue;
 			}
 
-			char *eq = strchr(trimmed, '=');
+			eq = strchr(trimmed, '=');
 			if (!eq) {
 				fputs(line, out);
 				continue;
 			}
 
-			*eq       = '\0';
-			char *key = trim_local(trimmed);
+			*eq = '\0';
+			key = trim_local(trimmed);
 
-			for (int i = 0; i < details->field_count; i++) {
+			for (i = 0; i < details->field_count; i++) {
 				if (strcmp(details->fields[i].key, key) != 0) {
 					continue;
 				}
@@ -505,9 +511,7 @@ save_module_config_fields(const char *path, const module_details_t *details)
 		in = NULL;
 	}
 
-	for (int i = 0; i < details->field_count; i++) {
-		char valuebuf[64];
-
+	for (i = 0; i < details->field_count; i++) {
 		if (seen[i]) {
 			continue;
 		}
@@ -519,10 +523,6 @@ save_module_config_fields(const char *path, const module_details_t *details)
 	}
 
 	if (fclose(out) != 0) {
-		/*
-		 * Treat stream as consumed after fclose() regardless of status to
-		 * avoid closing the same FILE* again in the shared cleanup path.
-		 */
 		out = NULL;
 		goto out;
 	}
@@ -547,11 +547,6 @@ out:
 	return rc;
 }
 
-/*
- * Per-module field initializers. Each function appends the editable bool/enum
- * fields for a single module to `details` using the shared add_bool/add_enum_*
- * helpers. Splitting them out keeps `module_details_open` to a table dispatch.
- */
 static void
 module_details_init_clock(module_details_t *details, barny_config_t *config)
 {
@@ -692,7 +687,6 @@ module_details_init_network(module_details_t *details, barny_config_t *config)
 static void
 module_details_init_fileread(module_details_t *details, barny_config_t *config)
 {
-	/* Text/number fields are currently read-only in this editor. */
 	(void)details;
 	(void)config;
 }
@@ -712,8 +706,8 @@ typedef void (*module_opener_fn)(module_details_t *details,
                                  barny_config_t   *config);
 
 static const struct {
-	const char       *name;
-	module_opener_fn  open;
+	const char      *name;
+	module_opener_fn open;
 } module_openers[] = {
 	{ "clock",     module_details_init_clock     },
 	{ "workspace", module_details_init_workspace },
@@ -730,6 +724,8 @@ static void
 module_details_open(module_details_t *details, barny_config_t *config,
                     const char *module_name)
 {
+	size_t i;
+
 	if (!details || !config || !module_name || !*module_name) {
 		return;
 	}
@@ -738,8 +734,9 @@ module_details_open(module_details_t *details, barny_config_t *config,
 	details->open = true;
 	snprintf(details->module, sizeof(details->module), "%s", module_name);
 
-	for (size_t i = 0;
-	     i < sizeof(module_openers) / sizeof(module_openers[0]); i++) {
+	for (i = 0;
+	     i < sizeof(module_openers) / sizeof(module_openers[0]);
+	     i++) {
 		if (strcmp(module_name, module_openers[i].name) == 0) {
 			module_openers[i].open(details, config);
 			return;
@@ -785,11 +782,13 @@ bar_layout_init(bar_layout_t *bar)
 static void
 bar_layout_clear(bar_layout_t *bar)
 {
+	int i;
+
 	if (!bar) {
 		return;
 	}
 
-	for (int i = 0; i < bar->count; i++) {
+	for (i = 0; i < bar->count; i++) {
 		free(bar->items[i].name);
 		bar->items[i].name  = NULL;
 		bar->items[i].x_rel = 0.0f;
@@ -800,11 +799,13 @@ bar_layout_clear(bar_layout_t *bar)
 static bool
 bar_layout_contains(const bar_layout_t *bar, const char *name)
 {
+	int i;
+
 	if (!bar || !name) {
 		return false;
 	}
 
-	for (int i = 0; i < bar->count; i++) {
+	for (i = 0; i < bar->count; i++) {
 		if (bar->items[i].name && strcmp(bar->items[i].name, name) == 0) {
 			return true;
 		}
@@ -840,16 +841,29 @@ bar_layout_sort(bar_layout_t *bar)
 static void
 bar_layout_constrain_to_width(bar_layout_t *bar, float content_width)
 {
+	float right = 0.0f;
+	float w;
+	float overflow;
+	float gaps[BARNY_MAX_MODULES] = { 0 };
+	float total_gaps              = 0.0f;
+	float prev_right;
+	float gap;
+	float keep;
+	float scale;
+	float prev_w;
+	float cursor = 0.0f;
+	float max_x;
+	float x;
+	int   i;
+
 	if (!bar || bar->count <= 0 || content_width <= 1.0f) {
 		return;
 	}
 
 	bar_layout_sort(bar);
 
-	/* Keep modules ordered and non-overlapping first. */
-	float right = 0.0f;
-	for (int i = 0; i < bar->count; i++) {
-		float w = module_block_width(bar->items[i].name);
+	for (i = 0; i < bar->count; i++) {
+		w = module_block_width(bar->items[i].name);
 		if (bar->items[i].x_rel < right) {
 			bar->items[i].x_rel = right;
 		}
@@ -859,22 +873,18 @@ bar_layout_constrain_to_width(bar_layout_t *bar, float content_width)
 		right = bar->items[i].x_rel + w;
 	}
 
-	float overflow = right - content_width;
+	overflow = right - content_width;
 	if (overflow > 0.0f) {
-		/* Shrink leading and inter-module gaps proportionally to fit width. */
-		float gaps[BARNY_MAX_MODULES] = { 0 };
-		float total_gaps              = 0.0f;
-
-		gaps[0]                       = bar->items[0].x_rel;
+		gaps[0] = bar->items[0].x_rel;
 		if (gaps[0] > 0.0f) {
 			total_gaps += gaps[0];
 		}
 
-		for (int i = 1; i < bar->count; i++) {
-			float prev_right
+		for (i = 1; i < bar->count; i++) {
+			prev_right
 			        = bar->items[i - 1].x_rel
 			          + module_block_width(bar->items[i - 1].name);
-			float gap = bar->items[i].x_rel - prev_right;
+			gap = bar->items[i].x_rel - prev_right;
 			if (gap > 0.0f) {
 				gaps[i]     = gap;
 				total_gaps += gaps[i];
@@ -882,27 +892,24 @@ bar_layout_constrain_to_width(bar_layout_t *bar, float content_width)
 		}
 
 		if (total_gaps > 0.0f) {
-			float keep  = total_gaps - overflow;
-			float scale = (keep > 0.0f) ? (keep / total_gaps) : 0.0f;
+			keep                = total_gaps - overflow;
+			scale               = (keep > 0.0f) ? (keep / total_gaps) : 0.0f;
 
 			bar->items[0].x_rel = gaps[0] * scale;
 
-			for (int i = 1; i < bar->count; i++) {
-				float prev_w = module_block_width(
+			for (i = 1; i < bar->count; i++) {
+				prev_w = module_block_width(
 				        bar->items[i - 1].name);
-				float prev_right
-				        = bar->items[i - 1].x_rel + prev_w;
+				prev_right          = bar->items[i - 1].x_rel + prev_w;
 				bar->items[i].x_rel = prev_right + gaps[i] * scale;
 			}
 		}
 	}
 
-	/* Final hard clamp so each module box remains inside bar bounds. */
-	float cursor = 0.0f;
-	for (int i = 0; i < bar->count; i++) {
-		float w     = module_block_width(bar->items[i].name);
-		float max_x = content_width - w;
-		float x     = bar->items[i].x_rel;
+	for (i = 0; i < bar->count; i++) {
+		w     = module_block_width(bar->items[i].name);
+		max_x = content_width - w;
+		x     = bar->items[i].x_rel;
 
 		if (max_x < 0.0f) {
 			max_x = 0.0f;
@@ -969,6 +976,7 @@ static char *
 bar_layout_take_index(bar_layout_t *bar, int index, float *x_rel)
 {
 	char *name;
+	int   i;
 
 	if (!bar || index < 0 || index >= bar->count) {
 		return NULL;
@@ -979,7 +987,7 @@ bar_layout_take_index(bar_layout_t *bar, int index, float *x_rel)
 		*x_rel = bar->items[index].x_rel;
 	}
 
-	for (int i = index; i < bar->count - 1; i++) {
+	for (i = index; i < bar->count - 1; i++) {
 		bar->items[i] = bar->items[i + 1];
 	}
 	bar->items[bar->count - 1].name  = NULL;
@@ -993,13 +1001,15 @@ load_tokens_into_bar(bar_layout_t *bar, char *const *tokens, int count,
                      int spacing)
 {
 	float x_rel = 0.0f;
+	int   i;
+	int   gap_units;
 
-	for (int i = 0; i < count; i++) {
+	for (i = 0; i < count; i++) {
 		if (!tokens[i]) {
 			continue;
 		}
 
-		int gap_units = barny_module_layout_gap_units(tokens[i]);
+		gap_units = barny_module_layout_gap_units(tokens[i]);
 		if (gap_units > 0) {
 			x_rel += (float)(gap_units * spacing);
 			continue;
@@ -1045,11 +1055,12 @@ static int
 build_pool(const bar_layout_t *bar, const char **pool, int pool_cap)
 {
 	const char *catalog[BARNY_MAX_MODULES];
-	int         total = barny_module_catalog_names(catalog, BARNY_MAX_MODULES);
+	int         total      = barny_module_catalog_names(catalog, BARNY_MAX_MODULES);
 	int         pool_count = 0;
-	int         limit = total < BARNY_MAX_MODULES ? total : BARNY_MAX_MODULES;
+	int         limit      = total < BARNY_MAX_MODULES ? total : BARNY_MAX_MODULES;
+	int         i;
 
-	for (int i = 0; i < limit && pool_count < pool_cap; i++) {
+	for (i = 0; i < limit && pool_count < pool_cap; i++) {
 		if (!bar_layout_contains(bar, catalog[i])) {
 			pool[pool_count++] = catalog[i];
 		}
@@ -1077,17 +1088,20 @@ static void
 build_bar_blocks(const bar_layout_t *bar, const SDL_FRect *bar_rect,
                  block_map_t *map)
 {
-	float start_x = bar_rect->x + SLOT_PAD;
-	float y       = bar_rect->y + (bar_rect->h - BLOCK_HEIGHT) * 0.5f;
+	float     start_x = bar_rect->x + SLOT_PAD;
+	float     y       = bar_rect->y + (bar_rect->h - BLOCK_HEIGHT) * 0.5f;
+	float     w;
+	SDL_FRect rect;
+	int       i;
 
-	for (int i = 0; i < bar->count; i++) {
+	for (i = 0; i < bar->count; i++) {
 		if (!bar->items[i].name) {
 			continue;
 		}
 
-		float     w = module_block_width(bar->items[i].name);
-		SDL_FRect rect
-		        = { start_x + bar->items[i].x_rel, y, w, BLOCK_HEIGHT };
+		w    = module_block_width(bar->items[i].name);
+		rect = (SDL_FRect){ start_x + bar->items[i].x_rel, y, w,
+			            BLOCK_HEIGHT };
 		append_block(map, bar->items[i].name, &rect, BLOCK_SRC_BAR, i);
 	}
 }
@@ -1096,23 +1110,26 @@ static void
 build_pool_blocks(const char *const *pool, int pool_count,
                   const SDL_FRect *pool_rect, block_map_t *map)
 {
-	float x         = pool_rect->x + SLOT_PAD;
-	float y         = pool_rect->y + 28.0f;
-	float line_h    = BLOCK_HEIGHT + BLOCK_GAP;
-	float max_right = pool_rect->x + pool_rect->w - SLOT_PAD;
+	float     x         = pool_rect->x + SLOT_PAD;
+	float     y         = pool_rect->y + 28.0f;
+	float     line_h    = BLOCK_HEIGHT + BLOCK_GAP;
+	float     max_right = pool_rect->x + pool_rect->w - SLOT_PAD;
+	float     w;
+	SDL_FRect rect;
+	int       i;
 
-	for (int i = 0; i < pool_count; i++) {
+	for (i = 0; i < pool_count; i++) {
 		if (!pool[i]) {
 			continue;
 		}
 
-		float w = module_block_width(pool[i]);
+		w = module_block_width(pool[i]);
 		if (x + w > max_right) {
 			x  = pool_rect->x + SLOT_PAD;
 			y += line_h;
 		}
 
-		SDL_FRect rect = { x, y, w, BLOCK_HEIGHT };
+		rect = (SDL_FRect){ x, y, w, BLOCK_HEIGHT };
 		append_block(map, pool[i], &rect, BLOCK_SRC_POOL, i);
 		x += w + BLOCK_GAP;
 	}
@@ -1166,6 +1183,7 @@ ensure_parent_dirs(const char *path)
 {
 	char *slash = NULL;
 	char  dir[PATH_MAX];
+	char *p;
 
 	if (!path || !*path) {
 		return -1;
@@ -1186,7 +1204,7 @@ ensure_parent_dirs(const char *path)
 		return 0;
 	}
 
-	for (char *p = dir + 1; *p; p++) {
+	for (p = dir + 1; *p; p++) {
 		if (*p != '/') {
 			continue;
 		}
@@ -1213,14 +1231,19 @@ save_layout(const char *config_path, const bar_layout_t *bar, int spacing)
 	int         gap_count   = 0;
 	char       *csv         = NULL;
 	int         rc          = -1;
+	int         lead_units;
+	float       right;
+	float       gap_px;
+	float       extra;
+	int         units;
+	int         i;
 
 	if (!bar || spacing < 1) {
 		return -1;
 	}
 
 	if (bar->count > 0) {
-		int lead_units
-		        = (int)lroundf(bar->items[0].x_rel / (float)spacing);
+		lead_units = (int)lroundf(bar->items[0].x_rel / (float)spacing);
 		if (lead_units > 0) {
 			gap_tokens[gap_count] = malloc(GAP_TOKEN_LEN);
 			if (!gap_tokens[gap_count]) {
@@ -1232,19 +1255,18 @@ save_layout(const char *config_path, const bar_layout_t *bar, int spacing)
 		}
 	}
 
-	for (int i = 0; i < bar->count; i++) {
-		float right;
+	for (i = 0; i < bar->count; i++) {
 		tokens[token_count++] = bar->items[i].name;
 
 		if (i >= bar->count - 1) {
 			continue;
 		}
 
-		right = bar->items[i].x_rel
-		        + module_block_width(bar->items[i].name);
-		float gap_px = bar->items[i + 1].x_rel - right;
-		float extra  = gap_px - (float)spacing;
-		int   units  = (int)lroundf(extra / (float)spacing);
+		right  = bar->items[i].x_rel
+		         + module_block_width(bar->items[i].name);
+		gap_px = bar->items[i + 1].x_rel - right;
+		extra  = gap_px - (float)spacing;
+		units  = (int)lroundf(extra / (float)spacing);
 
 		if (units > 0) {
 			gap_tokens[gap_count] = malloc(GAP_TOKEN_LEN);
@@ -1270,9 +1292,10 @@ save_layout(const char *config_path, const bar_layout_t *bar, int spacing)
 
 out:
 	free(csv);
-	for (int i = 0; i < gap_count; i++) {
+	for (i = 0; i < gap_count; i++) {
 		free(gap_tokens[i]);
 	}
+
 	return rc;
 }
 
@@ -1383,6 +1406,11 @@ static detail_click_result_t
 module_details_handle_click(module_details_t *details, SDL_Renderer *renderer,
                             float x, float y, const char *config_path)
 {
+	detail_field_t *field;
+	bool            open;
+	int             i;
+	int             o;
+
 	if (!details || !details->open || !renderer) {
 		return DETAIL_CLICK_NONE;
 	}
@@ -1412,8 +1440,8 @@ module_details_handle_click(module_details_t *details, SDL_Renderer *renderer,
 		return DETAIL_CLICK_SAVE_FAILED;
 	}
 
-	for (int i = 0; i < details->field_count; i++) {
-		detail_field_t *field = &details->fields[i];
+	for (i = 0; i < details->field_count; i++) {
+		field = &details->fields[i];
 
 		if (field->kind == DETAIL_FIELD_BOOL) {
 			if (point_in_rect(x, y, &field->control_rect)
@@ -1425,7 +1453,7 @@ module_details_handle_click(module_details_t *details, SDL_Renderer *renderer,
 		}
 
 		if (field->dropdown_open) {
-			for (int o = 0; o < field->option_count; o++) {
+			for (o = 0; o < field->option_count; o++) {
 				if (point_in_rect(x, y, &field->option_rects[o])) {
 					detail_field_apply_option(field, o);
 					field->dropdown_open = false;
@@ -1435,7 +1463,7 @@ module_details_handle_click(module_details_t *details, SDL_Renderer *renderer,
 		}
 
 		if (point_in_rect(x, y, &field->control_rect)) {
-			bool open = !field->dropdown_open;
+			open = !field->dropdown_open;
 			module_details_close_dropdowns(details);
 			field->dropdown_open = open;
 			return DETAIL_CLICK_NONE;
@@ -1446,23 +1474,19 @@ module_details_handle_click(module_details_t *details, SDL_Renderer *renderer,
 	return DETAIL_CLICK_NONE;
 }
 
-/*
- * Render a boolean checkbox row inside the details panel. The row covers the
- * "control_rect" already laid out by the caller; this helper does not advance
- * the y cursor (the caller does).
- */
 static void
 draw_checkbox(SDL_Renderer *renderer, const detail_field_t *field, float text_y)
 {
-	SDL_FRect box = { field->control_rect.x + 6.0f,
-		          field->control_rect.y + 2.0f, 14.0f, 14.0f };
+	SDL_FRect box     = { field->control_rect.x + 6.0f,
+		              field->control_rect.y + 2.0f, 14.0f, 14.0f };
 	bool      checked = field->bool_ptr && *field->bool_ptr;
+	SDL_FRect fill;
 
 	SDL_SetRenderDrawColor(renderer, 94, 102, 118, 255);
 	SDL_RenderRect(renderer, &box);
 	if (checked) {
-		SDL_FRect fill = { box.x + 3.0f, box.y + 3.0f, box.w - 6.0f,
-			           box.h - 6.0f };
+		fill = (SDL_FRect){ box.x + 3.0f, box.y + 3.0f, box.w - 6.0f,
+			            box.h - 6.0f };
 		SDL_SetRenderDrawColor(renderer, 112, 180, 126, 255);
 		SDL_RenderFillRect(renderer, &fill);
 	}
@@ -1471,14 +1495,11 @@ draw_checkbox(SDL_Renderer *renderer, const detail_field_t *field, float text_y)
 	                    checked ? "true" : "false");
 }
 
-/*
- * Render the closed dropdown control plus, when expanded, the popup list of
- * options. Returns the y offset *after* the control row and any popup, so the
- * caller can continue laying out subsequent fields.
- */
 static float
 draw_dropdown_field(SDL_Renderer *renderer, detail_field_t *field, float y)
 {
+	int o;
+
 	SDL_SetRenderDrawColor(renderer, 46, 54, 66, 255);
 	SDL_RenderFillRect(renderer, &field->control_rect);
 	SDL_SetRenderDrawColor(renderer, 110, 122, 141, 255);
@@ -1487,8 +1508,7 @@ draw_dropdown_field(SDL_Renderer *renderer, detail_field_t *field, float y)
 	SDL_RenderDebugText(renderer, field->control_rect.x + 6.0f, y + 6.0f,
 	                    detail_field_selected_label(field));
 	SDL_RenderDebugText(renderer,
-	                    field->control_rect.x + field->control_rect.w
-	                            - 14.0f,
+	                    field->control_rect.x + field->control_rect.w - 14.0f,
 	                    y + 6.0f, "v");
 
 	y += DETAIL_ROW_H;
@@ -1496,7 +1516,7 @@ draw_dropdown_field(SDL_Renderer *renderer, detail_field_t *field, float y)
 		return y;
 	}
 
-	for (int o = 0; o < field->option_count; o++) {
+	for (o = 0; o < field->option_count; o++) {
 		field->option_rects[o].x = field->control_rect.x;
 		field->option_rects[o].y = y;
 		field->option_rects[o].w = field->control_rect.w;
@@ -1516,11 +1536,6 @@ draw_dropdown_field(SDL_Renderer *renderer, detail_field_t *field, float y)
 	return y;
 }
 
-/*
- * Lay out and draw the "Save module settings" / "Close" buttons plus the
- * keyboard hint string at the bottom of the panel. Updates save_rect /
- * close_rect on `details` so click handling stays in sync.
- */
 static void
 draw_detail_buttons(SDL_Renderer *renderer, module_details_t *details)
 {
@@ -1560,8 +1575,11 @@ draw_detail_buttons(SDL_Renderer *renderer, module_details_t *details)
 static void
 draw_module_details(SDL_Renderer *renderer, module_details_t *details)
 {
-	SDL_FRect bg;
-	float     y;
+	SDL_FRect       bg;
+	float           y;
+	detail_field_t *field;
+	float           ctrl_x;
+	int             i;
 
 	if (!details || !details->open) {
 		return;
@@ -1593,12 +1611,12 @@ draw_module_details(SDL_Renderer *renderer, module_details_t *details)
 	        "Checkboxes for true/false, dropdowns for multi-choice.");
 
 	y = details->panel_rect.y + 48.0f;
-	for (int i = 0; i < details->field_count; i++) {
-		detail_field_t *field  = &details->fields[i];
-		float           ctrl_x = details->panel_rect.x
-		               + details->panel_rect.w
-		               - DETAIL_CTRL_W
-		               - 16.0f;
+	for (i = 0; i < details->field_count; i++) {
+		field  = &details->fields[i];
+		ctrl_x = details->panel_rect.x
+		         + details->panel_rect.w
+		         - DETAIL_CTRL_W
+		         - 16.0f;
 
 		memset(field->option_rects, 0, sizeof(field->option_rects));
 		field->control_rect.x = ctrl_x;
@@ -1641,6 +1659,13 @@ draw_frame(SDL_Renderer *renderer, const ui_regions_t *ui, const block_map_t *ma
            const char *config_path, const char *status, bool show_status,
            module_details_t *details)
 {
+	float      marker_x;
+	SDL_FRect  insertion;
+	float      w;
+	SDL_FRect  rect;
+	ui_block_t ghost;
+	int        i;
+
 	SDL_SetRenderDrawColor(renderer, 24, 24, 28, 255);
 	SDL_RenderClear(renderer);
 
@@ -1653,13 +1678,13 @@ draw_frame(SDL_Renderer *renderer, const ui_regions_t *ui, const block_map_t *ma
 	                  "CONTIGUOUS BAR (FREE PLACEMENT)", 70, 110, 165);
 	draw_labeled_zone(renderer, &ui->pool, "MODULE POOL", 90, 95, 105);
 
-	for (int i = 0; i < map->count; i++) {
+	for (i = 0; i < map->count; i++) {
 		draw_block(renderer, &map->blocks[i]);
 	}
 
 	if (drag->active && target->valid && target->to_bar) {
-		float     marker_x  = ui->bar_slot.x + SLOT_PAD + target->x_rel;
-		SDL_FRect insertion = {
+		marker_x  = ui->bar_slot.x + SLOT_PAD + target->x_rel;
+		insertion = (SDL_FRect){
 			marker_x - 1.0f,
 			ui->bar_slot.y + 8.0f,
 			3.0f,
@@ -1670,14 +1695,14 @@ draw_frame(SDL_Renderer *renderer, const ui_regions_t *ui, const block_map_t *ma
 	}
 
 	if (drag->active) {
-		float     w    = module_block_width(drag->name);
-		SDL_FRect rect = {
+		w    = module_block_width(drag->name);
+		rect = (SDL_FRect){
 			drag->mouse_x - drag->offset_x,
 			drag->mouse_y - drag->offset_y,
 			w,
 			BLOCK_HEIGHT,
 		};
-		ui_block_t ghost = {
+		ghost = (ui_block_t){
 			.name   = drag->name,
 			.rect   = rect,
 			.source = BLOCK_SRC_POOL,
@@ -1732,6 +1757,25 @@ main(int argc, char **argv)
 	drag_state_t          drag         = { 0 };
 	module_details_t      details;
 	int                   spacing;
+	int                   w, h;
+	ui_regions_t          ui;
+	block_map_t           map;
+	drop_target_t         target;
+	const char           *pool[BARNY_MAX_MODULES];
+	int                   pool_count;
+	SDL_Event             event;
+	char                  msg[128];
+	float                 mx, my;
+	ui_block_t           *block;
+	detail_click_result_t click_result;
+	int                   i;
+	bool                  placed;
+	float                 dx, dy;
+	bool                  click_action;
+	drop_target_t         drop_target;
+	float                 block_left;
+	float                 rel;
+	float                 max_rel;
 
 	resolve_config_path(argc, argv, config_path, sizeof(config_path));
 
@@ -1771,13 +1815,9 @@ main(int argc, char **argv)
 	SDL_SetRenderVSync(renderer, 1);
 
 	while (running) {
-		int           w = 0, h = 0;
-		ui_regions_t  ui;
-		block_map_t   map;
-		drop_target_t target = { 0 };
-		const char   *pool[BARNY_MAX_MODULES];
-		int           pool_count;
-		SDL_Event     event;
+		w      = 0;
+		h      = 0;
+		target = (drop_target_t){ 0 };
 
 		SDL_GetWindowSizeInPixels(window, &w, &h);
 		compute_regions(w, h, &ui);
@@ -1822,7 +1862,6 @@ main(int argc, char **argv)
 							        &status_until,
 							        "This module has no editable bool/enum options yet.");
 						} else {
-							char msg[128];
 							snprintf(
 							        msg, sizeof(msg),
 							        "Module settings save failed (%s).",
@@ -1848,7 +1887,6 @@ main(int argc, char **argv)
 						        &status_until,
 						        "Config saved to current project dir: config/barny.conf");
 					} else {
-						char msg[128];
 						snprintf(msg, sizeof(msg),
 						         "Save failed (%s).",
 						         strerror(errno));
@@ -1874,11 +1912,11 @@ main(int argc, char **argv)
 				}
 			} else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
 			           && event.button.button == SDL_BUTTON_LEFT) {
-				float mx = event.button.x;
-				float my = event.button.y;
+				mx = event.button.x;
+				my = event.button.y;
 
 				if (details.open) {
-					detail_click_result_t click_result
+					click_result
 					        = module_details_handle_click(
 					                &details, renderer, mx, my,
 					                config_path);
@@ -1895,7 +1933,6 @@ main(int argc, char **argv)
 						        "Module settings saved to config/barny.conf");
 					} else if (click_result
 					           == DETAIL_CLICK_SAVE_FAILED) {
-						char msg[128];
 						snprintf(
 						        msg, sizeof(msg),
 						        "Module settings save failed (%s).",
@@ -1906,8 +1943,8 @@ main(int argc, char **argv)
 					continue;
 				}
 
-				for (int i = map.count - 1; i >= 0; i--) {
-					ui_block_t *block = &map.blocks[i];
+				for (i = map.count - 1; i >= 0; i--) {
+					block = &map.blocks[i];
 					if (!point_in_rect(mx, my, &block->rect)) {
 						continue;
 					}
@@ -1931,7 +1968,7 @@ main(int argc, char **argv)
 						        &drag.source_x_rel);
 					} else {
 						drag.source_x_rel = 0.0f;
-						drag.name = strdup(block->name);
+						drag.name         = strdup(block->name);
 					}
 
 					if (!drag.name) {
@@ -1942,14 +1979,14 @@ main(int argc, char **argv)
 			} else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP
 			           && event.button.button == SDL_BUTTON_LEFT
 			           && drag.active) {
-				bool  placed = false;
-				float dx     = event.button.x - drag.start_mouse_x;
-				float dy     = event.button.y - drag.start_mouse_y;
-				bool  click_action
+				placed = false;
+				dx     = event.button.x - drag.start_mouse_x;
+				dy     = event.button.y - drag.start_mouse_y;
+				click_action
 				        = fabsf(dx) <= CLICK_THRESHOLD_PX
 				          && fabsf(dy) <= CLICK_THRESHOLD_PX
 				          && drag.click_name[0] != '\0';
-				drop_target_t drop_target = compute_drop_target(
+				drop_target = compute_drop_target(
 				        event.button.x, event.button.y, &ui);
 
 				if (click_action) {
@@ -1975,17 +2012,15 @@ main(int argc, char **argv)
 				}
 
 				if (drop_target.valid && drop_target.to_bar) {
-					float block_left
-					        = event.button.x - drag.offset_x;
-					float rel = block_left
-					            - (ui.bar_slot.x + SLOT_PAD);
-					float max_rel
-					        = ui.bar_slot.w
-					          - module_block_width(drag.name)
-					          - SLOT_PAD * 2.0f;
-					rel = clampf(rel, 0.0f,
-					             max_rel > 0.0f ? max_rel :
-					                              0.0f);
+					block_left = event.button.x - drag.offset_x;
+					rel        = block_left
+					             - (ui.bar_slot.x + SLOT_PAD);
+					max_rel    = ui.bar_slot.w
+					             - module_block_width(drag.name)
+					             - SLOT_PAD * 2.0f;
+					rel        = clampf(rel, 0.0f,
+					                    max_rel > 0.0f ? max_rel :
+					                                     0.0f);
 
 					if (bar_layout_add_owned(&bar, drag.name,
 					                         rel)

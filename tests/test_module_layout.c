@@ -22,6 +22,7 @@ create_temp_config_file(const char *content)
 		fputs(content, f);
 	}
 	fclose(f);
+
 	return path;
 }
 
@@ -41,7 +42,9 @@ test_module_layout_basics(void)
 	TEST("catalog exposes known modules")
 	{
 		const char *names[BARNY_MAX_MODULES] = { 0 };
-		int total = barny_module_catalog_names(names, BARNY_MAX_MODULES);
+		int         total;
+
+		total = barny_module_catalog_names(names, BARNY_MAX_MODULES);
 
 		ASSERT_EQ_INT(10, total);
 		ASSERT_EQ_STR("clock", names[0]);
@@ -56,6 +59,7 @@ test_module_layout_basics(void)
 	TEST("default layout matches legacy arrangement")
 	{
 		barny_module_layout_t layout;
+
 		barny_module_layout_init(&layout);
 		barny_module_layout_set_defaults(&layout);
 
@@ -107,7 +111,7 @@ test_module_layout_parsing_and_ops(void)
 		barny_module_layout_t layout;
 
 		barny_config_defaults(&config);
-		config.modules_left = strdup("clock, workspace, nope, workspace");
+		config.modules_left   = strdup("clock, workspace, nope, workspace");
 		config.modules_center = strdup("ram");
 		config.modules_right  = strdup("tray, disk");
 
@@ -186,9 +190,10 @@ test_module_layout_runtime_apply(void)
 
 	TEST("apply registers selected modules in requested slots")
 	{
-		barny_state_t         state = { 0 };
+		barny_state_t         state;
 		barny_module_layout_t layout;
 
+		state = (barny_state_t){ 0 };
 		barny_module_layout_init(&layout);
 		ASSERT_EQ_INT(0,
 		              barny_module_layout_insert(&layout, BARNY_POS_LEFT,
@@ -214,9 +219,10 @@ test_module_layout_runtime_apply(void)
 
 	TEST("apply converts gap token to spacer module width")
 	{
-		barny_state_t         state = { 0 };
+		barny_state_t         state;
 		barny_module_layout_t layout;
 
+		state = (barny_state_t){ 0 };
 		barny_config_defaults(&state.config);
 		state.config.module_spacing = 20;
 
@@ -256,7 +262,6 @@ test_module_layout_edge_cases(void)
 
 		barny_config_defaults(&config);
 		config.modules_left = strdup("workspace");
-		/* modules_center and modules_right remain NULL */
 
 		barny_module_layout_init(&layout);
 		barny_module_layout_load_from_config(&config, &layout);
@@ -273,20 +278,21 @@ test_module_layout_edge_cases(void)
 	TEST("insert returns -1 when slot is full")
 	{
 		barny_module_layout_t layout;
+		const char           *names[BARNY_MAX_MODULES];
+		int                   total;
+		int                   i;
+
 		barny_module_layout_init(&layout);
 
-		/* fill the left slot to BARNY_MAX_MODULES using catalog modules */
-		const char *names[BARNY_MAX_MODULES] = { 0 };
-		int total = barny_module_catalog_names(names, BARNY_MAX_MODULES);
+		for (i = 0; i < BARNY_MAX_MODULES; i++)
+			names[i] = NULL;
+		total = barny_module_catalog_names(names, BARNY_MAX_MODULES);
 
-		for (int i = 0; i < total && i < BARNY_MAX_MODULES; i++) {
+		for (i = 0; i < total && i < BARNY_MAX_MODULES; i++) {
 			barny_module_layout_insert(&layout, BARNY_POS_LEFT,
 			                           names[i], -1);
 		}
 
-		/* the slot should have `total` modules (10), which is < BARNY_MAX_MODULES
-		 * so we can't truly overflow with only catalog entries. Instead verify
-		 * the count matches and duplicate insert is rejected. */
 		ASSERT_EQ_INT(total, layout.left_count);
 		ASSERT_EQ_INT(-1, barny_module_layout_insert(
 		                          &layout, BARNY_POS_LEFT, "clock", -1));
@@ -297,7 +303,9 @@ test_module_layout_edge_cases(void)
 	TEST("serialize_csv with NULL entries in the middle")
 	{
 		const char *arr[4] = { "clock", NULL, "ram", NULL };
-		char       *csv    = barny_module_layout_serialize_csv(arr, 4);
+		char       *csv;
+
+		csv = barny_module_layout_serialize_csv(arr, 4);
 
 		ASSERT_NOT_NULL(csv);
 		ASSERT_EQ_STR("clock, ram", csv);
@@ -307,7 +315,9 @@ test_module_layout_edge_cases(void)
 	TEST("serialize_csv with count 0 returns empty string")
 	{
 		const char *arr[1] = { "clock" };
-		char       *csv    = barny_module_layout_serialize_csv(arr, 0);
+		char       *csv;
+
+		csv = barny_module_layout_serialize_csv(arr, 0);
 
 		ASSERT_NOT_NULL(csv);
 		ASSERT_EQ_STR("", csv);
@@ -324,12 +334,13 @@ test_module_layout_config_write(void)
 
 	TEST("writer updates only module layout keys")
 	{
-		const char *path
-		        = create_temp_config_file("height = 42\n"
-		                                  "modules_left = old_left\n"
-		                                  "modules_center = old_center\n"
-		                                  "modules_right = old_right\n");
+		const char    *path;
 		barny_config_t cfg;
+
+		path = create_temp_config_file("height = 42\n"
+		                               "modules_left = old_left\n"
+		                               "modules_center = old_center\n"
+		                               "modules_right = old_right\n");
 
 		ASSERT_NOT_NULL(path);
 		ASSERT_EQ_INT(0, barny_config_write_module_layout(

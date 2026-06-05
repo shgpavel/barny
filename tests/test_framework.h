@@ -40,20 +40,20 @@ __attribute__((unused)) static const char *_current_test_name = NULL;
 		printf(" ---\n" COLOR_RESET);                            \
 	} while (0)
 
-#define TEST(name)                                                               \
-	for (int _test_loop = (_current_test_name = name, _test_total_count++,   \
-	                      printf("  [TEST] %s... ", name), 1);               \
-	     _test_loop; _test_loop = 0,                                         \
+#define TEST(name)                                                                     \
+	for (int _test_loop         = (_current_test_name = name, _test_total_count++, \
+	                              printf("  [TEST] %s... ", name), 1);             \
+	     _test_loop; _test_loop = 0,                                               \
 	         (_test_pass_count++, printf(COLOR_GREEN "PASS\n" COLOR_RESET)))
 
-#define TEST_FAIL(msg, ...)                                                        \
-	do {                                                                       \
-		_test_fail_count++;                                                \
-		_test_pass_count--; /* Will be incremented at end of TEST block */ \
-		printf(COLOR_RED "FAIL\n" COLOR_RESET);                            \
+#define TEST_FAIL(msg, ...)                                          \
+	do {                                                         \
+		_test_fail_count++;                                  \
+		_test_pass_count--;                                  \
+		printf(COLOR_RED "FAIL\n" COLOR_RESET);              \
 		printf(COLOR_RED "         -> " msg "\n" COLOR_RESET \
-		       __VA_OPT__(,) __VA_ARGS__);                                 \
-		break;                                                             \
+		               __VA_OPT__(, ) __VA_ARGS__);          \
+		break;                                               \
 	} while (0)
 
 #define ASSERT_TRUE(expr)                                      \
@@ -164,4 +164,4 @@ __attribute__((unused)) static const char *_current_test_name = NULL;
 		_total_failures += _test_fail_count; \
 	} while (0)
 
-#endif /* TEST_FRAMEWORK_H */
+#endif

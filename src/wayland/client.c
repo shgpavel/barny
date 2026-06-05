@@ -5,7 +5,6 @@
 #include "barny.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
-/* Forward declarations for listeners */
 static void
 registry_global(void *data, struct wl_registry *registry, uint32_t name,
                 const char *interface, uint32_t version);
@@ -17,7 +16,6 @@ static const struct wl_registry_listener registry_listener = {
 	.global_remove = registry_global_remove,
 };
 
-/* Output listener */
 static void
 output_geometry(void *data, struct wl_output *output, int32_t x, int32_t y,
                 int32_t phys_w, int32_t phys_h, int32_t subpixel, const char *make,
@@ -41,12 +39,12 @@ output_mode(void *data, struct wl_output *output, uint32_t flags, int32_t width,
 {
 	barny_output_t *out = data;
 	(void)output;
-	(void)height;
 	(void)refresh;
 
 	if (flags & WL_OUTPUT_MODE_CURRENT) {
-		out->width  = width;
-		out->height = out->state->config.height;
+		out->width       = width;
+		out->height      = out->state->config.height;
+		out->mode_height = height;
 	}
 }
 
@@ -95,20 +93,20 @@ static const struct wl_output_listener output_listener = {
 	.description = output_description,
 };
 
-/* Pointer listener */
 static void
 pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
               struct wl_surface *surface, wl_fixed_t sx, wl_fixed_t sy)
 {
-	barny_state_t *state = data;
+	barny_state_t  *state = data;
+	barny_output_t *out;
+
 	(void)pointer;
 	(void)serial;
 
 	state->pointer_x = wl_fixed_to_double(sx);
 	state->pointer_y = wl_fixed_to_double(sy);
 
-	/* Find which output this surface belongs to */
-	for (barny_output_t *out = state->outputs; out; out = out->next) {
+	for (out = state->outputs; out; out = out->next) {
 		if (out->surface == surface) {
 			state->pointer_output = out;
 			break;
@@ -125,12 +123,11 @@ pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
 	(void)serial;
 	(void)surface;
 
-	/* Clear hover state */
 	if (state->hover_module && state->hover_module->on_hover) {
 		state->hover_module->on_hover(state->hover_module, false, 0,
 		                              0);
 	}
-	state->hover_module = NULL;
+	state->hover_module   = NULL;
 
 	state->pointer_output = NULL;
 }
@@ -139,22 +136,24 @@ static void
 pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time,
                wl_fixed_t sx, wl_fixed_t sy)
 {
-	barny_state_t *state = data;
+	barny_state_t  *state = data;
+	barny_module_t *hovered;
+	barny_module_t *mod;
+	int             mx;
+	int             i;
+
 	(void)pointer;
 	(void)time;
+
 	state->pointer_x = wl_fixed_to_double(sx);
 	state->pointer_y = wl_fixed_to_double(sy);
 
-	/* Hover detection: find module under pointer */
-	int             mx      = (int)state->pointer_x;
-	barny_module_t *hovered = NULL;
+	mx               = (int)state->pointer_x;
+	hovered          = NULL;
 
-	for (int i = 0; i < state->module_count; i++) {
-		barny_module_t *mod = state->modules[i];
-		if (mod && mod->on_hover && mod->width > 0
-		    && mod->render_x >= 0
-		    && mx >= mod->render_x
-		    && mx < mod->render_x + mod->width) {
+	for (i = 0; i < state->module_count; i++) {
+		mod = state->modules[i];
+		if (mod && mod->on_hover && mod->width > 0 && mod->render_x >= 0 && mx >= mod->render_x && mx < mod->render_x + mod->width) {
 			hovered = mod;
 			break;
 		}
@@ -178,7 +177,12 @@ static void
 pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial,
                uint32_t time, uint32_t button, uint32_t button_state)
 {
-	barny_state_t *state = data;
+	barny_state_t  *state = data;
+	barny_module_t *mod;
+	int             x;
+	int             y;
+	int             i;
+
 	(void)pointer;
 	(void)serial;
 	(void)time;
@@ -191,12 +195,11 @@ pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial,
 		return;
 	}
 
-	/* Dispatch click to modules */
-	int x = (int)state->pointer_x;
-	int y = (int)state->pointer_y;
+	x = (int)state->pointer_x;
+	y = (int)state->pointer_y;
 
-	for (int i = 0; i < state->module_count; i++) {
-		barny_module_t *mod = state->modules[i];
+	for (i = 0; i < state->module_count; i++) {
+		mod = state->modules[i];
 		if (mod && mod->on_click) {
 			mod->on_click(mod, button, x, y);
 		}
@@ -208,16 +211,16 @@ pointer_axis(void *data, struct wl_pointer *pointer, uint32_t time, uint32_t axi
              wl_fixed_t value)
 {
 	barny_state_t *state = data;
+	double         px;
+
 	(void)pointer;
 	(void)time;
 
-	/* Only handle horizontal axis (1) from touchpad when pointer is over the bar */
-	if (axis != 1 || !state->pointer_output ||
-	    state->axis_source != WL_POINTER_AXIS_SOURCE_FINGER) {
+	if (axis != 1 || !state->pointer_output || state->axis_source != WL_POINTER_AXIS_SOURCE_FINGER) {
 		return;
 	}
 
-	double px = wl_fixed_to_double(value);
+	px                            = wl_fixed_to_double(value);
 	state->touchpad_scroll_accum += px;
 
 	if (state->touchpad_scroll_accum > 30.0) {
@@ -264,12 +267,10 @@ pointer_axis_discrete(void *data, struct wl_pointer *pointer, uint32_t axis,
 	barny_state_t *state = data;
 	(void)pointer;
 
-	/* Only handle vertical scroll (axis 0) when pointer is over the bar */
 	if (axis != 0 || !state->pointer_output) {
 		return;
 	}
 
-	/* Switch workspaces: scroll up = prev, scroll down = next */
 	if (discrete < 0) {
 		barny_sway_ipc_send(state, 0, "workspace prev");
 	} else if (discrete > 0) {
@@ -289,7 +290,6 @@ static const struct wl_pointer_listener pointer_listener = {
 	.axis_discrete = pointer_axis_discrete,
 };
 
-/* Seat listener */
 static void
 seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps)
 {
@@ -321,7 +321,10 @@ static void
 registry_global(void *data, struct wl_registry *registry, uint32_t name,
                 const char *interface, uint32_t version)
 {
-	barny_state_t *state = data;
+	barny_state_t    *state = data;
+	struct wl_output *wl_output;
+	barny_output_t   *output;
+
 	(void)version;
 
 	if (strcmp(interface, wl_compositor_interface.name) == 0) {
@@ -338,18 +341,17 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 		        = wl_registry_bind(registry, name, &wl_seat_interface, 7);
 		wl_seat_add_listener(state->seat, &seat_listener, state);
 	} else if (strcmp(interface, wl_output_interface.name) == 0) {
-		struct wl_output *wl_output = wl_registry_bind(
+		wl_output = wl_registry_bind(
 		        registry, name, &wl_output_interface, 4);
 
-		barny_output_t *output = calloc(1, sizeof(barny_output_t));
-		output->wl_output      = wl_output;
-		output->state          = state;
-		output->scale          = 1;
-		output->registry_name  = name;
+		output                = calloc(1, sizeof(barny_output_t));
+		output->wl_output     = wl_output;
+		output->state         = state;
+		output->scale         = 1;
+		output->registry_name = name;
 
 		wl_output_add_listener(wl_output, &output_listener, output);
 
-		/* Add to list */
 		output->next   = state->outputs;
 		state->outputs = output;
 	}
@@ -358,22 +360,21 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 static void
 registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
 {
-	barny_state_t *state = data;
+	barny_state_t   *state = data;
+	barny_output_t **prev;
+	barny_output_t  *out;
+
 	(void)registry;
 
-	/* Find and remove output with matching registry name */
-	barny_output_t **prev = &state->outputs;
-	for (barny_output_t *out = state->outputs; out; out = out->next) {
+	prev = &state->outputs;
+	for (out = state->outputs; out; out = out->next) {
 		if (out->registry_name == name) {
-			/* Clear pointer_output if it's being removed */
 			if (state->pointer_output == out) {
 				state->pointer_output = NULL;
 			}
 
-			/* Remove from linked list */
 			*prev = out->next;
 
-			/* Destroy surface and resources */
 			barny_output_destroy_surface(out);
 			if (out->wl_output) {
 				wl_output_destroy(out->wl_output);
@@ -402,7 +403,6 @@ barny_wayland_init(barny_state_t *state)
 	state->registry = wl_display_get_registry(state->display);
 	wl_registry_add_listener(state->registry, &registry_listener, state);
 
-	/* First roundtrip to get globals */
 	wl_display_roundtrip(state->display);
 
 	if (!state->compositor) {
@@ -419,7 +419,6 @@ barny_wayland_init(barny_state_t *state)
 		return -1;
 	}
 
-	/* Second roundtrip to get output modes */
 	wl_display_roundtrip(state->display);
 
 	return 0;
@@ -428,10 +427,12 @@ barny_wayland_init(barny_state_t *state)
 void
 barny_wayland_cleanup(barny_state_t *state)
 {
-	/* Destroy outputs */
-	barny_output_t *out = state->outputs;
+	barny_output_t *out;
+	barny_output_t *next;
+
+	out = state->outputs;
 	while (out) {
-		barny_output_t *next = out->next;
+		next = out->next;
 		barny_output_destroy_surface(out);
 		if (out->wl_output) {
 			wl_output_destroy(out->wl_output);

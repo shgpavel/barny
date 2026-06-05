@@ -33,9 +33,9 @@ typedef struct {
 	char file_name[FILE_LEN];
 } tracked_pair_t;
 
-static volatile int  running    = 1;
-static tracked_pair_t *pairs    = NULL;
-static int            pair_count = 0;
+static volatile int    running    = 1;
+static tracked_pair_t *pairs      = NULL;
+static int             pair_count = 0;
 
 static void
 signal_handler(int sig)
@@ -48,11 +48,12 @@ static void
 pair_file_from_market(const char *market, char *buf, size_t buf_size)
 {
 	char   slug[FILE_LEN];
-	size_t out = 0;
+	size_t out;
 
 	if (!buf || buf_size == 0)
 		return;
 
+	out    = 0;
 	buf[0] = '\0';
 
 	while (*market && *market != '-' && out + 1 < sizeof(slug)) {
@@ -81,10 +82,14 @@ clear_pairs(void)
 static void
 set_pairs_from_csv(const char *value)
 {
+	size_t token_count;
+	char **tokens;
+	size_t i;
+
 	clear_pairs();
 
-	size_t  token_count = 0;
-	char  **tokens      = helper_parse_csv(value, &token_count);
+	token_count = 0;
+	tokens      = helper_parse_csv(value, &token_count);
 	if (!tokens || token_count == 0) {
 		helper_free_string_array(tokens, token_count);
 		return;
@@ -99,7 +104,7 @@ set_pairs_from_csv(const char *value)
 		return;
 	}
 
-	for (size_t i = 0; i < token_count; i++) {
+	for (i = 0; i < token_count; i++) {
 		snprintf(pairs[pair_count].inst_id,
 		         sizeof(pairs[pair_count].inst_id), "%s", tokens[i]);
 		pair_file_from_market(
@@ -119,13 +124,14 @@ set_default_pairs(void)
 {
 	size_t count = sizeof(default_crypto_pairs)
 	               / sizeof(default_crypto_pairs[0]);
+	size_t i;
 
 	clear_pairs();
 	pairs = calloc(count, sizeof(*pairs));
 	if (!pairs)
 		return;
 
-	for (size_t i = 0; i < count; i++) {
+	for (i = 0; i < count; i++) {
 		snprintf(pairs[i].inst_id, sizeof(pairs[i].inst_id), "%s",
 		         default_crypto_pairs[i]);
 		pair_file_from_market(default_crypto_pairs[i], pairs[i].file_name,
@@ -137,17 +143,23 @@ set_default_pairs(void)
 static void
 load_config_file(const char *path)
 {
-	FILE *f = fopen(path, "r");
+	FILE  *f;
+	char   line[512];
+	char  *trimmed;
+	char  *eq;
+	char  *key;
+	char  *value;
+	size_t value_len;
+	bool   in_quotes;
+	char  *p;
+	char  *end;
+
+	f = fopen(path, "r");
 	if (!f)
 		return;
 
-	char line[512];
 	while (fgets(line, sizeof(line), f)) {
-		char *trimmed = helper_trim(line);
-		char *eq;
-		char *key;
-		char *value;
-		size_t value_len;
+		trimmed = helper_trim(line);
 
 		if (*trimmed == '#' || *trimmed == '\0')
 			continue;
@@ -163,15 +175,15 @@ load_config_file(const char *path)
 			continue;
 
 		{
-			bool in_quotes = false;
-			for (char *p = value; *p; p++) {
+			in_quotes = false;
+			for (p = value; *p; p++) {
 				if (*p == '"') {
 					in_quotes = !in_quotes;
 				} else if (*p == '#'
 				           && !in_quotes
 				           && p > value
 				           && isspace((unsigned char)*(p - 1))) {
-					char *end = p - 1;
+					end = p - 1;
 					while (end > value
 					       && isspace((unsigned char)*end))
 						end--;
@@ -182,8 +194,7 @@ load_config_file(const char *path)
 		}
 
 		value_len = strlen(value);
-		if (value_len >= 2 && value[0] == '"'
-		    && value[value_len - 1] == '"') {
+		if (value_len >= 2 && value[0] == '"' && value[value_len - 1] == '"') {
 			value[value_len - 1] = '\0';
 			value++;
 		}
@@ -198,7 +209,9 @@ static void
 read_config(void)
 {
 	char        user_path[512];
-	const char *home = getenv("HOME");
+	const char *home;
+
+	home = getenv("HOME");
 
 	set_default_pairs();
 	load_config_file(CONFIG_PATH);
@@ -216,8 +229,8 @@ read_config(void)
 static void
 write_price(const char *name, double price)
 {
-	char path[256];
-	char tmp_path[256];
+	char  path[256];
+	char  tmp_path[256];
 	FILE *f;
 
 	snprintf(path, sizeof(path), "%s/%s", OUTPUT_DIR, name);
@@ -235,18 +248,20 @@ write_price(const char *name, double price)
 static void
 process_message(const char *data, size_t len)
 {
-	cJSON *json = cJSON_ParseWithLength(data, len);
+	cJSON *json;
 	cJSON *data_arr;
 	cJSON *first;
 	cJSON *inst_id;
 	cJSON *mark_px;
+	double price;
+	int    i;
 
+	json = cJSON_ParseWithLength(data, len);
 	if (!json)
 		return;
 
 	data_arr = cJSON_GetObjectItem(json, "data");
-	if (!data_arr || !cJSON_IsArray(data_arr)
-	    || cJSON_GetArraySize(data_arr) < 1) {
+	if (!data_arr || !cJSON_IsArray(data_arr) || cJSON_GetArraySize(data_arr) < 1) {
 		cJSON_Delete(json);
 		return;
 	}
@@ -256,16 +271,16 @@ process_message(const char *data, size_t len)
 		cJSON_Delete(json);
 		return;
 	}
+
 	inst_id = cJSON_GetObjectItem(first, "instId");
 	mark_px = cJSON_GetObjectItem(first, "markPx");
-	if (!inst_id || !inst_id->valuestring || !mark_px
-	    || !mark_px->valuestring) {
+	if (!inst_id || !inst_id->valuestring || !mark_px || !mark_px->valuestring) {
 		cJSON_Delete(json);
 		return;
 	}
 
-	double price = strtod(mark_px->valuestring, NULL);
-	for (int i = 0; i < pair_count; i++) {
+	price = strtod(mark_px->valuestring, NULL);
+	for (i = 0; i < pair_count; i++) {
 		if (strcmp(inst_id->valuestring, pairs[i].inst_id) == 0) {
 			write_price(pairs[i].file_name, price);
 			break;
@@ -278,12 +293,17 @@ process_message(const char *data, size_t len)
 static int
 websocket_loop(CURL *curl)
 {
-	cJSON   *msg = cJSON_CreateObject();
-	cJSON   *args;
-	char    *sub_str;
-	size_t   sent;
-	CURLcode res;
+	cJSON                      *msg;
+	cJSON                      *args;
+	char                       *sub_str;
+	size_t                      sent;
+	CURLcode                    res;
+	int                         i;
+	char                        buffer[4096];
+	size_t                      rlen;
+	const struct curl_ws_frame *frame;
 
+	msg = cJSON_CreateObject();
 	if (!msg)
 		return -1;
 
@@ -294,7 +314,7 @@ websocket_loop(CURL *curl)
 	}
 
 	cJSON_AddStringToObject(msg, "op", "subscribe");
-	for (int i = 0; i < pair_count; i++) {
+	for (i = 0; i < pair_count; i++) {
 		cJSON *arg = cJSON_CreateObject();
 		if (!arg)
 			continue;
@@ -320,11 +340,7 @@ websocket_loop(CURL *curl)
 
 	fprintf(stderr, "Subscribed to %d crypto pairs\n", pair_count);
 
-	char buffer[4096];
 	while (running) {
-		size_t                      rlen;
-		const struct curl_ws_frame *frame;
-
 		res = curl_ws_recv(curl, buffer, sizeof(buffer) - 1, &rlen,
 		                   &frame);
 		if (res == CURLE_AGAIN) {
@@ -351,9 +367,10 @@ websocket_loop(CURL *curl)
 static CURL *
 create_websocket(void)
 {
-	CURL     *curl = curl_easy_init();
-	CURLcode  res;
+	CURL    *curl;
+	CURLcode res;
 
+	curl = curl_easy_init();
 	if (!curl)
 		return NULL;
 
@@ -382,6 +399,8 @@ create_websocket(void)
 int
 main(void)
 {
+	CURL *curl;
+
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
 
@@ -389,7 +408,7 @@ main(void)
 	read_config();
 
 	while (running) {
-		CURL *curl = create_websocket();
+		curl = create_websocket();
 		if (curl) {
 			websocket_loop(curl);
 			curl_easy_cleanup(curl);

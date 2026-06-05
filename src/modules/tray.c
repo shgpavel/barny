@@ -1,9 +1,3 @@
-/*
- * System tray module
- *
- * Displays StatusNotifierItem icons from applications
- */
-
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,13 +13,14 @@ typedef struct {
 	int            icon_size;
 	int            icon_spacing;
 	int            item_count;
-	int            render_x; /* X position where module was last rendered */
+	int            render_x;
 } tray_data_t;
 
 static int
 tray_init(barny_module_t *self, barny_state_t *state)
 {
 	tray_data_t *data  = self->data;
+
 	data->state        = state;
 	data->icon_size    = state->config.tray_icon_size;
 	data->icon_spacing = state->config.tray_icon_spacing;
@@ -38,6 +33,7 @@ static void
 tray_destroy(barny_module_t *self)
 {
 	tray_data_t *data = self->data;
+
 	if (!data)
 		return;
 
@@ -48,13 +44,16 @@ tray_destroy(barny_module_t *self)
 static void
 tray_update(barny_module_t *self)
 {
-	tray_data_t *data  = self->data;
+	tray_data_t *data;
+	int          count;
+	sni_item_t  *items;
+	sni_item_t  *item;
 
-	/* Count items and check for changes */
-	int          count = 0;
-	sni_item_t  *items = barny_sni_host_get_items(data->state);
-	for (sni_item_t *item = items; item; item = item->next) {
-		/* Only count active/passive items, not hidden */
+	data  = self->data;
+	count = 0;
+	items = barny_sni_host_get_items(data->state);
+
+	for (item = items; item; item = item->next) {
 		if (!item->status
 		    || strcmp(item->status, "Passive") == 0
 		    || strcmp(item->status, "Active") == 0
@@ -68,7 +67,6 @@ tray_update(barny_module_t *self)
 		self->dirty      = true;
 	}
 
-	/* Update width based on item count */
 	if (count > 0) {
 		self->width = count * data->icon_size
 		              + (count - 1) * data->icon_spacing
@@ -82,20 +80,27 @@ static void
 draw_icon_bg(cairo_t *cr, double cx, double cy, double size, bool square,
              int corner_radius, double r, double g, double b, double a)
 {
-	double half = size / 2.0 - 1;
+	double half;
+	double left;
+	double top;
+	double w;
+	double h;
+	double cr_r;
+
+	half = size / 2.0 - 1;
 	if (half < 1)
 		half = 1;
 
 	cairo_set_source_rgba(cr, r, g, b, a);
 
 	if (square) {
-		double left = cx - half;
-		double top  = cy - half;
-		double w    = half * 2;
-		double h    = half * 2;
+		left = cx - half;
+		top  = cy - half;
+		w    = half * 2;
+		h    = half * 2;
 
 		if (corner_radius > 0) {
-			double cr_r = corner_radius;
+			cr_r = corner_radius;
 			if (cr_r > w / 2.0)
 				cr_r = w / 2.0;
 			if (cr_r > h / 2.0)
@@ -124,27 +129,42 @@ draw_icon_bg(cairo_t *cr, double cx, double cy, double size, bool square,
 static void
 tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
-	tray_data_t    *data = self->data;
-	barny_config_t *cfg  = &data->state->config;
+	tray_data_t    *data;
+	barny_config_t *cfg;
+	sni_item_t     *items;
+	bool            square;
+	int             corner_radius;
+	int             icon_x;
+	int             icon_y;
+	sni_item_t     *item;
+	double          cx;
+	double          cy;
+	int             iw;
+	int             ih;
+	int             pad;
+	int             target;
+	double          scale;
+	double          dx;
+	double          dy;
+
+	data = self->data;
+	cfg  = &data->state->config;
 	(void)w;
 
-	/* Store render position for click handling */
-	data->render_x    = x;
+	data->render_x = x;
 
-	sni_item_t *items = barny_sni_host_get_items(data->state);
+	items          = barny_sni_host_get_items(data->state);
 	if (!items) {
 		return;
 	}
 
-	bool square = cfg->tray_icon_shape
-	              && strcmp(cfg->tray_icon_shape, "square") == 0;
-	int corner_radius = cfg->tray_icon_corner_radius;
+	square        = cfg->tray_icon_shape
+	                && strcmp(cfg->tray_icon_shape, "square") == 0;
+	corner_radius = cfg->tray_icon_corner_radius;
+	icon_x        = x + 4;
+	icon_y        = y + (h - data->icon_size) / 2;
 
-	int icon_x        = x + 4;
-	int icon_y        = y + (h - data->icon_size) / 2;
-
-	for (sni_item_t *item = items; item; item = item->next) {
-		/* Skip items with no status or hidden status */
+	for (item = items; item; item = item->next) {
 		if (item->status
 		    && strcmp(item->status, "Passive") != 0
 		    && strcmp(item->status, "Active") != 0
@@ -152,12 +172,11 @@ tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 			continue;
 		}
 
-		double cx = icon_x + data->icon_size / 2.0;
-		double cy = icon_y + data->icon_size / 2.0;
+		cx = icon_x + data->icon_size / 2.0;
+		cy = icon_y + data->icon_size / 2.0;
 
 		cairo_save(cr);
 
-		/* Draw background shape */
 		draw_icon_bg(cr, cx + 1, cy + 1, data->icon_size, square,
 		             corner_radius, 0, 0, 0,
 		             cfg->tray_icon_bg_opacity * 0.5);
@@ -165,26 +184,23 @@ tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 		             cfg->tray_icon_bg_r, cfg->tray_icon_bg_g,
 		             cfg->tray_icon_bg_b, cfg->tray_icon_bg_opacity);
 
-		/* Draw the icon (or fallback) */
 		if (item->icon
 		    && cairo_surface_status(item->icon) == CAIRO_STATUS_SUCCESS) {
-			int iw = cairo_image_surface_get_width(item->icon);
-			int ih = cairo_image_surface_get_height(item->icon);
+			iw = cairo_image_surface_get_width(item->icon);
+			ih = cairo_image_surface_get_height(item->icon);
 			if (iw > 0 && ih > 0) {
-				/* Scale icon to fit inside the background with padding */
-				int pad    = 4;
-				int target = data->icon_size - pad * 2;
+				pad    = 4;
+				target = data->icon_size - pad * 2;
 				if (target < 1)
 					target = 1;
-				double scale
-				        = (double)target / (iw > ih ? iw : ih);
+				scale = (double)target / (iw > ih ? iw : ih);
 
-				double dx = icon_x
-				            + pad
-				            + (target - iw * scale) / 2.0;
-				double dy = icon_y
-				            + pad
-				            + (target - ih * scale) / 2.0;
+				dx    = icon_x
+				        + pad
+				        + (target - iw * scale) / 2.0;
+				dy    = icon_y
+				        + pad
+				        + (target - ih * scale) / 2.0;
 
 				cairo_save(cr);
 				cairo_translate(cr, dx, dy);
@@ -204,21 +220,23 @@ tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 static void
 tray_on_click(barny_module_t *self, int button, int x, int y)
 {
-	tray_data_t *data  = self->data;
+	tray_data_t *data;
+	sni_item_t  *items;
+	int          rel_x;
+	int          icon_x;
+	sni_item_t  *item;
+	int          icon_end;
 
-	sni_item_t  *items = barny_sni_host_get_items(data->state);
+	data  = self->data;
+	items = barny_sni_host_get_items(data->state);
 	if (!items) {
 		return;
 	}
 
-	/* Convert absolute x to position relative to module */
-	int rel_x  = x - data->render_x;
+	rel_x  = x - data->render_x;
+	icon_x = 4;
 
-	/* Determine which icon was clicked */
-	int icon_x = 4; /* Starting offset */
-
-	for (sni_item_t *item = items; item; item = item->next) {
-		/* Skip non-visible items */
+	for (item = items; item; item = item->next) {
 		if (item->status
 		    && strcmp(item->status, "Passive") != 0
 		    && strcmp(item->status, "Active") != 0
@@ -226,14 +244,12 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 			continue;
 		}
 
-		int icon_end = icon_x + data->icon_size;
+		icon_end = icon_x + data->icon_size;
 
 		if (rel_x >= icon_x && rel_x < icon_end) {
-			/* Found the clicked icon */
-			/* Button codes are evdev: BTN_LEFT=272, BTN_RIGHT=273 */
-			if (button == 272) {        /* Left click */
+			if (button == 272) {
 				barny_sni_item_activate(data->state, item, x, y);
-			} else if (button == 273) { /* Right click */
+			} else if (button == 273) {
 				barny_sni_item_secondary_activate(data->state,
 				                                  item, x, y);
 			}
@@ -264,7 +280,7 @@ barny_module_tray_create(void)
 	mod->render   = tray_render;
 	mod->on_click = tray_on_click;
 	mod->data     = data;
-	mod->width    = 0; /* Dynamic based on items */
+	mod->width    = 0;
 	mod->dirty    = true;
 
 	return mod;

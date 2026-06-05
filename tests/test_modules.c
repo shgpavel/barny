@@ -55,6 +55,7 @@ static barny_module_t *
 create_mock_module(const char *name, barny_position_t pos)
 {
 	barny_module_t *mod = calloc(1, sizeof(barny_module_t));
+
 	mod->name           = name;
 	mod->position       = pos;
 	mod->init           = mock_init;
@@ -64,6 +65,7 @@ create_mock_module(const char *name, barny_position_t pos)
 	mod->width          = 100;
 	mod->height         = 30;
 	mod->dirty          = false;
+
 	return mod;
 }
 
@@ -74,8 +76,11 @@ test_module_register(void)
 
 	TEST("register single module")
 	{
-		barny_state_t   state = { 0 };
-		barny_module_t *mod   = create_mock_module("test", BARNY_POS_LEFT);
+		barny_state_t   state;
+		barny_module_t *mod;
+
+		state = (barny_state_t){ 0 };
+		mod   = create_mock_module("test", BARNY_POS_LEFT);
 
 		barny_module_register(&state, mod);
 
@@ -87,12 +92,15 @@ test_module_register(void)
 
 	TEST("register multiple modules")
 	{
-		barny_state_t   state = { 0 };
-		barny_module_t *mod1 = create_mock_module("test1", BARNY_POS_LEFT);
-		barny_module_t *mod2
-		        = create_mock_module("test2", BARNY_POS_CENTER);
-		barny_module_t *mod3
-		        = create_mock_module("test3", BARNY_POS_RIGHT);
+		barny_state_t   state;
+		barny_module_t *mod1;
+		barny_module_t *mod2;
+		barny_module_t *mod3;
+
+		state = (barny_state_t){ 0 };
+		mod1  = create_mock_module("test1", BARNY_POS_LEFT);
+		mod2  = create_mock_module("test2", BARNY_POS_CENTER);
+		mod3  = create_mock_module("test3", BARNY_POS_RIGHT);
 
 		barny_module_register(&state, mod1);
 		barny_module_register(&state, mod2);
@@ -110,17 +118,19 @@ test_module_register(void)
 
 	TEST("respects max module limit")
 	{
-		barny_state_t   state = { 0 };
+		barny_state_t   state;
 		barny_module_t *modules[BARNY_MAX_MODULES + 5];
+		int             i;
 
-		for (int i = 0; i < BARNY_MAX_MODULES + 5; i++) {
+		state = (barny_state_t){ 0 };
+		for (i = 0; i < BARNY_MAX_MODULES + 5; i++) {
 			modules[i] = create_mock_module("test", BARNY_POS_LEFT);
 			barny_module_register(&state, modules[i]);
 		}
 
 		ASSERT_EQ_INT(BARNY_MAX_MODULES, state.module_count);
 
-		for (int i = 0; i < BARNY_MAX_MODULES + 5; i++) {
+		for (i = 0; i < BARNY_MAX_MODULES + 5; i++) {
 			free(modules[i]);
 		}
 	}
@@ -135,9 +145,12 @@ test_module_lifecycle(void)
 
 	TEST("init calls module init function")
 	{
+		barny_state_t   state;
+		barny_module_t *mod;
+
 		reset_mock_counters();
-		barny_state_t   state = { 0 };
-		barny_module_t *mod   = create_mock_module("test", BARNY_POS_LEFT);
+		state = (barny_state_t){ 0 };
+		mod   = create_mock_module("test", BARNY_POS_LEFT);
 
 		barny_module_register(&state, mod);
 		barny_modules_init(&state);
@@ -149,13 +162,16 @@ test_module_lifecycle(void)
 
 	TEST("init calls all registered modules")
 	{
+		barny_state_t   state;
+		barny_module_t *mod1;
+		barny_module_t *mod2;
+		barny_module_t *mod3;
+
 		reset_mock_counters();
-		barny_state_t   state = { 0 };
-		barny_module_t *mod1 = create_mock_module("test1", BARNY_POS_LEFT);
-		barny_module_t *mod2
-		        = create_mock_module("test2", BARNY_POS_CENTER);
-		barny_module_t *mod3
-		        = create_mock_module("test3", BARNY_POS_RIGHT);
+		state = (barny_state_t){ 0 };
+		mod1  = create_mock_module("test1", BARNY_POS_LEFT);
+		mod2  = create_mock_module("test2", BARNY_POS_CENTER);
+		mod3  = create_mock_module("test3", BARNY_POS_RIGHT);
 
 		barny_module_register(&state, mod1);
 		barny_module_register(&state, mod2);
@@ -171,9 +187,12 @@ test_module_lifecycle(void)
 
 	TEST("update calls module update function")
 	{
+		barny_state_t   state;
+		barny_module_t *mod;
+
 		reset_mock_counters();
-		barny_state_t   state = { 0 };
-		barny_module_t *mod   = create_mock_module("test", BARNY_POS_LEFT);
+		state = (barny_state_t){ 0 };
+		mod   = create_mock_module("test", BARNY_POS_LEFT);
 
 		barny_module_register(&state, mod);
 		barny_modules_update(&state);
@@ -185,10 +204,13 @@ test_module_lifecycle(void)
 
 	TEST("mark_dirty sets all modules dirty")
 	{
-		barny_state_t   state = { 0 };
-		barny_module_t *mod1 = create_mock_module("test1", BARNY_POS_LEFT);
-		barny_module_t *mod2
-		        = create_mock_module("test2", BARNY_POS_CENTER);
+		barny_state_t   state;
+		barny_module_t *mod1;
+		barny_module_t *mod2;
+
+		state       = (barny_state_t){ 0 };
+		mod1        = create_mock_module("test1", BARNY_POS_LEFT);
+		mod2        = create_mock_module("test2", BARNY_POS_CENTER);
 
 		mod1->dirty = false;
 		mod2->dirty = false;
@@ -215,6 +237,7 @@ test_module_factories(void)
 	TEST("clock module created with correct name")
 	{
 		barny_module_t *mod = barny_module_clock_create();
+
 		ASSERT_NOT_NULL(mod);
 		ASSERT_EQ_STR("clock", mod->name);
 		ASSERT_NOT_NULL(mod->init);
@@ -227,6 +250,7 @@ test_module_factories(void)
 	TEST("clock module has right position")
 	{
 		barny_module_t *mod = barny_module_clock_create();
+
 		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
@@ -236,6 +260,7 @@ test_module_factories(void)
 	TEST("workspace module created with correct name")
 	{
 		barny_module_t *mod = barny_module_workspace_create();
+
 		ASSERT_NOT_NULL(mod);
 		ASSERT_EQ_STR("workspace", mod->name);
 		ASSERT_NOT_NULL(mod->init);
@@ -247,16 +272,17 @@ test_module_factories(void)
 	TEST("workspace module has left position")
 	{
 		barny_module_t *mod = barny_module_workspace_create();
+
 		ASSERT_EQ_INT(BARNY_POS_LEFT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
 		free(mod);
 	}
 
-	/* Disk module */
 	TEST("disk module created with correct name")
 	{
 		barny_module_t *mod = barny_module_disk_create();
+
 		ASSERT_NOT_NULL(mod);
 		ASSERT_EQ_STR("disk", mod->name);
 		ASSERT_NOT_NULL(mod->init);
@@ -270,16 +296,17 @@ test_module_factories(void)
 	TEST("disk module has right position")
 	{
 		barny_module_t *mod = barny_module_disk_create();
+
 		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
 		free(mod);
 	}
 
-	/* Sysinfo module (includes freq, power, temp) */
 	TEST("sysinfo module created with correct name")
 	{
 		barny_module_t *mod = barny_module_sysinfo_create();
+
 		ASSERT_NOT_NULL(mod);
 		ASSERT_EQ_STR("sysinfo", mod->name);
 		ASSERT_NOT_NULL(mod->init);
@@ -292,15 +319,16 @@ test_module_factories(void)
 	TEST("sysinfo module has right position")
 	{
 		barny_module_t *mod = barny_module_sysinfo_create();
+
 		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
 	}
 
-	/* RAM module */
 	TEST("ram module created with correct name")
 	{
 		barny_module_t *mod = barny_module_ram_create();
+
 		ASSERT_NOT_NULL(mod);
 		ASSERT_EQ_STR("ram", mod->name);
 		ASSERT_NOT_NULL(mod->init);
@@ -314,16 +342,17 @@ test_module_factories(void)
 	TEST("ram module has right position")
 	{
 		barny_module_t *mod = barny_module_ram_create();
+
 		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
 		free(mod);
 	}
 
-	/* Network module */
 	TEST("network module created with correct name")
 	{
 		barny_module_t *mod = barny_module_network_create();
+
 		ASSERT_NOT_NULL(mod);
 		ASSERT_EQ_STR("network", mod->name);
 		ASSERT_NOT_NULL(mod->init);
@@ -337,16 +366,17 @@ test_module_factories(void)
 	TEST("network module has right position")
 	{
 		barny_module_t *mod = barny_module_network_create();
+
 		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
 		free(mod);
 	}
 
-	/* Fileread module */
 	TEST("fileread module created with correct name")
 	{
 		barny_module_t *mod = barny_module_fileread_create();
+
 		ASSERT_NOT_NULL(mod);
 		ASSERT_EQ_STR("fileread", mod->name);
 		ASSERT_NOT_NULL(mod->init);
@@ -360,6 +390,7 @@ test_module_factories(void)
 	TEST("fileread module has right position")
 	{
 		barny_module_t *mod = barny_module_fileread_create();
+
 		ASSERT_EQ_INT(BARNY_POS_RIGHT, mod->position);
 		if (mod->destroy)
 			mod->destroy(mod);
@@ -383,11 +414,13 @@ test_module_positions(void)
 
 	TEST("modules maintain their position")
 	{
-		barny_module_t *left = create_mock_module("left", BARNY_POS_LEFT);
-		barny_module_t *center
-		        = create_mock_module("center", BARNY_POS_CENTER);
-		barny_module_t *right
-		        = create_mock_module("right", BARNY_POS_RIGHT);
+		barny_module_t *left;
+		barny_module_t *center;
+		barny_module_t *right;
+
+		left   = create_mock_module("left", BARNY_POS_LEFT);
+		center = create_mock_module("center", BARNY_POS_CENTER);
+		right  = create_mock_module("right", BARNY_POS_RIGHT);
 
 		ASSERT_EQ_INT(BARNY_POS_LEFT, left->position);
 		ASSERT_EQ_INT(BARNY_POS_CENTER, center->position);
@@ -408,9 +441,12 @@ test_module_data(void)
 
 	TEST("module data pointer can be set")
 	{
-		barny_module_t *mod = create_mock_module("test", BARNY_POS_LEFT);
-		int             test_data = 42;
-		mod->data                 = &test_data;
+		barny_module_t *mod;
+		int             test_data;
+
+		mod       = create_mock_module("test", BARNY_POS_LEFT);
+		test_data = 42;
+		mod->data = &test_data;
 
 		ASSERT_EQ_INT(42, *(int *)mod->data);
 
@@ -420,6 +456,7 @@ test_module_data(void)
 	TEST("module dimensions can be set")
 	{
 		barny_module_t *mod = create_mock_module("test", BARNY_POS_LEFT);
+
 		mod->width          = 200;
 		mod->height         = 50;
 

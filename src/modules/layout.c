@@ -12,17 +12,17 @@ typedef struct {
 } module_catalog_entry_t;
 
 static const module_catalog_entry_t module_catalog[] = {
-	{ "clock",     BARNY_POS_RIGHT },
-	{ "workspace", BARNY_POS_LEFT  },
-	{ "sysinfo",   BARNY_POS_RIGHT },
-	{ "weather",   BARNY_POS_RIGHT },
-	{ "disk",      BARNY_POS_RIGHT },
-	{ "ram",       BARNY_POS_RIGHT },
-	{ "network",   BARNY_POS_RIGHT },
-	{ "fileread",  BARNY_POS_RIGHT },
-	{ "crypto",    BARNY_POS_RIGHT },
-	{ "tray",      BARNY_POS_RIGHT },
-	{ "battery",   BARNY_POS_RIGHT },
+	{ "clock",       BARNY_POS_RIGHT  },
+	{ "workspace",   BARNY_POS_LEFT   },
+	{ "sysinfo",     BARNY_POS_RIGHT  },
+	{ "weather",     BARNY_POS_RIGHT  },
+	{ "disk",        BARNY_POS_RIGHT  },
+	{ "ram",         BARNY_POS_RIGHT  },
+	{ "network",     BARNY_POS_RIGHT  },
+	{ "fileread",    BARNY_POS_RIGHT  },
+	{ "crypto",      BARNY_POS_RIGHT  },
+	{ "tray",        BARNY_POS_RIGHT  },
+	{ "battery",     BARNY_POS_RIGHT  },
 	{ "windowtitle", BARNY_POS_CENTER },
 };
 
@@ -35,8 +35,9 @@ catalog_size(void)
 int
 barny_module_layout_gap_units(const char *name)
 {
-	char *end = NULL;
-	long  units;
+	const char *num;
+	char       *end = NULL;
+	long        units;
 
 	if (!name) {
 		return 0;
@@ -46,7 +47,7 @@ barny_module_layout_gap_units(const char *name)
 		return 0;
 	}
 
-	const char *num = (name[0] == 'g') ? name + 4 : name + 6;
+	num = (name[0] == 'g') ? name + 4 : name + 6;
 	if (!*num) {
 		return 0;
 	}
@@ -88,11 +89,13 @@ slot_array_for_position(barny_module_layout_t *layout, barny_position_t position
 static void
 layout_clear_slot(char **slot, int *count)
 {
+	int i;
+
 	if (!slot || !count) {
 		return;
 	}
 
-	for (int i = 0; i < *count; i++) {
+	for (i = 0; i < *count; i++) {
 		free(slot[i]);
 		slot[i] = NULL;
 	}
@@ -128,6 +131,9 @@ barny_module_layout_destroy(barny_module_layout_t *layout)
 bool
 barny_module_catalog_has(const char *name)
 {
+	int count;
+	int i;
+
 	if (!name || !*name) {
 		return false;
 	}
@@ -136,8 +142,8 @@ barny_module_catalog_has(const char *name)
 		return true;
 	}
 
-	int count = catalog_size();
-	for (int i = 0; i < count; i++) {
+	count = catalog_size();
+	for (i = 0; i < count; i++) {
 		if (strcmp(module_catalog[i].name, name) == 0) {
 			return true;
 		}
@@ -150,12 +156,15 @@ int
 barny_module_catalog_names(const char **names, int max_names)
 {
 	int total = catalog_size();
+	int limit;
+	int i;
+
 	if (!names || max_names <= 0) {
 		return total;
 	}
 
-	int limit = max_names < total ? max_names : total;
-	for (int i = 0; i < limit; i++) {
+	limit = max_names < total ? max_names : total;
+	for (i = 0; i < limit; i++) {
 		names[i] = module_catalog[i].name;
 	}
 
@@ -165,6 +174,8 @@ barny_module_catalog_names(const char **names, int max_names)
 bool
 barny_module_layout_contains(const barny_module_layout_t *layout, const char *name)
 {
+	int i;
+
 	if (!layout || !name) {
 		return false;
 	}
@@ -173,17 +184,17 @@ barny_module_layout_contains(const barny_module_layout_t *layout, const char *na
 		return false;
 	}
 
-	for (int i = 0; i < layout->left_count; i++) {
+	for (i = 0; i < layout->left_count; i++) {
 		if (layout->left[i] && strcmp(layout->left[i], name) == 0) {
 			return true;
 		}
 	}
-	for (int i = 0; i < layout->center_count; i++) {
+	for (i = 0; i < layout->center_count; i++) {
 		if (layout->center[i] && strcmp(layout->center[i], name) == 0) {
 			return true;
 		}
 	}
-	for (int i = 0; i < layout->right_count; i++) {
+	for (i = 0; i < layout->right_count; i++) {
 		if (layout->right[i] && strcmp(layout->right[i], name) == 0) {
 			return true;
 		}
@@ -199,6 +210,8 @@ barny_module_layout_insert(barny_module_layout_t *layout,
 	int   *count = NULL;
 	char **slot  = slot_array_for_position(layout, position, &count);
 	bool   is_gap;
+	char  *copy;
+	int    i;
 
 	if (!slot || !count || !name || !*name) {
 		return -1;
@@ -221,16 +234,17 @@ barny_module_layout_insert(barny_module_layout_t *layout,
 		index = *count;
 	}
 
-	char *copy = strdup(name);
+	copy = strdup(name);
 	if (!copy) {
 		return -1;
 	}
 
-	for (int i = *count; i > index; i--) {
+	for (i = *count; i > index; i--) {
 		slot[i] = slot[i - 1];
 	}
 	slot[index] = copy;
 	(*count)++;
+
 	return 0;
 }
 
@@ -239,25 +253,28 @@ barny_module_layout_remove(barny_module_layout_t *layout, const char *name)
 {
 	int   *count = NULL;
 	char **slot  = NULL;
+	int    pos;
+	int    i;
+	int    j;
 
 	if (!layout || !name) {
 		return false;
 	}
 
-	for (int pos = BARNY_POS_LEFT; pos <= BARNY_POS_RIGHT; pos++) {
+	for (pos = BARNY_POS_LEFT; pos <= BARNY_POS_RIGHT; pos++) {
 		slot = slot_array_for_position(layout, (barny_position_t)pos,
 		                               &count);
 		if (!slot || !count) {
 			continue;
 		}
 
-		for (int i = 0; i < *count; i++) {
+		for (i = 0; i < *count; i++) {
 			if (!slot[i] || strcmp(slot[i], name) != 0) {
 				continue;
 			}
 
 			free(slot[i]);
-			for (int j = i; j < *count - 1; j++) {
+			for (j = i; j < *count - 1; j++) {
 				slot[j] = slot[j + 1];
 			}
 			slot[*count - 1] = NULL;
@@ -273,17 +290,21 @@ static void
 parse_csv_slot(barny_module_layout_t *layout, barny_position_t position,
                const char *csv)
 {
+	size_t count;
+	char **items;
+	size_t i;
+
 	if (!layout || !csv) {
 		return;
 	}
 
-	size_t  count = 0;
-	char  **items = barny_parse_csv(csv, &count);
+	count = 0;
+	items = barny_parse_csv(csv, &count);
 	if (!items) {
 		return;
 	}
 
-	for (size_t i = 0; i < count; i++) {
+	for (i = 0; i < count; i++) {
 		const char *name   = items[i];
 		bool        is_gap = barny_module_layout_gap_units(name) > 0;
 		if (!barny_module_catalog_has(name)) {
@@ -306,14 +327,17 @@ parse_csv_slot(barny_module_layout_t *layout, barny_position_t position,
 void
 barny_module_layout_set_defaults(barny_module_layout_t *layout)
 {
+	int count;
+	int i;
+
 	if (!layout) {
 		return;
 	}
 
 	layout_clear_all(layout);
 
-	int count = catalog_size();
-	for (int i = 0; i < count; i++) {
+	count = catalog_size();
+	for (i = 0; i < count; i++) {
 		barny_module_layout_insert(layout,
 		                           module_catalog[i].default_position,
 		                           module_catalog[i].name, -1);
@@ -324,7 +348,7 @@ int
 barny_module_layout_load_from_config(const barny_config_t  *config,
                                      barny_module_layout_t *layout)
 {
-	bool has_explicit_layout = false;
+	bool has_explicit_layout;
 
 	if (!layout) {
 		return -1;
@@ -359,6 +383,9 @@ barny_module_layout_serialize_csv(const char *const *names, int count)
 	size_t len         = 1;
 	char  *out         = NULL;
 	int    valid_count = 0;
+	int    i;
+	char  *p;
+	int    added;
 
 	if (!names || count <= 0) {
 		out = malloc(1);
@@ -368,7 +395,7 @@ barny_module_layout_serialize_csv(const char *const *names, int count)
 		return out;
 	}
 
-	for (int i = 0; i < count; i++) {
+	for (i = 0; i < count; i++) {
 		if (!names[i]) {
 			continue;
 		}
@@ -385,14 +412,16 @@ barny_module_layout_serialize_csv(const char *const *names, int count)
 		return NULL;
 	}
 
-	char *p     = out;
-	int   added = 0;
-	for (int i = 0; i < count; i++) {
+	p     = out;
+	added = 0;
+	for (i = 0; i < count; i++) {
+		size_t nlen;
+
 		if (!names[i]) {
 			continue;
 		}
 
-		size_t nlen = strlen(names[i]);
+		nlen = strlen(names[i]);
 		memcpy(p, names[i], nlen);
 		p += nlen;
 		added++;

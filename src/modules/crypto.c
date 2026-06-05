@@ -6,10 +6,10 @@
 #include "barny.h"
 #include "popup.h"
 
-#define POPUP_LINE_H          26
-#define CRYPTO_NAME_LEN       24
+#define POPUP_LINE_H         26
+#define CRYPTO_NAME_LEN      24
 #define CRYPTO_FILE_PATH_LEN 128
-#define CRYPTO_PRICE_LEN      32
+#define CRYPTO_PRICE_LEN     32
 
 static const char *default_crypto_pairs[] = {
 	"BTC-USDT-SWAP",
@@ -106,12 +106,10 @@ static void
 format_pair_price(const barny_config_t *cfg, char *buf, size_t buf_size,
                   double price)
 {
-	const char *sym = (cfg && cfg->crypto_currency_symbol)
-	                          ? cfg->crypto_currency_symbol
-	                          : "$";
-	bool        suffix    = cfg && cfg->crypto_symbol_suffix;
-	int         decimals  = cfg ? cfg->crypto_decimals : 0;
-	int         auto_dec  = decimals;
+	const char *sym      = (cfg && cfg->crypto_currency_symbol) ? cfg->crypto_currency_symbol : "$";
+	bool        suffix   = cfg && cfg->crypto_symbol_suffix;
+	int         decimals = cfg ? cfg->crypto_decimals : 0;
+	int         auto_dec = decimals;
 
 	if (cfg && cfg->crypto_decimals == 0) {
 		if (price < 1.0)
@@ -170,11 +168,14 @@ crypto_popup_height(void *ud)
 static int
 crypto_popup_width(void *ud)
 {
-	crypto_data_t *data = ud;
+	crypto_data_t *data      = ud;
 	int            max_label = 0;
 	int            max_value = 0;
+	int            i;
+	int            content;
+	int            total;
 
-	for (int i = 1; i < data->pair_count; i++) {
+	for (i = 1; i < data->pair_count; i++) {
 		int lw = barny_popup_measure_text(data->popup_font_desc,
 		                                  data->pairs[i].name);
 		int vw = barny_popup_measure_text(data->popup_font_desc,
@@ -184,10 +185,12 @@ crypto_popup_width(void *ud)
 		if (vw > max_value)
 			max_value = vw;
 	}
-	int content = max_label + 24 + max_value;
-	int total   = content + 2 * BARNY_POPUP_PAD_X;
+
+	content = max_label + 24 + max_value;
+	total   = content + 2 * BARNY_POPUP_PAD_X;
 	if (total < 180)
 		total = 180;
+
 	return total;
 }
 
@@ -197,6 +200,10 @@ crypto_popup_render(void *ud, cairo_t *cr, int w, int h)
 	crypto_data_t  *data = ud;
 	barny_config_t *cfg  = &data->state->config;
 	PangoLayout    *layout;
+	double          vr;
+	double          vg;
+	double          vb;
+	int             i;
 
 	(void)h;
 
@@ -206,41 +213,20 @@ crypto_popup_render(void *ud, cairo_t *cr, int w, int h)
 	layout = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, data->popup_font_desc);
 
-	for (int i = 1; i < data->pair_count; i++) {
-		int line_y = (i - 1) * POPUP_LINE_H;
-		int tw, th;
-		int text_y;
-		int price_x;
+	vr = 0.5;
+	vg = 1.0;
+	vb = 0.5;
+	if (cfg->text_color_set) {
+		vr = cfg->text_color_r;
+		vg = cfg->text_color_g;
+		vb = cfg->text_color_b;
+	}
 
-		pango_layout_set_text(layout, data->pairs[i].name, -1);
-		pango_layout_get_pixel_size(layout, &tw, &th);
-		text_y = line_y + (POPUP_LINE_H - th) / 2;
-
-		cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-		cairo_move_to(cr, 1, text_y + 1);
-		pango_cairo_show_layout(cr, layout);
-
-		cairo_set_source_rgba(cr, 0.6, 0.7, 0.65, 0.9);
-		cairo_move_to(cr, 0, text_y);
-		pango_cairo_show_layout(cr, layout);
-
-		pango_layout_set_text(layout, data->pairs[i].price_str, -1);
-		pango_layout_get_pixel_size(layout, &tw, &th);
-		price_x = w - tw;
-
-		cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-		cairo_move_to(cr, price_x + 1, text_y + 1);
-		pango_cairo_show_layout(cr, layout);
-
-		if (cfg->text_color_set) {
-			cairo_set_source_rgba(cr, cfg->text_color_r,
-			                      cfg->text_color_g,
-			                      cfg->text_color_b, 0.9);
-		} else {
-			cairo_set_source_rgba(cr, 0.5, 1, 0.5, 0.9);
-		}
-		cairo_move_to(cr, price_x, text_y);
-		pango_cairo_show_layout(cr, layout);
+	for (i = 1; i < data->pair_count; i++) {
+		barny_popup_draw_row(cr, layout, (i - 1) * POPUP_LINE_H,
+		                     POPUP_LINE_H, w, data->pairs[i].name,
+		                     data->pairs[i].price_str, 0.6, 0.7, 0.65, vr,
+		                     vg, vb, 0.9);
 	}
 
 	g_object_unref(layout);
@@ -278,32 +264,23 @@ crypto_init(barny_module_t *self, barny_state_t *state)
 {
 	crypto_data_t        *data = self->data;
 	const barny_config_t *cfg  = &state->config;
+	int                   i;
 
-	data->state = state;
-	data->self  = self;
+	data->state     = state;
+	data->self      = self;
 	data->font_desc = pango_font_description_from_string(
 	        cfg->font ? cfg->font : "Sans 11");
-	data->popup_font_desc = pango_font_description_from_string(
-	        cfg->font ? cfg->font : "Sans 11");
+	data->popup_font_desc = barny_popup_font_from(cfg->font, "Sans 11");
 
-	int base_size = pango_font_description_get_size(data->popup_font_desc);
-	if (base_size > 0) {
-		pango_font_description_set_size(data->popup_font_desc,
-		                                base_size * 85 / 100);
-	} else {
-		pango_font_description_set_size(data->popup_font_desc,
-		                                9 * PANGO_SCALE);
-	}
-
-	data->pair_count = configured_pair_count(cfg);
+	data->pair_count      = configured_pair_count(cfg);
 	if (data->pair_count > 64)
 		data->pair_count = 64;
-	data->pairs      = calloc((size_t)data->pair_count,
-	                          sizeof(*data->pairs));
+	data->pairs = calloc((size_t)data->pair_count,
+	                     sizeof(*data->pairs));
 	if (!data->pairs)
 		return -1;
 
-	for (int i = 0; i < data->pair_count; i++) {
+	for (i = 0; i < data->pair_count; i++) {
 		const char *market = configured_pair_at(cfg, i);
 
 		pair_name_from_market(market, data->pairs[i].name,
@@ -349,16 +326,16 @@ crypto_update(barny_module_t *self)
 {
 	crypto_data_t *data          = self->data;
 	bool           popup_changed = false;
+	int            i;
 
-	for (int i = 0; i < data->pair_count; i++) {
+	for (i = 0; i < data->pair_count; i++) {
 		double price;
+		char   formatted[CRYPTO_PRICE_LEN];
 
 		if (!read_pair_price(data->pairs[i].file_path, &price))
 			continue;
 
 		if (price != data->pairs[i].price) {
-			char formatted[CRYPTO_PRICE_LEN];
-
 			data->pairs[i].price = price;
 			format_pair_price(&data->state->config, formatted,
 			                  sizeof(formatted), price);
@@ -384,34 +361,12 @@ static void
 crypto_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
 	crypto_data_t *data = self->data;
-	PangoLayout   *layout;
-	barny_config_t *cfg;
 	int            tw;
-	int            th;
-
 	(void)w;
 
-	layout = pango_cairo_create_layout(cr);
-	pango_layout_set_font_description(layout, data->font_desc);
-	pango_layout_set_text(layout, data->price_str, -1);
-	pango_layout_get_pixel_size(layout, &tw, &th);
-
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_move_to(cr, x + 1, y + (h - th) / 2 + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	cfg = &data->state->config;
-	if (cfg->text_color_set) {
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
-		                      cfg->text_color_b, 0.9);
-	} else {
-		cairo_set_source_rgba(cr, 0.5, 1, 0.5, 0.9);
-	}
-	cairo_move_to(cr, x, y + (h - th) / 2);
-	pango_cairo_show_layout(cr, layout);
-
-	g_object_unref(layout);
-
+	tw          = barny_module_render_text(cr, data->font_desc, data->price_str,
+	                                       x, y, h, &data->state->config,
+	                                       0.5, 1, 0.5, 0.9);
 	self->width = tw + 8;
 }
 
@@ -427,17 +382,17 @@ barny_module_crypto_create(void)
 		return NULL;
 	}
 
-	mod->name     = "crypto";
-	mod->position = BARNY_POS_RIGHT;
-	mod->init     = crypto_init;
-	mod->destroy  = crypto_destroy;
-	mod->update   = crypto_update;
-	mod->update_interval_ms = 1000; /* prices file refreshed by helper at most every ~1s */
-	mod->render   = crypto_render;
-	mod->on_hover = crypto_on_hover;
-	mod->data     = data;
-	mod->width    = 120;
-	mod->dirty    = true;
+	mod->name               = "crypto";
+	mod->position           = BARNY_POS_RIGHT;
+	mod->init               = crypto_init;
+	mod->destroy            = crypto_destroy;
+	mod->update             = crypto_update;
+	mod->update_interval_ms = 1000;
+	mod->render             = crypto_render;
+	mod->on_hover           = crypto_on_hover;
+	mod->data               = data;
+	mod->width              = 120;
+	mod->dirty              = true;
 
 	return mod;
 }

@@ -1,11 +1,5 @@
-/*
- * Main entry point for barny_test_internals binary.
- * This binary tests static functions by #including source files directly.
- */
-
 #include "test_framework.h"
 
-/* Config internals */
 extern void
 test_parse_hex_color(void);
 extern void
@@ -15,7 +9,6 @@ test_parse_bool(void);
 extern void
 test_parse_int_clamped(void);
 
-/* Clock internals */
 extern void
 test_build_time_string(void);
 extern void
@@ -23,19 +16,15 @@ test_build_date_string(void);
 extern void
 test_clock_display_str(void);
 
-/* Disk internals */
 extern void
 test_format_bytes(void);
 
-/* RAM internals */
 extern void
 test_format_size(void);
 
-/* Network internals */
 extern void
 test_is_physical_interface(void);
 
-/* Workspace internals */
 extern void
 test_parse_workspaces(void);
 extern void
@@ -45,7 +34,6 @@ test_is_square_shape(void);
 extern void
 test_workspace_click_uses_render_x(void);
 
-/* Tray internals */
 extern void
 test_tray_update_width_and_dirty(void);
 extern void

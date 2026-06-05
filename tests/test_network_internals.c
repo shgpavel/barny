@@ -1,11 +1,5 @@
-/*
- * Tests for static functions in network.c
- * We #include the source file directly to access static functions.
- */
-
 #include "test_framework.h"
 
-/* Include network.c directly to access static functions */
 #include "../src/modules/network.c"
 
 void
@@ -13,7 +7,6 @@ test_is_physical_interface(void)
 {
 	TEST_SUITE_BEGIN("is_physical_interface");
 
-	/* Interfaces that should be rejected */
 	TEST("rejects loopback 'lo'")
 	{
 		ASSERT_FALSE(is_physical_interface("lo"));
@@ -39,7 +32,6 @@ test_is_physical_interface(void)
 		ASSERT_FALSE(is_physical_interface("virbr0"));
 	}
 
-	/* Interfaces that should be accepted */
 	TEST("accepts eth0")
 	{
 		ASSERT_TRUE(is_physical_interface("eth0"));

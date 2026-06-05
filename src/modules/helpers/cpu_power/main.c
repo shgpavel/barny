@@ -36,7 +36,9 @@ signal_handler(int sig)
 static int
 read_uint64_file(const char *path, uint64_t *val)
 {
-	FILE *f = fopen(path, "r");
+	FILE *f;
+
+	f = fopen(path, "r");
 	if (!f)
 		return -1;
 
@@ -52,7 +54,10 @@ read_uint64_file(const char *path, uint64_t *val)
 static int
 read_string_file(const char *path, char *buf, size_t size)
 {
-	FILE *f = fopen(path, "r");
+	FILE  *f;
+	size_t len;
+
+	f = fopen(path, "r");
 	if (!f)
 		return -1;
 
@@ -61,8 +66,7 @@ read_string_file(const char *path, char *buf, size_t size)
 		return -1;
 	}
 
-	/* Remove trailing newline */
-	size_t len = strlen(buf);
+	len = strlen(buf);
 	if (len > 0 && buf[len - 1] == '\n')
 		buf[len - 1] = '\0';
 
@@ -73,34 +77,38 @@ read_string_file(const char *path, char *buf, size_t size)
 static void
 detect_rapl_domains(void)
 {
-	/* Look for intel-rapl or amd-rapl domains */
-	DIR *dir = opendir("/sys/class/powercap");
+	DIR                *dir;
+	struct dirent      *entry;
+	int                 colons;
+	char               *p;
+	char                energy_path[512];
+	FILE               *f;
+	struct rapl_domain *dom;
+	char                name_path[512];
+	char                max_path[512];
+
+	dir = opendir("/sys/class/powercap");
 	if (!dir) {
 		fprintf(stderr, "RAPL not available (no /sys/class/powercap)\n");
 		return;
 	}
 
-	struct dirent *entry;
 	while ((entry = readdir(dir)) != NULL && domain_count < MAX_RAPL_DOMAINS) {
-		/* Look for intel-rapl:X or amd_rapl:X (top-level package domains) */
 		if (strncmp(entry->d_name, "intel-rapl:", 11) != 0
 		    && strncmp(entry->d_name, "amd_rapl:", 9) != 0)
 			continue;
 
-		/* Skip sub-domains (intel-rapl:0:1, etc.) - we want package power */
-		int colons = 0;
-		for (char *p = entry->d_name; *p; p++)
+		colons = 0;
+		for (p = entry->d_name; *p; p++)
 			if (*p == ':')
 				colons++;
 		if (colons > 1)
 			continue;
 
-		char energy_path[512];
 		snprintf(energy_path, sizeof(energy_path),
 		         "/sys/class/powercap/%s/energy_uj", entry->d_name);
 
-		/* Check if readable without sudo */
-		FILE *f = fopen(energy_path, "r");
+		f = fopen(energy_path, "r");
 		if (!f) {
 			fprintf(stderr,
 			        "Warning: %s not readable (try: sudo chmod o+r %s)\n",
@@ -109,27 +117,22 @@ detect_rapl_domains(void)
 		}
 		fclose(f);
 
-		struct rapl_domain *dom = &domains[domain_count];
+		dom = &domains[domain_count];
 		snprintf(dom->energy_path, sizeof(dom->energy_path), "%s",
 		         energy_path);
 
-		/* Read domain name */
-		char name_path[512];
 		snprintf(name_path, sizeof(name_path),
 		         "/sys/class/powercap/%s/name", entry->d_name);
 		if (read_string_file(name_path, dom->name, sizeof(dom->name)) != 0)
 			snprintf(dom->name, sizeof(dom->name), "%s",
 			         entry->d_name);
 
-		/* Read max energy for wraparound handling */
-		char max_path[512];
 		snprintf(max_path, sizeof(max_path),
 		         "/sys/class/powercap/%s/max_energy_range_uj",
 		         entry->d_name);
 		if (read_uint64_file(max_path, &dom->max_energy) != 0)
 			dom->max_energy = UINT64_MAX;
 
-		/* Initialize last reading */
 		read_uint64_file(dom->energy_path, &dom->last_energy);
 		clock_gettime(CLOCK_MONOTONIC, &dom->last_time);
 
@@ -145,39 +148,37 @@ read_power(struct rapl_domain *dom)
 {
 	uint64_t        energy;
 	struct timespec now;
+	double          dt;
+	uint64_t        de;
 
 	if (read_uint64_file(dom->energy_path, &energy) != 0)
 		return -1.0;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
-	/* Calculate time delta in seconds */
-	double dt = (now.tv_sec - dom->last_time.tv_sec)
-	            + (now.tv_nsec - dom->last_time.tv_nsec) / 1e9;
+	dt = (now.tv_sec - dom->last_time.tv_sec)
+	     + (now.tv_nsec - dom->last_time.tv_nsec) / 1e9;
 
 	if (dt < 0.001)
-		return -1.0; /* Too short interval */
+		return -1.0;
 
-	/* Calculate energy delta, handling wraparound */
-	uint64_t de;
 	if (energy >= dom->last_energy) {
 		de = energy - dom->last_energy;
 	} else {
-		/* Wraparound occurred */
 		de = (dom->max_energy - dom->last_energy) + energy;
 	}
 
-	/* Update last values */
 	dom->last_energy = energy;
 	dom->last_time   = now;
 
-	/* Convert uJ to Watts: W = uJ / (us) = uJ / (s * 1e6) */
 	return de / (dt * 1e6);
 }
 
 static void
 write_output(double total_power)
 {
-	FILE *f = fopen(OUTPUT_TMP_PATH, "w");
+	FILE *f;
+
+	f = fopen(OUTPUT_TMP_PATH, "w");
 	if (!f) {
 		fprintf(stderr, "Failed to open output file\n");
 		return;
@@ -194,6 +195,10 @@ write_output(double total_power)
 int
 main(void)
 {
+	double total_power;
+	double power;
+	int    i;
+
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
 
@@ -206,14 +211,13 @@ main(void)
 		return 1;
 	}
 
-	/* Wait a bit to get initial delta */
 	sleep(1);
 
 	while (running) {
-		double total_power = 0.0;
+		total_power = 0.0;
 
-		for (int i = 0; i < domain_count; i++) {
-			double power = read_power(&domains[i]);
+		for (i = 0; i < domain_count; i++) {
+			power = read_power(&domains[i]);
 			if (power >= 0)
 				total_power += power;
 		}

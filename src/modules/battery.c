@@ -17,38 +17,44 @@ typedef struct {
 static int
 detect_battery(char *path_buf, size_t path_len)
 {
-	DIR *dir = opendir("/sys/class/power_supply");
+	DIR           *dir;
+	struct dirent *ent;
+	char           type_path[512];
+	int            n;
+	FILE          *f;
+	char           type[32];
+	char          *nl;
+	int            r;
+
+	dir = opendir("/sys/class/power_supply");
 	if (!dir)
 		return -1;
 
-	struct dirent *ent;
 	while ((ent = readdir(dir)) != NULL) {
 		if (ent->d_name[0] == '.')
 			continue;
 
-		char type_path[512];
-		int  n = snprintf(type_path, sizeof(type_path),
-		                  "/sys/class/power_supply/%s/type", ent->d_name);
+		n = snprintf(type_path, sizeof(type_path),
+		             "/sys/class/power_supply/%s/type", ent->d_name);
 		if (n < 0 || (size_t)n >= sizeof(type_path))
 			continue;
 
-		FILE *f = fopen(type_path, "r");
+		f = fopen(type_path, "r");
 		if (!f)
 			continue;
 
-		char type[32] = { 0 };
+		type[0] = '\0';
 		if (fgets(type, sizeof(type), f)) {
-			/* Strip trailing newline */
-			char *nl = strchr(type, '\n');
+			nl = strchr(type, '\n');
 			if (nl)
 				*nl = '\0';
 		}
 		fclose(f);
 
 		if (strcmp(type, "Battery") == 0) {
-			int r = snprintf(path_buf, path_len,
-			                 "/sys/class/power_supply/%s/uevent",
-			                 ent->d_name);
+			r = snprintf(path_buf, path_len,
+			             "/sys/class/power_supply/%s/uevent",
+			             ent->d_name);
 			if (r < 0 || (size_t)r >= path_len) {
 				closedir(dir);
 				return -1;
@@ -71,15 +77,13 @@ battery_init(barny_module_t *self, barny_state_t *state)
 	data->status[0]      = '\0';
 
 	data->font_desc      = pango_font_description_from_string(
-                state->config.font ? state->config.font : "Sans 10");
+	        state->config.font ? state->config.font : "Sans 10");
 
-	/* Determine uevent path */
 	if (state->config.battery_path) {
 		snprintf(data->device_path, sizeof(data->device_path), "%s",
 		         state->config.battery_path);
 	} else if (detect_battery(data->device_path, sizeof(data->device_path))
 	           < 0) {
-		/* Fallback to BAT0 */
 		snprintf(data->device_path, sizeof(data->device_path),
 		         "/sys/class/power_supply/BAT0/uevent");
 	}
@@ -106,21 +110,32 @@ battery_destroy(barny_module_t *self)
 static void
 battery_update(barny_module_t *self)
 {
-	battery_data_t *data = self->data;
-	barny_config_t *cfg  = &data->state->config;
+	battery_data_t *data;
+	barny_config_t *cfg;
+	FILE           *f;
+	char            new_status[16];
+	int             new_capacity;
+	char            line[256];
+	char           *val;
+	char           *nl;
+	const char     *sp;
+	char            pct_str[16];
+	const char     *prefix;
 
-	FILE           *f    = fopen(data->device_path, "r");
+	data = self->data;
+	cfg  = &data->state->config;
+
+	f    = fopen(data->device_path, "r");
 	if (!f)
 		return;
 
-	char new_status[16] = { 0 };
-	int  new_capacity   = -1;
-	char line[256];
+	new_status[0] = '\0';
+	new_capacity  = -1;
 
 	while (fgets(line, sizeof(line), f)) {
 		if (strncmp(line, "POWER_SUPPLY_STATUS=", 20) == 0) {
-			char *val = line + 20;
-			char *nl  = strchr(val, '\n');
+			val = line + 20;
+			nl  = strchr(val, '\n');
 			if (nl)
 				*nl = '\0';
 			strncpy(new_status, val, sizeof(new_status) - 1);
@@ -134,7 +149,6 @@ battery_update(barny_module_t *self)
 	if (new_capacity < 0)
 		return;
 
-	/* Check if values changed */
 	if (new_capacity == data->capacity
 	    && strcmp(new_status, data->status) == 0)
 		return;
@@ -142,14 +156,10 @@ battery_update(barny_module_t *self)
 	data->capacity = new_capacity;
 	snprintf(data->status, sizeof(data->status), "%s", new_status);
 
-	/* Format display string */
-	const char *sp = cfg->battery_unit_space ? " " : "";
-	char        pct_str[16];
+	sp = cfg->battery_unit_space ? " " : "";
 	snprintf(pct_str, sizeof(pct_str), "%d%s%%", data->capacity, sp);
 
 	if (cfg->battery_show_status && data->status[0]) {
-		/* Abbreviate status */
-		const char *prefix;
 		if (strcmp(data->status, "Charging") == 0)
 			prefix = "CHG";
 		else if (strcmp(data->status, "Discharging") == 0)
@@ -174,32 +184,15 @@ battery_update(barny_module_t *self)
 static void
 battery_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
-	battery_data_t *data = self->data;
+	battery_data_t *data;
+	int             tw;
+
+	data = self->data;
 	(void)w;
 
-	PangoLayout *layout = pango_cairo_create_layout(cr);
-	pango_layout_set_font_description(layout, data->font_desc);
-	pango_layout_set_text(layout, data->display_str, -1);
-
-	int tw, th;
-	pango_layout_get_pixel_size(layout, &tw, &th);
-
-	/* Shadow */
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_move_to(cr, x + 1, y + (h - th) / 2 + 1);
-	pango_cairo_show_layout(cr, layout);
-
-	barny_config_t *cfg = &data->state->config;
-	if (cfg->text_color_set)
-		cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
-		                      cfg->text_color_b, 0.9);
-	else
-		cairo_set_source_rgba(cr, 0.8, 1, 0.8, 0.9);
-	cairo_move_to(cr, x, y + (h - th) / 2);
-	pango_cairo_show_layout(cr, layout);
-
-	g_object_unref(layout);
-
+	tw          = barny_module_render_text(cr, data->font_desc, data->display_str,
+	                                       x, y, h, &data->state->config,
+	                                       0.8, 1, 0.8, 0.9);
 	self->width = tw + 8;
 }
 
@@ -215,16 +208,16 @@ barny_module_battery_create(void)
 		return NULL;
 	}
 
-	mod->name     = "battery";
-	mod->position = BARNY_POS_RIGHT;
-	mod->init     = battery_init;
-	mod->destroy  = battery_destroy;
-	mod->update   = battery_update;
+	mod->name               = "battery";
+	mod->position           = BARNY_POS_RIGHT;
+	mod->init               = battery_init;
+	mod->destroy            = battery_destroy;
+	mod->update             = battery_update;
 	mod->update_interval_ms = 5000;
-	mod->render   = battery_render;
-	mod->data     = data;
-	mod->width    = 80;
-	mod->dirty    = true;
+	mod->render             = battery_render;
+	mod->data               = data;
+	mod->width              = 80;
+	mod->dirty              = true;
 
 	return mod;
 }

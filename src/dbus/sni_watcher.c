@@ -1,10 +1,3 @@
-/*
- * StatusNotifierWatcher implementation
- *
- * Implements org.kde.StatusNotifierWatcher interface which apps use
- * to register their status notifier items (system tray icons).
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +10,7 @@
 typedef struct {
 	barny_state_t *state;
 	sd_bus_slot   *slot;
-	char         **items; /* Array of registered item services */
+	char         **items;
 	int            item_count;
 	int            item_capacity;
 	bool           host_registered;
@@ -52,23 +45,24 @@ emit_item_unregistered(const char *service)
 static void
 add_item(const char *service)
 {
+	int    i;
+	int    new_cap;
+	char **new_items;
+
 	if (!watcher) {
 		return;
 	}
 
-	/* Check for duplicates */
-	for (int i = 0; i < watcher->item_count; i++) {
+	for (i = 0; i < watcher->item_count; i++) {
 		if (strcmp(watcher->items[i], service) == 0) {
 			return;
 		}
 	}
 
-	/* Expand capacity if needed */
 	if (watcher->item_count >= watcher->item_capacity) {
-		int new_cap = watcher->item_capacity ? watcher->item_capacity * 2 :
-		                                       8;
-		char **new_items = (char **)realloc((void *)watcher->items,
-		                                    new_cap * sizeof(char *));
+		new_cap   = watcher->item_capacity ? watcher->item_capacity * 2 : 8;
+		new_items = (char **)realloc((void *)watcher->items,
+		                             new_cap * sizeof(char *));
 		if (!new_items) {
 			return;
 		}
@@ -85,15 +79,18 @@ add_item(const char *service)
 static void
 remove_item(const char *service)
 {
+	int i;
+	int j;
+
 	if (!watcher) {
 		return;
 	}
 
-	for (int i = 0; i < watcher->item_count; i++) {
+	for (i = 0; i < watcher->item_count; i++) {
 		if (strcmp(watcher->items[i], service) == 0) {
 			free(watcher->items[i]);
-			/* Shift remaining items */
-			for (int j = i; j < watcher->item_count - 1; j++) {
+
+			for (j = i; j < watcher->item_count - 1; j++) {
 				watcher->items[j] = watcher->items[j + 1];
 			}
 			watcher->item_count--;
@@ -104,30 +101,27 @@ remove_item(const char *service)
 	}
 }
 
-/*
- * D-Bus method: RegisterStatusNotifierItem
- * Called by apps to register their tray icon
- */
 static int
 method_register_item(sd_bus_message *m, void *userdata, sd_bus_error *error)
 {
+	const char *service;
+	int         r;
+	const char *sender;
+	char       *full_service;
+	size_t      len;
+
 	(void)userdata;
 	(void)error;
 
-	const char *service;
-	int         r = sd_bus_message_read(m, "s", &service);
+	r = sd_bus_message_read(m, "s", &service);
 	if (r < 0) {
 		return r;
 	}
 
-	/* The service might be just an object path if sent from the same connection,
-	 * or a full bus name. Handle both cases. */
-	const char *sender = sd_bus_message_get_sender(m);
-	char       *full_service;
+	sender = sd_bus_message_get_sender(m);
 
 	if (service[0] == '/') {
-		/* It's an object path, use sender as service name */
-		size_t len   = strlen(sender) + strlen(service) + 1;
+		len          = strlen(sender) + strlen(service) + 1;
 		full_service = malloc(len);
 		if (!full_service) {
 			return -ENOMEM;
@@ -146,18 +140,16 @@ method_register_item(sd_bus_message *m, void *userdata, sd_bus_error *error)
 	return sd_bus_reply_method_return(m, "");
 }
 
-/*
- * D-Bus method: RegisterStatusNotifierHost
- * Called to register a status notifier host (display)
- */
 static int
 method_register_host(sd_bus_message *m, void *userdata, sd_bus_error *error)
 {
+	const char *service;
+	int         r;
+
 	(void)userdata;
 	(void)error;
 
-	const char *service;
-	int         r = sd_bus_message_read(m, "s", &service);
+	r = sd_bus_message_read(m, "s", &service);
 	if (r < 0) {
 		return r;
 	}
@@ -166,7 +158,6 @@ method_register_host(sd_bus_message *m, void *userdata, sd_bus_error *error)
 		watcher->host_registered = true;
 		printf("barny: SNI host registered: %s\n", service);
 
-		/* Emit host registered signal */
 		sd_bus_emit_signal(watcher->state->dbus,
 		                   SNI_WATCHER_PATH,
 		                   SNI_WATCHER_INTERFACE,
@@ -177,14 +168,14 @@ method_register_host(sd_bus_message *m, void *userdata, sd_bus_error *error)
 	return sd_bus_reply_method_return(m, "");
 }
 
-/*
- * D-Bus property: RegisteredStatusNotifierItems
- */
 static int
 property_get_items(sd_bus *bus, const char *path, const char *interface,
                    const char *property, sd_bus_message *reply, void *userdata,
                    sd_bus_error *error)
 {
+	int r;
+	int i;
+
 	(void)bus;
 	(void)path;
 	(void)interface;
@@ -192,13 +183,13 @@ property_get_items(sd_bus *bus, const char *path, const char *interface,
 	(void)userdata;
 	(void)error;
 
-	int r = sd_bus_message_open_container(reply, 'a', "s");
+	r = sd_bus_message_open_container(reply, 'a', "s");
 	if (r < 0) {
 		return r;
 	}
 
 	if (watcher) {
-		for (int i = 0; i < watcher->item_count; i++) {
+		for (i = 0; i < watcher->item_count; i++) {
 			r = sd_bus_message_append(reply, "s", watcher->items[i]);
 			if (r < 0) {
 				return r;
@@ -209,9 +200,6 @@ property_get_items(sd_bus *bus, const char *path, const char *interface,
 	return sd_bus_message_close_container(reply);
 }
 
-/*
- * D-Bus property: IsStatusNotifierHostRegistered
- */
 static int
 property_get_host_registered(sd_bus *bus, const char *path, const char *interface,
                              const char *property, sd_bus_message *reply,
@@ -228,9 +216,6 @@ property_get_host_registered(sd_bus *bus, const char *path, const char *interfac
 	                             watcher ? watcher->host_registered : false);
 }
 
-/*
- * D-Bus property: ProtocolVersion
- */
 static int
 property_get_protocol_version(sd_bus *bus, const char *path, const char *interface,
                               const char *property, sd_bus_message *reply,
@@ -265,22 +250,20 @@ static const sd_bus_vtable watcher_vtable[]
 	    SD_BUS_SIGNAL("StatusNotifierHostRegistered", "", 0),
 	    SD_BUS_VTABLE_END };
 
-/*
- * Handle name owner changes to detect when apps disconnect
- */
 static int
 name_owner_changed(sd_bus_message *m, void *userdata, sd_bus_error *error)
 {
+	const char *name, *old_owner, *new_owner;
+	int         r;
+
 	(void)userdata;
 	(void)error;
 
-	const char *name, *old_owner, *new_owner;
-	int r = sd_bus_message_read(m, "sss", &name, &old_owner, &new_owner);
+	r = sd_bus_message_read(m, "sss", &name, &old_owner, &new_owner);
 	if (r < 0) {
 		return r;
 	}
 
-	/* If the name has no new owner, the app disconnected */
 	if (new_owner[0] == '\0') {
 		remove_item(name);
 	}
@@ -303,7 +286,6 @@ barny_sni_watcher_init(barny_state_t *state)
 	}
 	watcher->state = state;
 
-	/* Register the vtable */
 	r              = sd_bus_add_object_vtable(state->dbus,
 	                                          &watcher->slot,
 	                                          SNI_WATCHER_PATH,
@@ -318,18 +300,16 @@ barny_sni_watcher_init(barny_state_t *state)
 		return -1;
 	}
 
-	/* Request the well-known name */
 	r = sd_bus_request_name(state->dbus, SNI_WATCHER_INTERFACE, 0);
 	if (r < 0) {
 		fprintf(stderr,
 		        "barny: failed to acquire %s: %s (another watcher may be running)\n",
 		        SNI_WATCHER_INTERFACE, strerror(-r));
-		/* Don't fail completely - we can still work as a host */
+
 	} else {
 		printf("barny: registered as %s\n", SNI_WATCHER_INTERFACE);
 	}
 
-	/* Watch for name owner changes to detect app disconnections */
 	r = sd_bus_match_signal(state->dbus,
 	                        NULL,
 	                        "org.freedesktop.DBus",
@@ -365,6 +345,8 @@ barny_sni_watcher_set_host_registered(bool registered)
 void
 barny_sni_watcher_cleanup(barny_state_t *state)
 {
+	int i;
+
 	if (!watcher) {
 		return;
 	}
@@ -377,7 +359,7 @@ barny_sni_watcher_cleanup(barny_state_t *state)
 		sd_bus_slot_unref(watcher->slot);
 	}
 
-	for (int i = 0; i < watcher->item_count; i++) {
+	for (i = 0; i < watcher->item_count; i++) {
 		free(watcher->items[i]);
 	}
 	free((void *)watcher->items);
