@@ -163,6 +163,11 @@ run_event_loop(barny_state_t *s)
 				if (out->configured)
 					barny_render_frame(out);
 			}
+			s->dyn_dirty = false;
+		} else if (s->dyn_dirty) {
+			if (s->dyn_output && s->dyn_output->configured)
+				barny_render_frame(s->dyn_output);
+			s->dyn_dirty = false;
 		}
 	}
 }

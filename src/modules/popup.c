@@ -7,10 +7,23 @@
 #include <unistd.h>
 
 #include "popup.h"
+#include "util.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 #define POPUP_WIDTH_DEFAULT 180
 #define POPUP_RADIUS        12
+
+#define POPUP_ANIM_OPEN_MS  170.0
+#define POPUP_ANIM_CLOSE_MS 130.0
+#define POPUP_ANIM_SCALE    0.90
+#define POPUP_ANIM_SLIDE    9.0
+
+enum popup_anim {
+	POPUP_ANIM_NONE = 0,
+	POPUP_ANIM_OPENING,
+	POPUP_ANIM_OPEN,
+	POPUP_ANIM_CLOSING,
+};
 
 struct barny_popup {
 	barny_state_t                *state;
@@ -30,6 +43,11 @@ struct barny_popup {
 	int                           screen_y;
 	int                           current_w;
 	int                           current_h;
+
+	enum popup_anim               anim;
+	uint64_t                      anim_start_ms;
+	struct wl_callback           *frame_cb;
+	cairo_surface_t              *snapshot;
 };
 
 static int
@@ -84,28 +102,21 @@ popup_create_shm(int size)
 }
 
 static void
-popup_render_frame(barny_popup_t *p)
+popup_teardown_buffer(barny_popup_t *p);
+
+static void
+popup_compose(barny_popup_t *p)
 {
-	barny_state_t   *state;
-	cairo_t         *cr;
-	int              pw;
-	int              ph;
+	barny_state_t   *state = p->state;
+	cairo_t         *cr    = p->cr;
+	int              pw    = p->current_w;
+	int              ph    = p->current_h;
 	barny_output_t  *out;
 	cairo_surface_t *bg;
 	int              out_w;
 	int              out_h;
-
-	if (!p->cr)
-		return;
-
-	state = p->state;
-	cr    = p->cr;
-	pw    = p->current_w;
-	ph    = p->current_h;
-
-	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-	cairo_paint(cr);
-	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	int              content_w;
+	int              content_h;
 
 	out   = state->pointer_output;
 	bg    = NULL;
@@ -125,31 +136,185 @@ popup_render_frame(barny_popup_t *p)
 	cairo_restore(cr);
 
 	barny_draw_glass_frame(cr, pw, ph, POPUP_RADIUS);
+
+	if (p->cb.render) {
+		content_w = pw - 2 * BARNY_POPUP_PAD_X;
+		content_h = ph - 2 * BARNY_POPUP_PAD_Y;
+		cairo_save(cr);
+		cairo_translate(cr, BARNY_POPUP_PAD_X, BARNY_POPUP_PAD_Y);
+		p->cb.render(p->cb.userdata, cr, content_w, content_h);
+		cairo_restore(cr);
+	}
+}
+
+static void
+popup_present(barny_popup_t *p, double alpha, double scale)
+{
+	cairo_t *cr = p->cr;
+	int      pw = p->current_w;
+	int      ph = p->current_h;
+	double   ax;
+	double   ay;
+	double   slide;
+
+	if (!cr || !p->buffer)
+		return;
+
+	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+
+	if (alpha > 0.003) {
+		ax    = pw / 2.0;
+		ay    = p->state->config.position_top ? 0.0 : (double)ph;
+		slide = (1.0 - alpha) * POPUP_ANIM_SLIDE
+		        * (p->state->config.position_top ? -1.0 : 1.0);
+
+		cairo_save(cr);
+		if (scale < 0.999 || alpha < 0.999 || p->snapshot) {
+			cairo_push_group(cr);
+			cairo_translate(cr, ax, ay + slide);
+			cairo_scale(cr, scale, scale);
+			cairo_translate(cr, -ax, -ay);
+			if (p->snapshot) {
+				cairo_set_source_surface(cr, p->snapshot, 0, 0);
+				cairo_paint(cr);
+			} else {
+				popup_compose(p);
+			}
+			cairo_pop_group_to_source(cr);
+			cairo_paint_with_alpha(cr, alpha);
+		} else {
+			popup_compose(p);
+		}
+		cairo_restore(cr);
+	}
+
+	cairo_surface_flush(p->cairo_surface);
+	wl_surface_attach(p->surface, p->buffer, 0, 0);
+	wl_surface_damage_buffer(p->surface, 0, 0, pw, ph);
+}
+
+static void
+popup_finalize_destroy(barny_popup_t *p)
+{
+	if (p->frame_cb) {
+		wl_callback_destroy(p->frame_cb);
+		p->frame_cb = NULL;
+	}
+	if (p->snapshot) {
+		cairo_surface_destroy(p->snapshot);
+		p->snapshot = NULL;
+	}
+
+	popup_teardown_buffer(p);
+
+	if (p->layer_surface) {
+		zwlr_layer_surface_v1_destroy(p->layer_surface);
+		p->layer_surface = NULL;
+	}
+	if (p->surface) {
+		wl_surface_destroy(p->surface);
+		p->surface = NULL;
+	}
+	p->configured = false;
+	free(p);
+}
+
+static double
+ease_out_cubic(double t)
+{
+	double u = 1.0 - t;
+	return 1.0 - u * u * u;
+}
+
+static double
+ease_in_cubic(double t)
+{
+	return t * t * t;
+}
+
+static void popup_schedule_frame(barny_popup_t *p);
+
+static void
+popup_animate(barny_popup_t *p)
+{
+	uint64_t now = barny_now_ms();
+	double   dur;
+	double   t;
+	double   e;
+	double   alpha;
+	double   scale;
+
+	if (p->anim == POPUP_ANIM_CLOSING) {
+		dur   = POPUP_ANIM_CLOSE_MS;
+		t     = dur > 0 ? (double)(now - p->anim_start_ms) / dur : 1.0;
+		if (t < 0)
+			t = 0;
+		if (t > 1.0)
+			t = 1.0;
+		e     = ease_in_cubic(t);
+		alpha = 1.0 - e;
+		scale = POPUP_ANIM_SCALE + (1.0 - POPUP_ANIM_SCALE) * (1.0 - e);
+	} else {
+		dur   = POPUP_ANIM_OPEN_MS;
+		t     = dur > 0 ? (double)(now - p->anim_start_ms) / dur : 1.0;
+		if (t < 0)
+			t = 0;
+		if (t > 1.0)
+			t = 1.0;
+		e     = ease_out_cubic(t);
+		alpha = e;
+		scale = POPUP_ANIM_SCALE + (1.0 - POPUP_ANIM_SCALE) * e;
+	}
+
+	popup_present(p, alpha, scale);
+
+	if (t >= 1.0) {
+		if (p->anim == POPUP_ANIM_CLOSING) {
+			popup_finalize_destroy(p);
+			return;
+		}
+		p->anim = POPUP_ANIM_OPEN;
+		wl_surface_commit(p->surface);
+		return;
+	}
+
+	popup_schedule_frame(p);
+	wl_surface_commit(p->surface);
+}
+
+static void
+popup_frame_done(void *data, struct wl_callback *cb, uint32_t time)
+{
+	barny_popup_t *p = data;
+	(void)time;
+
+	wl_callback_destroy(cb);
+	p->frame_cb = NULL;
+	popup_animate(p);
+}
+
+static const struct wl_callback_listener popup_frame_listener = {
+	.done = popup_frame_done,
+};
+
+static void
+popup_schedule_frame(barny_popup_t *p)
+{
+	if (p->frame_cb)
+		return;
+	p->frame_cb = wl_surface_frame(p->surface);
+	wl_callback_add_listener(p->frame_cb, &popup_frame_listener, p);
 }
 
 static void
 popup_paint(barny_popup_t *p)
 {
-	int content_w;
-	int content_h;
-
 	if (!p->cr || !p->buffer)
 		return;
 
-	popup_render_frame(p);
-
-	if (p->cb.render) {
-		content_w = p->current_w - 2 * BARNY_POPUP_PAD_X;
-		content_h = p->current_h - 2 * BARNY_POPUP_PAD_Y;
-		cairo_save(p->cr);
-		cairo_translate(p->cr, BARNY_POPUP_PAD_X, BARNY_POPUP_PAD_Y);
-		p->cb.render(p->cb.userdata, p->cr, content_w, content_h);
-		cairo_restore(p->cr);
-	}
-
-	cairo_surface_flush(p->cairo_surface);
-	wl_surface_attach(p->surface, p->buffer, 0, 0);
-	wl_surface_damage_buffer(p->surface, 0, 0, p->current_w, p->current_h);
+	popup_present(p, 1.0, 1.0);
 	wl_surface_commit(p->surface);
 }
 
@@ -219,7 +384,17 @@ popup_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 	p->current_h  = ph;
 	p->configured = true;
 
-	popup_paint(p);
+	if (!p->state->config.popup_animations) {
+		popup_paint(p);
+	} else if (p->anim == POPUP_ANIM_NONE) {
+		p->anim          = POPUP_ANIM_OPENING;
+		p->anim_start_ms = barny_now_ms();
+		popup_animate(p);
+	} else if (p->anim == POPUP_ANIM_OPEN) {
+		popup_paint(p);
+	} else {
+		popup_animate(p);
+	}
 }
 
 static void
@@ -333,27 +508,48 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 void
 barny_popup_destroy(barny_popup_t *p)
 {
+	cairo_t *sc;
+
 	if (!p)
 		return;
 
-	popup_teardown_buffer(p);
+	if (!p->state->config.popup_animations || !p->configured || !p->buffer
+	    || p->anim == POPUP_ANIM_CLOSING) {
+		popup_finalize_destroy(p);
+		return;
+	}
 
-	if (p->layer_surface) {
-		zwlr_layer_surface_v1_destroy(p->layer_surface);
-		p->layer_surface = NULL;
+	if (!p->snapshot && p->cairo_surface) {
+		p->snapshot = cairo_image_surface_create(
+		        CAIRO_FORMAT_ARGB32, p->current_w, p->current_h);
+		if (cairo_surface_status(p->snapshot) == CAIRO_STATUS_SUCCESS) {
+			sc = cairo_create(p->snapshot);
+			cairo_set_source_surface(sc, p->cairo_surface, 0, 0);
+			cairo_paint(sc);
+			cairo_destroy(sc);
+		} else {
+			cairo_surface_destroy(p->snapshot);
+			p->snapshot = NULL;
+		}
 	}
-	if (p->surface) {
-		wl_surface_destroy(p->surface);
-		p->surface = NULL;
+
+	if (!p->snapshot) {
+		popup_finalize_destroy(p);
+		return;
 	}
-	p->configured = false;
-	free(p);
+
+	p->anim          = POPUP_ANIM_CLOSING;
+	p->anim_start_ms = barny_now_ms();
+	if (!p->frame_cb)
+		popup_animate(p);
 }
 
 void
 barny_popup_redraw(barny_popup_t *p)
 {
 	if (!p || !p->configured)
+		return;
+	if (p->anim == POPUP_ANIM_OPENING || p->anim == POPUP_ANIM_CLOSING)
 		return;
 	popup_paint(p);
 }

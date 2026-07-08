@@ -181,6 +181,10 @@ barny_output_destroy_surface(barny_output_t *output)
 		cairo_surface_destroy(output->lens_map);
 		output->lens_map = NULL;
 	}
+	if (output->bulge_map) {
+		cairo_surface_destroy(output->bulge_map);
+		output->bulge_map = NULL;
+	}
 	if (output->cr) {
 		cairo_destroy(output->cr);
 		output->cr = NULL;
@@ -241,6 +245,10 @@ barny_output_create_buffer(barny_output_t *output)
 	if (output->lens_map) {
 		cairo_surface_destroy(output->lens_map);
 		output->lens_map = NULL;
+	}
+	if (output->bulge_map) {
+		cairo_surface_destroy(output->bulge_map);
+		output->bulge_map = NULL;
 	}
 
 	fd = create_shm_file(size);

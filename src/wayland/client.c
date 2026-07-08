@@ -115,6 +115,11 @@ pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
 			break;
 		}
 	}
+
+	if (state->pointer_output) {
+		state->dyn_output = state->pointer_output;
+		state->dyn_dirty  = true;
+	}
 }
 
 static void
@@ -134,6 +139,8 @@ pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
 
 	state->pointer_output  = NULL;
 	state->pointer_surface = NULL;
+
+	state->dyn_dirty       = true;
 }
 
 static void
@@ -156,6 +163,11 @@ pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time,
 		barny_menu_pointer_motion(state, state->pointer_x,
 		                          state->pointer_y);
 		return;
+	}
+
+	if (state->pointer_output) {
+		state->dyn_output = state->pointer_output;
+		state->dyn_dirty  = true;
 	}
 
 	mx               = (int)state->pointer_x;
@@ -483,6 +495,9 @@ registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
 		if (out->registry_name == name) {
 			if (state->pointer_output == out) {
 				state->pointer_output = NULL;
+			}
+			if (state->dyn_output == out) {
+				state->dyn_output = NULL;
 			}
 
 			*prev = out->next;

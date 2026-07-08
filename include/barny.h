@@ -113,6 +113,11 @@ struct barny_config {
 	double                  tray_icon_bg_opacity;
 	int                     tray_menu_gap;
 
+	bool                    dynamic_glass;
+	double                  glass_gleam;
+	double                  glass_bulge;
+	bool                    popup_animations;
+
 	barny_refraction_mode_t refraction_mode;
 	double                  displacement_scale;
 	double                  chromatic_aberration;
@@ -211,6 +216,7 @@ struct barny_output {
 
 	cairo_surface_t              *bg_cache;
 	cairo_surface_t              *lens_map;
+	cairo_surface_t              *bulge_map;
 
 	barny_state_t                *state;
 	struct barny_output          *next;
@@ -230,6 +236,9 @@ struct barny_state {
 	barny_output_t             *pointer_output;
 	double                      pointer_x, pointer_y;
 	struct wl_surface          *pointer_surface;
+
+	barny_output_t             *dyn_output;
+	bool                        dyn_dirty;
 
 	barny_menu_t               *menu;
 

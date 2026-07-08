@@ -129,23 +129,5 @@ barny_draw_glass_frame(cairo_t *cr, double w, double h, double r)
 	cairo_paint(cr);
 	cairo_pattern_destroy(p);
 
-	p = cairo_pattern_create_linear(0, 0, 0, 4);
-	cairo_pattern_add_color_stop_rgba(p, 0.0, 1, 1, 1, 0.9);
-	cairo_pattern_add_color_stop_rgba(p, 1.0, 1, 1, 1, 0.0);
-	cairo_set_source(cr, p);
-	cairo_rectangle(cr, 0, 0, w, 4);
-	cairo_fill(cr);
-	cairo_pattern_destroy(p);
-
 	cairo_restore(cr);
-
-	p = cairo_pattern_create_linear(0, 0, 0, h);
-	cairo_pattern_add_color_stop_rgba(p, 0.0, 1, 1, 1, 0.85);
-	cairo_pattern_add_color_stop_rgba(p, 0.5, 1, 1, 1, 0.18);
-	cairo_pattern_add_color_stop_rgba(p, 1.0, 1, 1, 1, 0.12);
-	barny_rounded_rect_path(cr, 1, 1, w - 2, h - 2, r - 0.5);
-	cairo_set_source(cr, p);
-	cairo_set_line_width(cr, 2);
-	cairo_stroke(cr);
-	cairo_pattern_destroy(p);
 }
