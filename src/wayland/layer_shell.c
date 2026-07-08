@@ -9,14 +9,20 @@
 #include "barny.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
+#define BAR_SHADOW_INNER 28
+#define BAR_SHADOW_LAT   10
+
 static void
 layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface,
                         uint32_t serial, uint32_t width, uint32_t height)
 {
-	barny_output_t *output = data;
+	barny_output_t   *output = data;
+	struct wl_region *region;
 
-	output->width          = width;
-	output->height         = height;
+	output->surf_width  = width;
+	output->surf_height = height;
+	output->width       = width - output->pad_left - output->pad_right;
+	output->height      = height - output->pad_top - output->pad_bottom;
 
 	zwlr_layer_surface_v1_ack_configure(surface, serial);
 
@@ -24,6 +30,12 @@ layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface,
 		fprintf(stderr, "barny: failed to create buffer\n");
 		return;
 	}
+
+	region = wl_compositor_create_region(output->state->compositor);
+	wl_region_add(region, output->pad_left, output->pad_top, output->width,
+	              output->height);
+	wl_surface_set_input_region(output->surface, region);
+	wl_region_destroy(region);
 
 	output->configured = true;
 	barny_render_frame(output);
@@ -91,6 +103,10 @@ barny_output_create_surface(barny_output_t *output)
 	barny_state_t *state = output->state;
 	uint32_t       layer;
 	uint32_t       anchor;
+	int            pad_l;
+	int            pad_r;
+	int            pad_t;
+	int            pad_b;
 
 	output->surface = wl_compositor_create_surface(state->compositor);
 	if (!output->surface) {
@@ -122,17 +138,32 @@ barny_output_create_surface(barny_output_t *output)
 	}
 	zwlr_layer_surface_v1_set_anchor(output->layer_surface, anchor);
 
+	pad_l = state->config.margin_left < BAR_SHADOW_LAT
+	                ? state->config.margin_left
+	                : BAR_SHADOW_LAT;
+	pad_r = state->config.margin_right < BAR_SHADOW_LAT
+	                ? state->config.margin_right
+	                : BAR_SHADOW_LAT;
+	pad_t = state->config.position_top ? 0 : BAR_SHADOW_INNER;
+	pad_b = state->config.position_top ? BAR_SHADOW_INNER : 0;
+
+	output->pad_left   = pad_l;
+	output->pad_right  = pad_r;
+	output->pad_top    = pad_t;
+	output->pad_bottom = pad_b;
+
 	zwlr_layer_surface_v1_set_size(output->layer_surface, 0,
-	                               state->config.height);
+	                               state->config.height + pad_t + pad_b);
 
 	zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface,
 	                                         state->config.height);
 
-	zwlr_layer_surface_v1_set_margin(output->layer_surface,
-	                                 state->config.margin_top,
-	                                 state->config.margin_right,
-	                                 state->config.margin_bottom,
-	                                 state->config.margin_left);
+	zwlr_layer_surface_v1_set_margin(
+	        output->layer_surface,
+	        state->config.position_top ? state->config.margin_top - pad_t : 0,
+	        state->config.margin_right - pad_r,
+	        state->config.position_top ? 0 : state->config.margin_bottom - pad_b,
+	        state->config.margin_left - pad_l);
 
 	wl_surface_commit(output->surface);
 
@@ -145,6 +176,10 @@ barny_output_destroy_surface(barny_output_t *output)
 	if (output->bg_cache) {
 		cairo_surface_destroy(output->bg_cache);
 		output->bg_cache = NULL;
+	}
+	if (output->lens_map) {
+		cairo_surface_destroy(output->lens_map);
+		output->lens_map = NULL;
 	}
 	if (output->cr) {
 		cairo_destroy(output->cr);
@@ -179,8 +214,8 @@ int
 barny_output_create_buffer(barny_output_t *output)
 {
 	barny_state_t      *state  = output->state;
-	int                 width  = output->width * output->scale;
-	int                 height = output->height * output->scale;
+	int                 width  = output->surf_width * output->scale;
+	int                 height = output->surf_height * output->scale;
 	int                 stride = width * 4;
 	int                 size   = stride * height;
 	int                 fd;
@@ -202,6 +237,10 @@ barny_output_create_buffer(barny_output_t *output)
 	if (output->bg_cache) {
 		cairo_surface_destroy(output->bg_cache);
 		output->bg_cache = NULL;
+	}
+	if (output->lens_map) {
+		cairo_surface_destroy(output->lens_map);
+		output->lens_map = NULL;
 	}
 
 	fd = create_shm_file(size);

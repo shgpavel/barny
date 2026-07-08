@@ -302,7 +302,7 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 	zwlr_layer_surface_v1_set_size(p->layer_surface, pw, ph);
 	zwlr_layer_surface_v1_set_exclusive_zone(p->layer_surface, 0);
 
-	left_margin  = state->config.margin_left + owner->render_x;
+	left_margin  = (state->config.margin_left - out->pad_left) + owner->render_x;
 	center_off   = (pw - owner->width) / 2;
 	left_margin -= center_off;
 	if (left_margin < 0)

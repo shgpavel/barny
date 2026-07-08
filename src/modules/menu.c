@@ -159,7 +159,7 @@ menu_compute_rect(barny_menu_t *m)
 	int             y;
 	int             reserved;
 
-	x = cfg->margin_left + m->anchor_x;
+	x = (cfg->margin_left - m->out->pad_left) + m->anchor_x;
 	if (x + m->menu_w > m->surf_w)
 		x = m->surf_w - m->menu_w;
 	if (x < 0)

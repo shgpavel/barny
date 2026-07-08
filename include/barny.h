@@ -194,6 +194,12 @@ struct barny_output {
 
 	int32_t                       width;
 	int32_t                       height;
+	int32_t                       surf_width;
+	int32_t                       surf_height;
+	int32_t                       pad_left;
+	int32_t                       pad_right;
+	int32_t                       pad_top;
+	int32_t                       pad_bottom;
 	int32_t                       mode_height;
 	int32_t                       scale;
 	char                         *name;
@@ -204,6 +210,7 @@ struct barny_output {
 	bool                          redraw_queued;
 
 	cairo_surface_t              *bg_cache;
+	cairo_surface_t              *lens_map;
 
 	barny_state_t                *state;
 	struct barny_output          *next;
@@ -288,6 +295,12 @@ void
 barny_blur_surface(cairo_surface_t *surface, int radius);
 void
 barny_apply_brightness(cairo_surface_t *surface, double factor);
+void
+barny_apply_vibrancy(cairo_surface_t *surface, double saturation,
+                     double brightness);
+cairo_surface_t *
+barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
+                           double max_disp);
 cairo_surface_t *
 barny_load_wallpaper(const char *path);
 

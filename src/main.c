@@ -258,8 +258,8 @@ main(int argc, char *argv[])
 			cairo_destroy(cr);
 			barny_blur_surface(state.blurred_wallpaper,
 			                   (int)state.config.blur_radius);
-			barny_apply_brightness(state.blurred_wallpaper,
-			                       state.config.brightness);
+			barny_apply_vibrancy(state.blurred_wallpaper, 1.35,
+			                     state.config.brightness);
 
 			if (state.config.refraction_mode != BARNY_REFRACT_NONE) {
 				printf("barny: creating liquid glass displacement map...\n");

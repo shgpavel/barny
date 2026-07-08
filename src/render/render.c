@@ -175,8 +175,8 @@ pick_victim(barny_state_t *state,
 
 static void
 render_section(barny_state_t *state, cairo_t *cr, const int *idx, int n,
-               int start_x, int height, int spacing, bool include_gaps,
-               const bool *dropped)
+               int start_x, int base_y, int avail_h, int spacing,
+               bool include_gaps, const bool *dropped)
 {
 	int             x = start_x;
 	int             i;
@@ -200,7 +200,7 @@ render_section(barny_state_t *state, cairo_t *cr, const int *idx, int n,
 		if (dropped[j]) {
 			mod->render_x = -1;
 			if (mod->render) {
-				h = mod->height > 0 ? mod->height : height;
+				h = mod->height > 0 ? mod->height : avail_h;
 				cairo_save(cr);
 				cairo_new_path(cr);
 				cairo_rectangle(cr, 0, 0, 0, 0);
@@ -212,8 +212,8 @@ render_section(barny_state_t *state, cairo_t *cr, const int *idx, int n,
 		}
 
 		w             = mod->width > 0 ? mod->width : 0;
-		h             = mod->height > 0 ? mod->height : height;
-		y             = (height - h) / 2;
+		h             = mod->height > 0 ? mod->height : avail_h;
+		y             = base_y + (avail_h - h) / 2;
 
 		mod->render_x = x;
 		cairo_save(cr);
@@ -281,8 +281,8 @@ barny_render_frame(barny_output_t *output)
 	cairo_surface_flush(output->cairo_surface);
 	wl_surface_attach(output->surface, output->buffer, 0, 0);
 	wl_surface_damage_buffer(output->surface, 0, 0,
-	                         output->width * output->scale,
-	                         output->height * output->scale);
+	                         output->surf_width * output->scale,
+	                         output->surf_height * output->scale);
 	wl_surface_commit(output->surface);
 }
 
@@ -292,6 +292,8 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 	barny_state_t  *state  = output->state;
 	int             width  = output->width;
 	int             height = output->height;
+	int             cx0    = output->pad_left;
+	int             cy0    = output->pad_top;
 	int             left[BARNY_MAX_MODULES];
 	int             center[BARNY_MAX_MODULES];
 	int             right[BARNY_MAX_MODULES];
@@ -363,18 +365,18 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 	}
 
 layout_ready:
-	render_section(state, cr, left, lc, pad_l, height, spacing, include_gaps,
-	               dropped);
+	render_section(state, cr, left, lc, cx0 + pad_l, cy0, height, spacing,
+	               include_gaps, dropped);
 
 	center_start = (width / 2) - total_c / 2;
 	if (center_start < pad_l)
 		center_start = pad_l;
-	render_section(state, cr, center, cc, center_start, height, spacing,
-	               include_gaps, dropped);
+	render_section(state, cr, center, cc, cx0 + center_start, cy0, height,
+	               spacing, include_gaps, dropped);
 
 	right_start = (width - pad_r) - total_r;
 	if (right_start < pad_l)
 		right_start = pad_l;
-	render_section(state, cr, right, rc, right_start, height, spacing,
-	               include_gaps, dropped);
+	render_section(state, cr, right, rc, cx0 + right_start, cy0, height,
+	               spacing, include_gaps, dropped);
 }

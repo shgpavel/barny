@@ -1,4 +1,5 @@
 #include <cairo/cairo.h>
+#include <math.h>
 
 #include "barny.h"
 
@@ -6,15 +7,55 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+#define SQUIRCLE_N     4.0
+#define SQUIRCLE_STEPS 14
+
+static void
+squircle_corner(cairo_t *cr, double cx, double cy, double r, double a0,
+                double a1)
+{
+	int    i;
+	double t;
+	double ang;
+	double ca;
+	double sa;
+	double u;
+	double v;
+
+	for (i = 0; i <= SQUIRCLE_STEPS; i++) {
+		t   = (double)i / SQUIRCLE_STEPS;
+		ang = a0 + (a1 - a0) * t;
+		ca  = cos(ang);
+		sa  = sin(ang);
+		u   = copysign(pow(fabs(ca), 2.0 / SQUIRCLE_N), ca);
+		v   = copysign(pow(fabs(sa), 2.0 / SQUIRCLE_N), sa);
+		cairo_line_to(cr, cx + r * u, cy + r * v);
+	}
+}
+
 void
 barny_rounded_rect_path(cairo_t *cr, double x, double y, double w, double h,
                         double r)
 {
+	if (r < 0.5) {
+		cairo_rectangle(cr, x, y, w, h);
+		return;
+	}
+	if (r > w / 2)
+		r = w / 2;
+	if (r > h / 2)
+		r = h / 2;
+
 	cairo_new_sub_path(cr);
-	cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, 0);
-	cairo_arc(cr, x + w - r, y + h - r, r, 0, M_PI / 2);
-	cairo_arc(cr, x + r, y + h - r, r, M_PI / 2, M_PI);
-	cairo_arc(cr, x + r, y + r, r, M_PI, 3 * M_PI / 2);
+	cairo_move_to(cr, x + r, y);
+	cairo_line_to(cr, x + w - r, y);
+	squircle_corner(cr, x + w - r, y + r, r, -M_PI / 2, 0);
+	cairo_line_to(cr, x + w, y + h - r);
+	squircle_corner(cr, x + w - r, y + h - r, r, 0, M_PI / 2);
+	cairo_line_to(cr, x + r, y + h);
+	squircle_corner(cr, x + r, y + h - r, r, M_PI / 2, M_PI);
+	cairo_line_to(cr, x, y + r);
+	squircle_corner(cr, x + r, y + r, r, M_PI, 3 * M_PI / 2);
 	cairo_close_path(cr);
 }
 
@@ -58,56 +99,53 @@ barny_paint_glass_bg(cairo_t *cr, cairo_surface_t *bg, int out_w, int out_h,
 void
 barny_draw_glass_frame(cairo_t *cr, double w, double h, double r)
 {
-	cairo_pattern_t *highlight;
-	cairo_pattern_t *shadow;
-	cairo_pattern_t *top_refract;
-	cairo_pattern_t *left_refract;
-
-	barny_rounded_rect_path(cr, 0.5, 0.5, w - 1, h - 1, r);
-	cairo_set_source_rgba(cr, 1, 1, 1, 0.12);
-	cairo_set_line_width(cr, 1);
-	cairo_stroke(cr);
-
-	barny_rounded_rect_path(cr, 1.5, 1.5, w - 3, h - 3, r - 1);
-	cairo_set_source_rgba(cr, 1, 1, 1, 0.06);
-	cairo_set_line_width(cr, 2);
-	cairo_stroke(cr);
+	cairo_pattern_t *p;
+	double           shadow_h = h * 0.28 > 10 ? 10 : h * 0.28;
 
 	cairo_save(cr);
 	barny_rounded_rect_path(cr, 0, 0, w, h, r);
 	cairo_clip(cr);
 
-	highlight = cairo_pattern_create_linear(0, 0, w * 0.7, h * 0.7);
-	cairo_pattern_add_color_stop_rgba(highlight, 0.0, 1, 1, 1, 0.15);
-	cairo_pattern_add_color_stop_rgba(highlight, 0.3, 1, 1, 1, 0.04);
-	cairo_pattern_add_color_stop_rgba(highlight, 1.0, 1, 1, 1, 0);
-	cairo_set_source(cr, highlight);
+	p = cairo_pattern_create_linear(0, 0, 0, h);
+	cairo_pattern_add_color_stop_rgba(p, 0.00, 1, 1, 1, 0.13);
+	cairo_pattern_add_color_stop_rgba(p, 0.14, 1, 1, 1, 0.05);
+	cairo_pattern_add_color_stop_rgba(p, 0.55, 1, 1, 1, 0.022);
+	cairo_pattern_add_color_stop_rgba(p, 1.00, 1, 1, 1, 0.035);
+	cairo_set_source(cr, p);
 	cairo_paint(cr);
-	cairo_pattern_destroy(highlight);
+	cairo_pattern_destroy(p);
 
-	shadow = cairo_pattern_create_linear(w * 0.3, h * 0.3, w, h);
-	cairo_pattern_add_color_stop_rgba(shadow, 0.0, 0, 0, 0, 0);
-	cairo_pattern_add_color_stop_rgba(shadow, 0.7, 0, 0, 0, 0);
-	cairo_pattern_add_color_stop_rgba(shadow, 1.0, 0, 0, 0, 0.15);
-	cairo_set_source(cr, shadow);
+	p = cairo_pattern_create_linear(0, 0, w * 0.55, h);
+	cairo_pattern_add_color_stop_rgba(p, 0.0, 1, 1, 1, 0.10);
+	cairo_pattern_add_color_stop_rgba(p, 0.4, 1, 1, 1, 0.0);
+	cairo_set_source(cr, p);
 	cairo_paint(cr);
-	cairo_pattern_destroy(shadow);
+	cairo_pattern_destroy(p);
 
-	top_refract = cairo_pattern_create_linear(0, 0, 0, 8);
-	cairo_pattern_add_color_stop_rgba(top_refract, 0.0, 1, 1, 1, 0.08);
-	cairo_pattern_add_color_stop_rgba(top_refract, 1.0, 1, 1, 1, 0);
-	cairo_set_source(cr, top_refract);
-	cairo_rectangle(cr, 0, 0, w, 8);
-	cairo_fill(cr);
-	cairo_pattern_destroy(top_refract);
+	p = cairo_pattern_create_linear(0, h - shadow_h, 0, h);
+	cairo_pattern_add_color_stop_rgba(p, 0.0, 0, 0, 0, 0.0);
+	cairo_pattern_add_color_stop_rgba(p, 1.0, 0, 0, 0, 0.16);
+	cairo_set_source(cr, p);
+	cairo_paint(cr);
+	cairo_pattern_destroy(p);
 
-	left_refract = cairo_pattern_create_linear(0, 0, 8, 0);
-	cairo_pattern_add_color_stop_rgba(left_refract, 0.0, 1, 1, 1, 0.06);
-	cairo_pattern_add_color_stop_rgba(left_refract, 1.0, 1, 1, 1, 0);
-	cairo_set_source(cr, left_refract);
-	cairo_rectangle(cr, 0, 0, 8, h);
+	p = cairo_pattern_create_linear(0, 0, 0, 4);
+	cairo_pattern_add_color_stop_rgba(p, 0.0, 1, 1, 1, 0.9);
+	cairo_pattern_add_color_stop_rgba(p, 1.0, 1, 1, 1, 0.0);
+	cairo_set_source(cr, p);
+	cairo_rectangle(cr, 0, 0, w, 4);
 	cairo_fill(cr);
-	cairo_pattern_destroy(left_refract);
+	cairo_pattern_destroy(p);
 
 	cairo_restore(cr);
+
+	p = cairo_pattern_create_linear(0, 0, 0, h);
+	cairo_pattern_add_color_stop_rgba(p, 0.0, 1, 1, 1, 0.85);
+	cairo_pattern_add_color_stop_rgba(p, 0.5, 1, 1, 1, 0.18);
+	cairo_pattern_add_color_stop_rgba(p, 1.0, 1, 1, 1, 0.12);
+	barny_rounded_rect_path(cr, 1, 1, w - 2, h - 2, r - 0.5);
+	cairo_set_source(cr, p);
+	cairo_set_line_width(cr, 2);
+	cairo_stroke(cr);
+	cairo_pattern_destroy(p);
 }

@@ -14,6 +14,10 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+#define BAR_LENS_EDGE  16.0
+#define BAR_LENS_DISP  11.0
+#define BAR_LENS_CHROMA 3.5
+
 static void
 stack_blur_line(uint8_t *src, uint8_t *dst, int width, int radius, int *stack)
 {
@@ -231,6 +235,51 @@ barny_apply_brightness(cairo_surface_t *surface, double factor)
 			row[x * 4 + 0] = b > 255 ? 255 : b;
 			row[x * 4 + 1] = g > 255 ? 255 : g;
 			row[x * 4 + 2] = r > 255 ? 255 : r;
+		}
+	}
+
+	cairo_surface_mark_dirty(surface);
+}
+
+void
+barny_apply_vibrancy(cairo_surface_t *surface, double saturation,
+                     double brightness)
+{
+	int      width;
+	int      height;
+	int      stride;
+	uint8_t *data;
+	uint8_t *row;
+	int      x;
+	int      y;
+	double   b;
+	double   g;
+	double   r;
+	double   luma;
+
+	cairo_surface_flush(surface);
+
+	width  = cairo_image_surface_get_width(surface);
+	height = cairo_image_surface_get_height(surface);
+	stride = cairo_image_surface_get_stride(surface);
+	data   = cairo_image_surface_get_data(surface);
+
+	for (y = 0; y < height; y++) {
+		row = data + y * stride;
+		for (x = 0; x < width; x++) {
+			b    = row[x * 4 + 0];
+			g    = row[x * 4 + 1];
+			r    = row[x * 4 + 2];
+
+			luma = 0.114 * b + 0.587 * g + 0.299 * r;
+
+			b    = (luma + (b - luma) * saturation) * brightness;
+			g    = (luma + (g - luma) * saturation) * brightness;
+			r    = (luma + (r - luma) * saturation) * brightness;
+
+			row[x * 4 + 0] = b < 0 ? 0 : (b > 255 ? 255 : (uint8_t)b);
+			row[x * 4 + 1] = g < 0 ? 0 : (g > 255 ? 255 : (uint8_t)g);
+			row[x * 4 + 2] = r < 0 ? 0 : (r > 255 ? 255 : (uint8_t)r);
 		}
 	}
 
@@ -635,28 +684,185 @@ barny_apply_displacement(cairo_surface_t *src, cairo_surface_t *dst,
 	cairo_surface_mark_dirty(dst);
 }
 
-static cairo_surface_t *
-build_glass_bg(barny_state_t *state, int width, int height)
+static double
+sd_round_rect(double px, double py, double hw, double hh, double r)
 {
+	double qx      = fabs(px) - (hw - r);
+	double qy      = fabs(py) - (hh - r);
+	double ax      = qx > 0 ? qx : 0;
+	double ay      = qy > 0 ? qy : 0;
+	double outside = sqrt(ax * ax + ay * ay);
+	double mq      = qx > qy ? qx : qy;
+	double inside  = mq < 0 ? mq : 0;
+
+	return outside + inside - r;
+}
+
+cairo_surface_t *
+barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
+                           double max_disp)
+{
+	cairo_surface_t *surface;
+	uint8_t         *data;
+	int              stride;
+	double           hw = w / 2.0;
+	double           hh = h / 2.0;
+	double           r  = radius;
+	int              x;
+	int              y;
+	uint8_t         *row;
+
+	if (r > hw)
+		r = hw;
+	if (r > hh)
+		r = hh;
+
+	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS)
+		return NULL;
+
+	cairo_surface_flush(surface);
+	data   = cairo_image_surface_get_data(surface);
+	stride = cairo_image_surface_get_stride(surface);
+
+	for (y = 0; y < h; y++) {
+		row = data + y * stride;
+		for (x = 0; x < w; x++) {
+			double px     = x - hw + 0.5;
+			double py     = y - hh + 0.5;
+			double d      = sd_round_rect(px, py, hw, hh, r);
+			double dispx  = 0;
+			double dispy  = 0;
+			int    rr;
+			int    gg;
+
+			if (d <= 0 && d >= -edge_w) {
+				double depth = -d;
+				double t     = 1.0 - depth / edge_w;
+				double mag   = max_disp * t * t;
+				double gx    = sd_round_rect(px + 1, py, hw, hh, r)
+				               - sd_round_rect(px - 1, py, hw, hh, r);
+				double gy    = sd_round_rect(px, py + 1, hw, hh, r)
+				               - sd_round_rect(px, py - 1, hw, hh, r);
+				double len   = sqrt(gx * gx + gy * gy);
+
+				if (len > 1e-6) {
+					gx /= len;
+					gy /= len;
+					dispx = gx * mag;
+					dispy = gy * mag;
+				}
+			}
+
+			dispx /= max_disp;
+			dispy /= max_disp;
+			if (dispx > 1)
+				dispx = 1;
+			if (dispx < -1)
+				dispx = -1;
+			if (dispy > 1)
+				dispy = 1;
+			if (dispy < -1)
+				dispy = -1;
+
+			rr             = 128 + (int)(127 * dispx);
+			gg             = 128 + (int)(127 * dispy);
+			row[x * 4 + 0] = 0;
+			row[x * 4 + 1] = (uint8_t)(gg < 0 ? 0 : (gg > 255 ? 255 : gg));
+			row[x * 4 + 2] = (uint8_t)(rr < 0 ? 0 : (rr > 255 ? 255 : rr));
+			row[x * 4 + 3] = 255;
+		}
+	}
+
+	cairo_surface_mark_dirty(surface);
+
+	return surface;
+}
+
+static void
+draw_bar_shadow(cairo_t *cr, int cx, int cy, int cw, int ch, int radius,
+                int surf_w, int surf_h)
+{
+	cairo_surface_t *shadow;
+	cairo_t         *sc;
+
+	shadow = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
+	if (cairo_surface_status(shadow) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(shadow);
+		return;
+	}
+
+	sc = cairo_create(shadow);
+	barny_rounded_rect_path(sc, cx, cy + 3, cw, ch, radius);
+	cairo_set_source_rgba(sc, 0, 0, 0, 0.78);
+	cairo_fill(sc);
+	cairo_destroy(sc);
+
+	barny_blur_surface(shadow, 12);
+
+	cairo_set_source_surface(cr, shadow, 0, 0);
+	cairo_paint(cr);
+	cairo_surface_destroy(shadow);
+}
+
+static cairo_surface_t *
+build_glass_bg(barny_output_t *output)
+{
+	barny_state_t   *state  = output->state;
 	int              radius = state->config.border_radius;
+	int              sw     = output->surf_width;
+	int              sh     = output->surf_height;
+	int              cx     = output->pad_left;
+	int              cy     = output->pad_top;
+	int              cw     = output->width;
+	int              ch     = output->height;
+	cairo_surface_t *cache;
+	cairo_t         *cr;
+	cairo_surface_t *bg;
+	cairo_surface_t *src;
+	cairo_surface_t *lensed;
+	cairo_t         *sc;
 
-	cairo_surface_t *cache
-	        = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-	cairo_t         *cr = cairo_create(cache);
+	cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sw, sh);
+	cr    = cairo_create(cache);
+	bg    = state->blurred_wallpaper;
 
-	cairo_surface_t *bg = state->displaced_wallpaper ?
-	                              state->displaced_wallpaper :
-	                              state->blurred_wallpaper;
+	draw_bar_shadow(cr, cx, cy, cw, ch, radius, sw, sh);
+
+	src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
+	sc  = cairo_create(src);
+	barny_paint_glass_bg(sc, bg, cw, ch, 0, 0, ch,
+	                     state->config.position_top);
+	cairo_destroy(sc);
+
+	if (!output->lens_map)
+		output->lens_map = barny_create_edge_lens_map(
+		        cw, ch, radius, BAR_LENS_EDGE, BAR_LENS_DISP);
+
+	lensed = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
+	if (output->lens_map) {
+		barny_apply_displacement(src, lensed, output->lens_map,
+		                         BAR_LENS_DISP, BAR_LENS_CHROMA);
+	} else {
+		sc = cairo_create(lensed);
+		cairo_set_source_surface(sc, src, 0, 0);
+		cairo_paint(sc);
+		cairo_destroy(sc);
+	}
 
 	cairo_save(cr);
-	barny_rounded_rect_path(cr, 0, 0, width, height, radius);
+	cairo_translate(cr, cx, cy);
+	cairo_save(cr);
+	barny_rounded_rect_path(cr, 0, 0, cw, ch, radius);
 	cairo_clip(cr);
-	barny_paint_glass_bg(cr, bg, width, height, 0, 0, height,
-	                     state->config.position_top);
+	cairo_set_source_surface(cr, lensed, 0, 0);
+	cairo_paint(cr);
+	cairo_restore(cr);
+	barny_draw_glass_frame(cr, cw, ch, radius);
 	cairo_restore(cr);
 
-	barny_draw_glass_frame(cr, width, height, radius);
-
+	cairo_surface_destroy(src);
+	cairo_surface_destroy(lensed);
 	cairo_destroy(cr);
 
 	return cache;
@@ -665,16 +871,13 @@ build_glass_bg(barny_state_t *state, int width, int height)
 void
 barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 {
-	int width  = output->width;
-	int height = output->height;
-
 	cairo_save(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
 	cairo_paint(cr);
 	cairo_restore(cr);
 
 	if (!output->bg_cache) {
-		output->bg_cache = build_glass_bg(output->state, width, height);
+		output->bg_cache = build_glass_bg(output);
 	}
 
 	if (output->bg_cache) {
