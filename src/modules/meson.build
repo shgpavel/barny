@@ -7,6 +7,7 @@ barny_sources += files(
     'fileread.c',
     'layout.c',
     'layout_apply.c',
+    'menu.c',
     'module.c',
     'network.c',
     'popup.c',

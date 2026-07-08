@@ -188,6 +188,8 @@ main(int argc, char *argv[])
 	(void)argc;
 	(void)argv;
 
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
 	printf("barny %s - liquid glass status bar\n", BARNY_VERSION);
 
 	barny_config_defaults(&state.config);

@@ -14,16 +14,40 @@ typedef struct {
 	PangoFontDescription *font_desc;
 } battery_data_t;
 
+static bool
+read_ps_attr(const char *supply, const char *attr, char *buf, size_t buflen)
+{
+	char  attr_path[512];
+	FILE *f;
+	char *nl;
+	int   n;
+
+	n = snprintf(attr_path, sizeof(attr_path),
+	             "/sys/class/power_supply/%s/%s", supply, attr);
+	if (n < 0 || (size_t)n >= sizeof(attr_path))
+		return false;
+
+	f = fopen(attr_path, "r");
+	if (!f)
+		return false;
+
+	buf[0] = '\0';
+	if (fgets(buf, buflen, f)) {
+		nl = strchr(buf, '\n');
+		if (nl)
+			*nl = '\0';
+	}
+	fclose(f);
+	return true;
+}
+
 static int
 detect_battery(char *path_buf, size_t path_len)
 {
 	DIR           *dir;
 	struct dirent *ent;
-	char           type_path[512];
-	int            n;
-	FILE          *f;
 	char           type[32];
-	char          *nl;
+	char           scope[32];
 	int            r;
 
 	dir = opendir("/sys/class/power_supply");
@@ -34,34 +58,23 @@ detect_battery(char *path_buf, size_t path_len)
 		if (ent->d_name[0] == '.')
 			continue;
 
-		n = snprintf(type_path, sizeof(type_path),
-		             "/sys/class/power_supply/%s/type", ent->d_name);
-		if (n < 0 || (size_t)n >= sizeof(type_path))
+		if (!read_ps_attr(ent->d_name, "type", type, sizeof(type)))
+			continue;
+		if (strcmp(type, "Battery") != 0)
 			continue;
 
-		f = fopen(type_path, "r");
-		if (!f)
+		if (read_ps_attr(ent->d_name, "scope", scope, sizeof(scope))
+		    && strcmp(scope, "Device") == 0)
 			continue;
 
-		type[0] = '\0';
-		if (fgets(type, sizeof(type), f)) {
-			nl = strchr(type, '\n');
-			if (nl)
-				*nl = '\0';
-		}
-		fclose(f);
-
-		if (strcmp(type, "Battery") == 0) {
-			r = snprintf(path_buf, path_len,
-			             "/sys/class/power_supply/%s/uevent",
-			             ent->d_name);
-			if (r < 0 || (size_t)r >= path_len) {
-				closedir(dir);
-				return -1;
-			}
+		r = snprintf(path_buf, path_len,
+		             "/sys/class/power_supply/%s/uevent", ent->d_name);
+		if (r < 0 || (size_t)r >= path_len) {
 			closedir(dir);
-			return 0;
+			return -1;
 		}
+		closedir(dir);
+		return 0;
 	}
 
 	closedir(dir);

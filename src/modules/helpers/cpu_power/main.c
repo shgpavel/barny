@@ -86,6 +86,8 @@ detect_rapl_domains(void)
 	struct rapl_domain *dom;
 	char                name_path[512];
 	char                max_path[512];
+	int                 i;
+	int                 psys_idx;
 
 	dir = opendir("/sys/class/powercap");
 	if (!dir) {
@@ -141,6 +143,20 @@ detect_rapl_domains(void)
 	}
 
 	closedir(dir);
+
+	psys_idx = -1;
+	for (i = 0; i < domain_count; i++) {
+		if (strcmp(domains[i].name, "psys") == 0) {
+			psys_idx = i;
+			break;
+		}
+	}
+	if (psys_idx >= 0) {
+		domains[0]   = domains[psys_idx];
+		domain_count = 1;
+		fprintf(stderr,
+		        "Using psys (platform / total board power) domain only\n");
+	}
 }
 
 static double

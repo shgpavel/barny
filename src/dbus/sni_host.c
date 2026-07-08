@@ -235,6 +235,7 @@ fetch_item_icon(sni_item_t *item, int icon_size)
 	if (r >= 0) {
 		item->icon = create_icon_from_pixmap(reply, icon_size);
 		sd_bus_message_unref(reply);
+		reply = NULL;
 		if (item->icon) {
 			sd_bus_error_free(&error);
 			return;

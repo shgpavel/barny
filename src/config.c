@@ -138,6 +138,7 @@ barny_config_defaults(barny_config_t *config)
 	config->tray_icon_bg_g                = 0.0;
 	config->tray_icon_bg_b                = 0.0;
 	config->tray_icon_bg_opacity          = 0.3;
+	config->tray_menu_gap                 = 8;
 
 	config->refraction_mode               = BARNY_REFRACT_LENS;
 	config->displacement_scale            = 8.0;
@@ -425,6 +426,8 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		if (v > 1.0)
 			v = 1.0;
 		config->tray_icon_bg_opacity = v;
+	} else if (strcmp(key, "tray_menu_gap") == 0) {
+		config->tray_menu_gap = parse_int_clamped(value, 0, 128);
 
 	} else if (strcmp(key, "clock_show_time") == 0) {
 		config->clock_show_time = parse_bool(value);

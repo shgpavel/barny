@@ -18,6 +18,7 @@ typedef struct barny_config barny_config_t;
 typedef struct barny_state  barny_state_t;
 typedef struct barny_output barny_output_t;
 typedef struct barny_module barny_module_t;
+typedef struct barny_menu   barny_menu_t;
 
 typedef enum {
 	BARNY_POS_LEFT,
@@ -110,6 +111,7 @@ struct barny_config {
 	double                  tray_icon_bg_g;
 	double                  tray_icon_bg_b;
 	double                  tray_icon_bg_opacity;
+	int                     tray_menu_gap;
 
 	barny_refraction_mode_t refraction_mode;
 	double                  displacement_scale;
@@ -220,6 +222,11 @@ struct barny_state {
 
 	barny_output_t             *pointer_output;
 	double                      pointer_x, pointer_y;
+	struct wl_surface          *pointer_surface;
+
+	barny_menu_t               *menu;
+
+	struct wl_keyboard         *keyboard;
 
 	barny_module_t             *hover_module;
 
@@ -412,6 +419,52 @@ barny_sni_item_activate(barny_state_t *state, sni_item_t *item, int x, int y);
 void
 barny_sni_item_secondary_activate(barny_state_t *state, sni_item_t *item, int x,
                                   int y);
+
+typedef struct barny_menu_item barny_menu_item_t;
+
+struct barny_menu_item {
+	int                id;
+	char              *label;
+	bool               enabled;
+	bool               visible;
+	bool               separator;
+	bool               has_submenu;
+	int                toggle_state;
+	barny_menu_item_t *children;
+	int                child_count;
+};
+
+char *
+barny_sni_item_menu_path(barny_state_t *state, sni_item_t *item);
+bool
+barny_sni_item_is_menu(barny_state_t *state, sni_item_t *item);
+barny_menu_item_t *
+barny_dbusmenu_get_layout(barny_state_t *state, const char *service,
+                          const char *menu_path);
+void
+barny_dbusmenu_free(barny_menu_item_t *root);
+void
+barny_dbusmenu_about_to_show(barny_state_t *state, const char *service,
+                             const char *menu_path, int id);
+void
+barny_dbusmenu_event_clicked(barny_state_t *state, const char *service,
+                             const char *menu_path, int id);
+
+void
+barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x);
+void
+barny_menu_close(barny_state_t *state);
+bool
+barny_menu_is_open(barny_state_t *state);
+bool
+barny_menu_owns_surface(barny_state_t *state, struct wl_surface *surface);
+void
+barny_menu_pointer_motion(barny_state_t *state, double sx, double sy);
+void
+barny_menu_pointer_button(barny_state_t *state, uint32_t button,
+                          uint32_t button_state);
+void
+barny_menu_key_escape(barny_state_t *state);
 
 int
 barny_sway_ipc_init(barny_state_t *state);

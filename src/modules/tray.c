@@ -247,11 +247,28 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 		icon_end = icon_x + data->icon_size;
 
 		if (rel_x >= icon_x && rel_x < icon_end) {
+			int   icon_abs = data->render_x + icon_x;
+			char *menu_path;
+
 			if (button == 272) {
-				barny_sni_item_activate(data->state, item, x, y);
+				if (barny_sni_item_is_menu(data->state, item)) {
+					barny_menu_open(data->state, item,
+					                icon_abs);
+				} else {
+					barny_sni_item_activate(data->state,
+					                        item, x, y);
+				}
 			} else if (button == 273) {
-				barny_sni_item_secondary_activate(data->state,
-				                                  item, x, y);
+				menu_path = barny_sni_item_menu_path(data->state,
+				                                     item);
+				if (menu_path) {
+					free(menu_path);
+					barny_menu_open(data->state, item,
+					                icon_abs);
+				} else {
+					barny_sni_item_secondary_activate(
+					        data->state, item, x, y);
+				}
 			}
 			return;
 		}

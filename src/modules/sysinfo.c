@@ -111,11 +111,13 @@ detect_core_counts(sysinfo_data_t *data)
 }
 
 static bool
-try_thermal_zone(char *path, size_t pathlen, int zone)
+try_thermal_zone(char *path, size_t pathlen, int zone, bool strict)
 {
 	char  type_path[256];
 	FILE *f;
 	char  type[64] = "";
+	bool  strong;
+	bool  weak;
 
 	snprintf(type_path, sizeof(type_path),
 	         "/sys/class/thermal/thermal_zone%d/type", zone);
@@ -129,12 +131,12 @@ try_thermal_zone(char *path, size_t pathlen, int zone)
 	}
 	fclose(f);
 
-	if (strstr(type, "cpu")
-	    || strstr(type, "CPU")
-	    || strstr(type, "x86_pkg")
-	    || strstr(type, "coretemp")
-	    || strstr(type, "k10temp")
-	    || strstr(type, "acpitz")) {
+	strong = strstr(type, "x86_pkg") || strstr(type, "coretemp")
+	         || strstr(type, "k10temp");
+	weak = strstr(type, "cpu") || strstr(type, "CPU")
+	       || strstr(type, "acpitz");
+
+	if (strong || (!strict && weak)) {
 		snprintf(path, pathlen, "/sys/class/thermal/thermal_zone%d/temp",
 		         zone);
 		return true;
@@ -212,15 +214,7 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 
 	if (cfg->sysinfo_temp_zone >= 0) {
 		if (try_thermal_zone(data->temp_path, sizeof(data->temp_path),
-		                     cfg->sysinfo_temp_zone)) {
-			data->temp_path_found = true;
-			return;
-		}
-	}
-
-	for (i = 0; i < 16; i++) {
-		if (try_thermal_zone(data->temp_path, sizeof(data->temp_path),
-		                     i)) {
+		                     cfg->sysinfo_temp_zone, false)) {
 			data->temp_path_found = true;
 			return;
 		}
@@ -229,6 +223,22 @@ find_temp_path(sysinfo_data_t *data, barny_config_t *cfg)
 	if (try_hwmon(data->temp_path, sizeof(data->temp_path))) {
 		data->temp_path_found = true;
 		return;
+	}
+
+	for (i = 0; i < 16; i++) {
+		if (try_thermal_zone(data->temp_path, sizeof(data->temp_path),
+		                     i, true)) {
+			data->temp_path_found = true;
+			return;
+		}
+	}
+
+	for (i = 0; i < 16; i++) {
+		if (try_thermal_zone(data->temp_path, sizeof(data->temp_path),
+		                     i, false)) {
+			data->temp_path_found = true;
+			return;
+		}
 	}
 
 	snprintf(data->temp_path, sizeof(data->temp_path),

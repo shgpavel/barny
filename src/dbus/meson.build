@@ -3,4 +3,5 @@ barny_sources += files(
     'dbus.c',
     'sni_watcher.c',
     'sni_host.c',
+    'dbusmenu.c',
 )
