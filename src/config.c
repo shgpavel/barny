@@ -143,6 +143,7 @@ barny_config_defaults(barny_config_t *config)
 	config->dynamic_glass                 = true;
 	config->glass_gleam                   = 0.24;
 	config->glass_bulge                   = 15.0;
+	config->glass_prism                   = 0.6;
 	config->popup_animations              = true;
 
 	config->refraction_mode               = BARNY_REFRACT_LENS;
@@ -439,6 +440,8 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->glass_gleam = atof(value);
 	} else if (strcmp(key, "glass_bulge") == 0) {
 		config->glass_bulge = atof(value);
+	} else if (strcmp(key, "glass_prism") == 0) {
+		config->glass_prism = atof(value);
 	} else if (strcmp(key, "popup_animations") == 0) {
 		config->popup_animations = parse_bool(value);
 

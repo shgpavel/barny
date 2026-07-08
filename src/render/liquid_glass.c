@@ -14,14 +14,13 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#define BAR_LENS_EDGE  16.0
-#define BAR_LENS_DISP  11.0
-#define BAR_LENS_CHROMA 3.5
+#define BAR_LENS_EDGE  20.0
+#define BAR_LENS_DISP  17.0
+#define BAR_LENS_CHROMA 8.0
 
-#define GLEAM_RADIUS   132.0
-#define BULGE_RADIUS   62.0
-#define BULGE_CHROMA   3.0
-#define BULGE_PROFILE_PEAK 0.3849
+#define BULGE_CHROMA   2.5
+#define BUBBLE_W       172.0
+#define BUBBLE_DISP    10.0
 
 static void
 stack_blur_line(uint8_t *src, uint8_t *dst, int width, int radius, int *stack)
@@ -744,7 +743,7 @@ barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
 			if (d <= 0 && d >= -edge_w) {
 				double depth = -d;
 				double t     = 1.0 - depth / edge_w;
-				double mag   = max_disp * t * t;
+				double mag   = max_disp * t * t * (3.0 - 2.0 * t);
 				double gx    = sd_round_rect(px + 1, py, hw, hh, r)
 				               - sd_round_rect(px - 1, py, hw, hh, r);
 				double gy    = sd_round_rect(px, py + 1, hw, hh, r)
@@ -784,60 +783,6 @@ barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
 	return surface;
 }
 
-static cairo_surface_t *
-build_bulge_map(int size, double radius)
-{
-	cairo_surface_t *surface;
-	uint8_t         *data;
-	int              stride;
-	double           c = size / 2.0;
-	int              x;
-	int              y;
-	uint8_t         *row;
-
-	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
-	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS)
-		return NULL;
-
-	cairo_surface_flush(surface);
-	data   = cairo_image_surface_get_data(surface);
-	stride = cairo_image_surface_get_stride(surface);
-
-	for (y = 0; y < size; y++) {
-		row = data + y * stride;
-		for (x = 0; x < size; x++) {
-			double ox   = x + 0.5 - c;
-			double oy   = y + 0.5 - c;
-			double dist = sqrt(ox * ox + oy * oy);
-			double r    = dist / radius;
-			double ndx  = 0;
-			double ndy  = 0;
-			int    rr;
-			int    gg;
-
-			if (r < 1.0 && dist > 1e-6) {
-				double om = 1.0 - r * r;
-				double f  = r * om * om;
-				double nd = -(f / BULGE_PROFILE_PEAK);
-
-				ndx = nd * (ox / dist);
-				ndy = nd * (oy / dist);
-			}
-
-			rr             = 128 + (int)(127 * ndx);
-			gg             = 128 + (int)(127 * ndy);
-			row[x * 4 + 0] = 0;
-			row[x * 4 + 1] = (uint8_t)(gg < 0 ? 0 : (gg > 255 ? 255 : gg));
-			row[x * 4 + 2] = (uint8_t)(rr < 0 ? 0 : (rr > 255 ? 255 : rr));
-			row[x * 4 + 3] = 255;
-		}
-	}
-
-	cairo_surface_mark_dirty(surface);
-
-	return surface;
-}
-
 static void
 render_dynamic(barny_output_t *output, cairo_t *cr)
 {
@@ -851,7 +796,6 @@ render_dynamic(barny_output_t *output, cairo_t *cr)
 	double           py     = state->pointer_y;
 	double           bulge  = state->config.glass_bulge;
 	double           gleam  = state->config.glass_gleam;
-	cairo_pattern_t *g;
 
 	if (!state->config.dynamic_glass)
 		return;
@@ -861,57 +805,103 @@ render_dynamic(barny_output_t *output, cairo_t *cr)
 		return;
 
 	if (bulge > 0.1) {
-		int              pd = (int)(BULGE_RADIUS * 2) + 4;
-		int              x0 = (int)(px - pd / 2.0);
-		int              y0 = (int)(py - pd / 2.0);
-		cairo_surface_t *patch;
+		double           over = state->config.position_top
+		                                ? output->pad_top
+		                                : output->pad_bottom;
+		double           bw   = BUBBLE_W;
+		double           bh   = ch + 2 * over;
+		double           br   = bh * 0.5;
+		double           bcx  = px;
+		double           bcy  = cy + ch / 2.0;
+		int              iw   = (int)bw;
+		int              ih   = (int)bh;
+		int              x0;
+		int              y0;
+		cairo_surface_t *src;
 		cairo_surface_t *warped;
-		cairo_t         *pc;
+		cairo_t         *sc;
+		cairo_pattern_t *rim;
+		cairo_pattern_t *sp;
+		cairo_surface_t *bg = state->blurred_wallpaper;
+		double           gl;
+		double           gcy;
+
+		if (br > bw / 2.0)
+			br = bw / 2.0;
+		if (bcx < cx + bw / 2.0)
+			bcx = cx + bw / 2.0;
+		if (bcx > cx + cw - bw / 2.0)
+			bcx = cx + cw - bw / 2.0;
+
+		x0 = (int)(bcx - bw / 2.0);
+		y0 = (int)(bcy - bh / 2.0);
 
 		if (!output->bulge_map)
-			output->bulge_map = build_bulge_map(pd, BULGE_RADIUS);
+			output->bulge_map = barny_create_edge_lens_map(
+			        iw, ih, (int)br, bh * 0.42, BUBBLE_DISP);
 
-		if (output->bulge_map) {
-			patch  = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pd, pd);
-			warped = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pd, pd);
+		if (output->bulge_map && bg) {
+			src    = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
+			warped = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
 
-			pc = cairo_create(patch);
-			cairo_set_source_surface(pc, output->bg_cache, -x0, -y0);
-			cairo_pattern_set_extend(cairo_get_source(pc),
-			                         CAIRO_EXTEND_PAD);
-			cairo_paint(pc);
-			cairo_destroy(pc);
+			sc = cairo_create(src);
+			cairo_translate(sc, -(x0 - output->pad_left),
+			                -(y0 - output->pad_top));
+			barny_paint_glass_bg(sc, bg, cw, ch, 0, 0, ch,
+			                     state->config.position_top);
+			cairo_destroy(sc);
 
-			barny_apply_displacement(patch, warped, output->bulge_map,
-			                         bulge, BULGE_CHROMA);
+			barny_apply_displacement(src, warped, output->bulge_map,
+			                         BUBBLE_DISP, BULGE_CHROMA);
 
 			cairo_save(cr);
-			barny_rounded_rect_path(cr, cx, cy, cw, ch, radius);
+			barny_rounded_rect_path(cr, cx, cy - over, cw,
+			                        ch + 2 * over, radius);
+			cairo_clip(cr);
+
+			cairo_save(cr);
+			barny_rounded_rect_path(cr, x0, y0, iw, ih, br);
 			cairo_clip(cr);
 			cairo_set_source_surface(cr, warped, x0, y0);
 			cairo_paint(cr);
+
+			gl  = gleam * 3.0;
+			if (gl > 0.95)
+				gl = 0.95;
+			gcy = cy + ch * 0.26;
+			cairo_save(cr);
+			cairo_translate(cr, bcx, gcy);
+			cairo_scale(cr, 1.0, 0.4);
+			sp = cairo_pattern_create_radial(0, 0, 0, 0, 0, bw * 0.14);
+			cairo_pattern_add_color_stop_rgba(sp, 0.00, 1, 1, 1, gl);
+			cairo_pattern_add_color_stop_rgba(sp, 0.42, 1, 1, 1,
+			                                  gl * 0.55);
+			cairo_pattern_add_color_stop_rgba(sp, 0.78, 1, 1, 1,
+			                                  gl * 0.06);
+			cairo_pattern_add_color_stop_rgba(sp, 1.00, 1, 1, 1, 0.0);
+			cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
+			cairo_set_source(cr, sp);
+			cairo_paint(cr);
+			cairo_pattern_destroy(sp);
+			cairo_restore(cr);
 			cairo_restore(cr);
 
-			cairo_surface_destroy(patch);
+			rim = cairo_pattern_create_linear(bcx, y0, bcx, y0 + ih);
+			cairo_pattern_add_color_stop_rgba(rim, 0.0, 1, 1, 1, 0.30);
+			cairo_pattern_add_color_stop_rgba(rim, 0.5, 1, 1, 1, 0.05);
+			cairo_pattern_add_color_stop_rgba(rim, 1.0, 1, 1, 1, 0.12);
+			barny_rounded_rect_path(cr, x0 + 1, y0 + 1, iw - 2, ih - 2,
+			                        br - 0.5);
+			cairo_set_source(cr, rim);
+			cairo_set_line_width(cr, 1.5);
+			cairo_stroke(cr);
+			cairo_pattern_destroy(rim);
+
+			cairo_restore(cr);
+
+			cairo_surface_destroy(src);
 			cairo_surface_destroy(warped);
 		}
-	}
-
-	if (gleam > 0.001) {
-		cairo_save(cr);
-		barny_rounded_rect_path(cr, cx, cy, cw, ch, radius);
-		cairo_clip(cr);
-
-		g = cairo_pattern_create_radial(px, py, 0, px, py, GLEAM_RADIUS);
-		cairo_pattern_add_color_stop_rgba(g, 0.0, 1, 1, 1, gleam);
-		cairo_pattern_add_color_stop_rgba(g, 0.5, 1, 1, 1, gleam * 0.32);
-		cairo_pattern_add_color_stop_rgba(g, 1.0, 1, 1, 1, 0.0);
-		cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
-		cairo_set_source(cr, g);
-		cairo_paint(cr);
-		cairo_pattern_destroy(g);
-
-		cairo_restore(cr);
 	}
 }
 
@@ -941,6 +931,59 @@ draw_bar_shadow(cairo_t *cr, int cx, int cy, int cw, int ch, int radius,
 	cairo_surface_destroy(shadow);
 }
 
+static void
+hsv2rgb(double hh, double s, double v, double *r, double *g, double *b)
+{
+	double i = floor(hh * 6.0);
+	double f = hh * 6.0 - i;
+	double p = v * (1.0 - s);
+	double q = v * (1.0 - f * s);
+	double t = v * (1.0 - (1.0 - f) * s);
+
+	switch (((int)i) % 6) {
+	case 0:  *r = v; *g = t; *b = p; break;
+	case 1:  *r = q; *g = v; *b = p; break;
+	case 2:  *r = p; *g = v; *b = t; break;
+	case 3:  *r = p; *g = q; *b = v; break;
+	case 4:  *r = t; *g = p; *b = v; break;
+	default: *r = v; *g = p; *b = q; break;
+	}
+}
+
+static void
+draw_spectral_rim(cairo_t *cr, double w, double h, double r, double strength)
+{
+	cairo_pattern_t *p;
+	int              i;
+	int              n      = 40;
+	double           cycles = 2.5;
+
+	if (strength <= 0.001)
+		return;
+
+	p = cairo_pattern_create_linear(0, 0, w, 0);
+	for (i = 0; i <= n; i++) {
+		double pos = (double)i / n;
+		double hue = fmod(pos * cycles, 1.0);
+		double rr;
+		double gg;
+		double bb;
+
+		hsv2rgb(hue, 0.9, 1.0, &rr, &gg, &bb);
+		cairo_pattern_add_color_stop_rgba(p, pos, rr, gg, bb, strength);
+	}
+
+	cairo_save(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
+	barny_rounded_rect_path(cr, 0.8, 0.8, w - 1.6, h - 1.6, r - 0.4);
+	cairo_set_source(cr, p);
+	cairo_set_line_width(cr, 1.6);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+
+	cairo_pattern_destroy(p);
+}
+
 static cairo_surface_t *
 build_glass_bg(barny_output_t *output)
 {
@@ -963,7 +1006,14 @@ build_glass_bg(barny_output_t *output)
 	cr    = cairo_create(cache);
 	bg    = state->blurred_wallpaper;
 
+	cairo_save(cr);
+	if (state->config.position_top)
+		cairo_rectangle(cr, 0, cy, sw, sh - cy);
+	else
+		cairo_rectangle(cr, 0, 0, sw, cy + ch);
+	cairo_clip(cr);
 	draw_bar_shadow(cr, cx, cy, cw, ch, radius, sw, sh);
+	cairo_restore(cr);
 
 	src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
 	sc  = cairo_create(src);
@@ -995,6 +1045,7 @@ build_glass_bg(barny_output_t *output)
 	cairo_paint(cr);
 	cairo_restore(cr);
 	barny_draw_glass_frame(cr, cw, ch, radius);
+	draw_spectral_rim(cr, cw, ch, radius, state->config.glass_prism);
 	cairo_restore(cr);
 
 	cairo_surface_destroy(src);

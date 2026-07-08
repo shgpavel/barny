@@ -13,6 +13,7 @@
 #define BARNY_BORDER_RADIUS  28
 #define BARNY_BLUR_RADIUS    2
 #define BARNY_MAX_MODULES    32
+#define BARNY_BAR_OVERRUN    6
 
 typedef struct barny_config barny_config_t;
 typedef struct barny_state  barny_state_t;
@@ -116,6 +117,7 @@ struct barny_config {
 	bool                    dynamic_glass;
 	double                  glass_gleam;
 	double                  glass_bulge;
+	double                  glass_prism;
 	bool                    popup_animations;
 
 	barny_refraction_mode_t refraction_mode;

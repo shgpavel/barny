@@ -144,8 +144,17 @@ barny_output_create_surface(barny_output_t *output)
 	pad_r = state->config.margin_right < BAR_SHADOW_LAT
 	                ? state->config.margin_right
 	                : BAR_SHADOW_LAT;
-	pad_t = state->config.position_top ? 0 : BAR_SHADOW_INNER;
-	pad_b = state->config.position_top ? BAR_SHADOW_INNER : 0;
+	if (state->config.position_top) {
+		pad_t = state->config.margin_top < BARNY_BAR_OVERRUN
+		                ? state->config.margin_top
+		                : BARNY_BAR_OVERRUN;
+		pad_b = BAR_SHADOW_INNER;
+	} else {
+		pad_t = BAR_SHADOW_INNER;
+		pad_b = state->config.margin_bottom < BARNY_BAR_OVERRUN
+		                ? state->config.margin_bottom
+		                : BARNY_BAR_OVERRUN;
+	}
 
 	output->pad_left   = pad_l;
 	output->pad_right  = pad_r;
