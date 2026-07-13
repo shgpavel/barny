@@ -173,6 +173,20 @@ pick_victim(barny_state_t *state,
 	}
 }
 
+/* Bleed allowance around a module's box: the text shadow sits a pixel out and
+   antialiasing frays the pill edges. */
+#define MODULE_BLEED 8
+
+static bool
+module_visible(const barny_output_t *output, int x, int w)
+{
+	if (!output->render_clipped)
+		return true;
+
+	return x + w + MODULE_BLEED > output->clip_x0
+	       && x - MODULE_BLEED < output->clip_x1;
+}
+
 static void
 render_section(barny_output_t *output, cairo_t *cr, const int *idx, int n,
                int start_x, int base_y, int avail_h, int spacing,
@@ -197,7 +211,10 @@ render_section(barny_output_t *output, cairo_t *cr, const int *idx, int n,
 			continue;
 
 		if (dropped[j]) {
-			if (mod->render) {
+			/* rendered off-surface purely so the module still
+			   measures itself; a clipped frame changes no widths,
+			   so the shaping is wasted there */
+			if (mod->render && !output->render_clipped) {
 				h = mod->height > 0 ? mod->height : avail_h;
 				cairo_save(cr);
 				cairo_new_path(cr);
@@ -216,13 +233,78 @@ render_section(barny_output_t *output, cairo_t *cr, const int *idx, int n,
 		output->mod_x[j] = x;
 		output->mod_w[j] = w;
 
-		cairo_save(cr);
-		if (mod->render)
+		if (mod->render && module_visible(output, x, w)) {
+			cairo_save(cr);
 			mod->render(mod, cr, x, y, w, h);
-		cairo_restore(cr);
+			cairo_restore(cr);
+		}
 
 		x += w + spacing;
 	}
+}
+
+/* Union of the strip the droplet covers now and the one it covered last frame:
+   everything the bar surface needs re-derived, and nothing else. Clamped to the
+   surface. Empty (w == 0) when there is no droplet on either frame. */
+static void
+lens_damage(const barny_output_t *output, bool have_lens, int lx, int ly,
+            int lw, int lh, int *dx, int *dy, int *dw, int *dh)
+{
+	int x0 = INT_MAX;
+	int y0 = INT_MAX;
+	int x1 = INT_MIN;
+	int y1 = INT_MIN;
+
+	if (have_lens) {
+		x0 = lx;
+		y0 = ly;
+		x1 = lx + lw;
+		y1 = ly + lh;
+	}
+	if (output->lens_dmg_w > 0) {
+		if (output->lens_dmg_x < x0)
+			x0 = output->lens_dmg_x;
+		if (output->lens_dmg_y < y0)
+			y0 = output->lens_dmg_y;
+		if (output->lens_dmg_x + output->lens_dmg_w > x1)
+			x1 = output->lens_dmg_x + output->lens_dmg_w;
+		if (output->lens_dmg_y + output->lens_dmg_h > y1)
+			y1 = output->lens_dmg_y + output->lens_dmg_h;
+	}
+
+	if (x1 <= x0 || y1 <= y0) {
+		*dx = *dy = *dw = *dh = 0;
+		return;
+	}
+
+	if (x0 < 0)
+		x0 = 0;
+	if (y0 < 0)
+		y0 = 0;
+	if (x1 > output->surf_width)
+		x1 = output->surf_width;
+	if (y1 > output->surf_height)
+		y1 = output->surf_height;
+
+	*dx = x0;
+	*dy = y0;
+	*dw = x1 > x0 ? x1 - x0 : 0;
+	*dh = y1 > y0 ? y1 - y0 : 0;
+}
+
+/* A droplet-only frame may repaint just the droplet's strip: the rest of the
+   bar is already correct in the (single, persistent) shm buffer. Anything that
+   can change pixels elsewhere -- a dirty module, a rebuilt bar cache, the
+   droplet living on another output -- forces the full path. */
+static bool
+lens_partial_ok(barny_output_t *output)
+{
+	barny_state_t *state = output->state;
+
+	return output->lens_dmg_valid
+	       && output->bg_cache
+	       && output == state->dyn_output
+	       && !barny_modules_any_dirty(state);
 }
 
 void
@@ -233,6 +315,10 @@ barny_render_frame(barny_output_t *output)
 	int            saved_widths[BARNY_MAX_MODULES];
 	bool           width_changed = false;
 	bool           lens_anim;
+	bool           have_lens;
+	bool           partial;
+	int            lx = 0, ly = 0, lw = 0, lh = 0;
+	int            dx = 0, dy = 0, dw = 0, dh = 0;
 	int            i;
 	int            new_w;
 
@@ -256,9 +342,31 @@ barny_render_frame(barny_output_t *output)
 		saved_widths[i] = state->modules[i] ? state->modules[i]->width : 0;
 	}
 
-	barny_render_liquid_glass(output, cr);
+	have_lens = barny_lens_rect(output, &lx, &ly, &lw, &lh);
+	lens_damage(output, have_lens, lx, ly, lw, lh, &dx, &dy, &dw, &dh);
+	partial = lens_partial_ok(output) && dw > 0 && dh > 0;
 
-	barny_render_modules(output, cr);
+	if (partial) {
+		/* Clip first: the clear, the bar-cache blit and the droplet all
+		   land inside the strip, and the modules outside it skip their
+		   text shaping entirely. */
+		cairo_save(cr);
+		cairo_rectangle(cr, dx, dy, dw, dh);
+		cairo_clip(cr);
+
+		output->render_clipped = true;
+		output->clip_x0        = dx;
+		output->clip_x1        = dx + dw;
+
+		barny_render_liquid_glass(output, cr);
+		barny_render_modules(output, cr);
+
+		output->render_clipped = false;
+		cairo_restore(cr);
+	} else {
+		barny_render_liquid_glass(output, cr);
+		barny_render_modules(output, cr);
+	}
 
 	for (i = 0; i < state->module_count; i++) {
 		new_w = state->modules[i] ? state->modules[i]->width : 0;
@@ -268,7 +376,10 @@ barny_render_frame(barny_output_t *output)
 		}
 	}
 
+	/* A module resized while drawing, so the layout it was drawn with is
+	   stale: redo the bar in full, strip or not. */
 	if (width_changed) {
+		partial = false;
 		barny_render_liquid_glass(output, cr);
 		barny_render_modules(output, cr);
 	}
@@ -283,13 +394,26 @@ barny_render_frame(barny_output_t *output)
 		output->redraw_queued = true;
 	}
 
+	output->lens_dmg_x     = have_lens ? lx : 0;
+	output->lens_dmg_y     = have_lens ? ly : 0;
+	output->lens_dmg_w     = have_lens ? lw : 0;
+	output->lens_dmg_h     = have_lens ? lh : 0;
+	output->lens_dmg_valid = true;
+
 	barny_output_request_frame(output);
 
 	cairo_surface_flush(output->cairo_surface);
 	wl_surface_attach(output->surface, output->buffer, 0, 0);
-	wl_surface_damage_buffer(output->surface, 0, 0,
-	                         output->surf_width * output->scale,
-	                         output->surf_height * output->scale);
+	if (partial) {
+		wl_surface_damage_buffer(output->surface, dx * output->scale,
+		                         dy * output->scale,
+		                         dw * output->scale,
+		                         dh * output->scale);
+	} else {
+		wl_surface_damage_buffer(output->surface, 0, 0,
+		                         output->surf_width * output->scale,
+		                         output->surf_height * output->scale);
+	}
 	wl_surface_commit(output->surface);
 }
 

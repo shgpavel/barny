@@ -18,6 +18,17 @@ layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface,
 {
 	barny_output_t   *output = data;
 	struct wl_region *region;
+	bool              resized;
+
+	/* The compositor re-sends configure at the same size whenever the
+	   layer-shell arrangement is touched -- every hover popup that opens or
+	   closes over the bar does it. Rebuilding the buffer throws away
+	   bg_cache and friends, and rebuilding those means a full-bar blur plus
+	   a displacement pass; doing that several times a second while the
+	   cursor sweeps the bar dominated the animation cost. Only a real
+	   resize warrants it. */
+	resized = (int32_t)width != output->surf_width
+	          || (int32_t)height != output->surf_height;
 
 	output->surf_width  = width;
 	output->surf_height = height;
@@ -26,7 +37,8 @@ layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface,
 
 	zwlr_layer_surface_v1_ack_configure(surface, serial);
 
-	if (barny_output_create_buffer(output) < 0) {
+	if ((resized || !output->buffer)
+	    && barny_output_create_buffer(output) < 0) {
 		fprintf(stderr, "barny: failed to create buffer\n");
 		return;
 	}
@@ -199,6 +211,8 @@ barny_output_destroy_surface(barny_output_t *output)
 		cairo_surface_destroy(output->glass_clean);
 		output->glass_clean = NULL;
 	}
+	barny_output_free_lens_cache(output);
+	output->lens_dmg_valid = false;
 	if (output->cr) {
 		cairo_destroy(output->cr);
 		output->cr = NULL;
@@ -268,6 +282,8 @@ barny_output_create_buffer(barny_output_t *output)
 		cairo_surface_destroy(output->glass_clean);
 		output->glass_clean = NULL;
 	}
+	barny_output_free_lens_cache(output);
+	output->lens_dmg_valid = false;
 
 	fd = create_shm_file(size);
 	if (fd < 0) {

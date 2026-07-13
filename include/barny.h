@@ -234,6 +234,29 @@ struct barny_output {
 	cairo_surface_t              *shadow_cache;
 	cairo_surface_t              *glass_clean;
 
+	/* droplet scratch, reused across frames: the patch geometry is fixed
+	   for a given bar, so allocating a surface and the distance-field
+	   buffers per frame was pure churn */
+	cairo_surface_t              *lens_patch;
+	int                           lens_patch_w;
+	int                           lens_patch_h;
+	float                        *lens_field;
+	double                       *lens_cols;
+
+	/* rect the droplet dirtied last frame; the next frame restores just
+	   that strip from bg_cache instead of repainting the whole bar */
+	int                           lens_dmg_x;
+	int                           lens_dmg_y;
+	int                           lens_dmg_w;
+	int                           lens_dmg_h;
+	bool                          lens_dmg_valid;
+
+	/* while set, modules that fall outside [clip_x0, clip_x1) skip their
+	   render entirely (a lens frame must not re-shape text it cannot show) */
+	bool                          render_clipped;
+	int                           clip_x0;
+	int                           clip_x1;
+
 	barny_state_t                *state;
 	struct barny_output          *next;
 };
@@ -311,6 +334,11 @@ void
 barny_render_liquid_glass(barny_output_t *output, cairo_t *cr);
 bool
 barny_lens_step(barny_output_t *output);
+/* rect the droplet covers this frame; false when it is not drawn */
+bool
+barny_lens_rect(barny_output_t *output, int *x, int *y, int *w, int *h);
+void
+barny_output_free_lens_cache(barny_output_t *output);
 void
 barny_render_modules(barny_output_t *output, cairo_t *cr);
 /* rect the module occupies on this output, false when it is not drawn there */

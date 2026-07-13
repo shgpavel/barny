@@ -643,3 +643,172 @@ test_file_extension(void)
 
 	TEST_SUITE_END();
 }
+
+#define LENS_BAR_W  800
+#define LENS_BAR_H  47
+#define LENS_PAD_L  8
+#define LENS_PAD_R  8
+#define LENS_PAD_T  4
+#define LENS_PAD_B  8
+
+static void
+lens_setup(barny_state_t *state, barny_output_t *out)
+{
+	memset(state, 0, sizeof(*state));
+	memset(out, 0, sizeof(*out));
+
+	state->config.dynamic_glass = true;
+	state->config.glass_gleam   = 0.24;
+	state->config.glass_bulge   = 15.0;
+	state->config.glass_prism   = 0.8;
+	state->config.border_radius = 28;
+	state->config.position_top  = false;
+
+	out->state                  = state;
+	out->width                  = LENS_BAR_W;
+	out->height                 = LENS_BAR_H;
+	out->pad_left               = LENS_PAD_L;
+	out->pad_right              = LENS_PAD_R;
+	out->pad_top                = LENS_PAD_T;
+	out->pad_bottom             = LENS_PAD_B;
+	out->surf_width             = LENS_PAD_L + LENS_BAR_W + LENS_PAD_R;
+	out->surf_height            = LENS_PAD_T + LENS_BAR_H + LENS_PAD_B;
+
+	state->dyn_output           = out;
+	state->lens_scale           = 1.0;
+	state->lens_vx              = 0.0;
+}
+
+static cairo_surface_t *
+lens_target(const barny_output_t *out)
+{
+	return cairo_image_surface_create(CAIRO_FORMAT_ARGB32, out->surf_width,
+	                                  out->surf_height);
+}
+
+static void
+lens_draw(barny_output_t *out, cairo_surface_t *surf, double lens_x,
+          const int *clip)
+{
+	cairo_t *cr = cairo_create(surf);
+
+	out->state->lens_x = lens_x;
+
+	if (clip) {
+		cairo_rectangle(cr, clip[0], clip[1], clip[2], clip[3]);
+		cairo_clip(cr);
+	}
+	barny_render_liquid_glass(out, cr);
+	cairo_destroy(cr);
+}
+
+static int
+lens_diff(cairo_surface_t *a, cairo_surface_t *b)
+{
+	int      w      = cairo_image_surface_get_width(a);
+	int      h      = cairo_image_surface_get_height(a);
+	int      stride = cairo_image_surface_get_stride(a);
+	uint8_t *da;
+	uint8_t *db;
+	int      x;
+	int      y;
+	int      n = 0;
+
+	cairo_surface_flush(a);
+	cairo_surface_flush(b);
+	da = cairo_image_surface_get_data(a);
+	db = cairo_image_surface_get_data(b);
+
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w * 4; x++) {
+			if (da[y * stride + x] != db[y * stride + x])
+				n++;
+		}
+	}
+
+	return n;
+}
+
+/* The frame loop redraws only the strip the droplet touches (the union of its
+   rect this frame and last), trusting the rest of the persistent buffer. That
+   is only sound if a strip-clipped render lands exactly the pixels a full
+   render would. */
+void
+test_lens_partial_redraw(void)
+{
+	barny_state_t   state;
+	barny_output_t  out;
+	cairo_surface_t *full;
+	cairo_surface_t *part;
+	double           xa = 300.0;
+	double           xb = 360.0;
+	int              ax, ay, aw, ah;
+	int              bx, by, bw, bh;
+	int              clip[4];
+	int              x0;
+	int              y0;
+	int              x1;
+	int              y1;
+
+	TEST_SUITE_BEGIN("Lens Partial Redraw");
+
+	lens_setup(&state, &out);
+
+	state.lens_x = xa;
+	ASSERT_TRUE(barny_lens_rect(&out, &ax, &ay, &aw, &ah));
+	state.lens_x = xb;
+	ASSERT_TRUE(barny_lens_rect(&out, &bx, &by, &bw, &bh));
+
+	x0      = ax < bx ? ax : bx;
+	y0      = ay < by ? ay : by;
+	x1      = (ax + aw) > (bx + bw) ? ax + aw : bx + bw;
+	y1      = (ay + ah) > (by + bh) ? ay + ah : by + bh;
+	clip[0] = x0;
+	clip[1] = y0;
+	clip[2] = x1 - x0;
+	clip[3] = y1 - y0;
+
+	TEST("droplet strip is far narrower than the bar")
+	{
+		ASSERT_TRUE(clip[2] < out.surf_width / 2);
+	}
+
+	full = lens_target(&out);
+	part = lens_target(&out);
+
+	/* reference: the whole bar drawn with the droplet at B */
+	lens_draw(&out, full, xb, NULL);
+
+	/* what the frame loop does: a full bar at A, then only the strip
+	   redrawn with the droplet now at B */
+	lens_draw(&out, part, xa, NULL);
+	lens_draw(&out, part, xb, clip);
+
+	TEST("strip redraw matches a full redraw byte for byte")
+	{
+		ASSERT_EQ_INT(0, lens_diff(full, part));
+	}
+
+	TEST("the droplet actually moved (guards against a no-op test)")
+	{
+		cairo_surface_t *at_a = lens_target(&out);
+
+		lens_draw(&out, at_a, xa, NULL);
+		ASSERT_TRUE(lens_diff(full, at_a) > 0);
+		cairo_surface_destroy(at_a);
+	}
+
+	cairo_surface_destroy(full);
+	cairo_surface_destroy(part);
+	barny_output_free_lens_cache(&out);
+	if (out.bg_cache)
+		cairo_surface_destroy(out.bg_cache);
+	if (out.lens_map)
+		cairo_surface_destroy(out.lens_map);
+	if (out.shadow_cache)
+		cairo_surface_destroy(out.shadow_cache);
+	if (out.glass_clean)
+		cairo_surface_destroy(out.glass_clean);
+
+	TEST_SUITE_END();
+}

@@ -23,6 +23,8 @@ extern void
 test_apply_displacement(void);
 extern void
 test_file_extension(void);
+extern void
+test_lens_partial_redraw(void);
 
 extern void
 test_module_register(void);
@@ -82,6 +84,7 @@ RUN_SUITE(test_blur_surface);
 RUN_SUITE(test_brightness);
 RUN_SUITE(test_apply_displacement);
 RUN_SUITE(test_file_extension);
+RUN_SUITE(test_lens_partial_redraw);
 
 printf("\n--- Module System Tests ---\n");
 RUN_SUITE(test_module_register);
