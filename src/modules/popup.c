@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,10 +14,31 @@
 #define POPUP_WIDTH_DEFAULT 180
 #define POPUP_RADIUS        12
 
-#define POPUP_ANIM_OPEN_MS  170.0
-#define POPUP_ANIM_CLOSE_MS 130.0
-#define POPUP_ANIM_SCALE    0.90
-#define POPUP_ANIM_SLIDE    9.0
+/* Liquid morph: the popup is born as a droplet squeezing out of the bar edge
+   and springs open into the data window; closing runs the morph backwards. */
+#define POPUP_MORPH_K_OPEN     200.0 /* open spring stiffness, s^-2 */
+#define POPUP_MORPH_ZETA_OPEN  0.86  /* slight jelly overshoot */
+#define POPUP_MORPH_K_CLOSE    430.0
+#define POPUP_MORPH_ZETA_CLOSE 1.0
+#define POPUP_DT_MAX           0.05
+
+#define POPUP_BLOB_W     96.0 /* droplet size at birth */
+#define POPUP_BLOB_H     40.0
+#define POPUP_NECK_SMIN  14.0 /* surface-tension fillet toward the bar */
+#define POPUP_REFRACT    1.7  /* droplet refraction, fades as it opens */
+#define POPUP_CHROMA     7.0
+#define POPUP_VEIL       0.08
+#define POPUP_VEIL_FADE  7.0
+#define POPUP_RIM_W      5.0
+#define POPUP_RIM_STR    0.28
+#define POPUP_RIM_CORE   0.50
+#define POPUP_RIM_CHROMA 0.28
+#define POPUP_SPEC_LX    (-0.30)
+#define POPUP_SPEC_LY    (-0.954)
+#define POPUP_SPEC_W     7.0
+#define POPUP_SPEC_P     10.0
+#define POPUP_SPEC_GAIN  0.55
+#define POPUP_CONTENT_IN 0.68 /* morph point where the data fades in */
 
 enum popup_anim {
 	POPUP_ANIM_NONE = 0,
@@ -44,10 +66,18 @@ struct barny_popup {
 	int                           current_w;
 	int                           current_h;
 
+	int                           body_w; /* the data window inside the surface */
+	int                           body_h;
+	int                           body_y;
+	int                           neck_h; /* rows bridging toward the bar edge */
+
 	enum popup_anim               anim;
-	uint64_t                      anim_start_ms;
+	double                        morph; /* 0 = droplet in the bar, 1 = window */
+	double                        morph_v;
+	uint64_t                      last_ms;
 	struct wl_callback           *frame_cb;
-	cairo_surface_t              *snapshot;
+	cairo_surface_t              *glass_src;     /* wallpaper + broad lighting */
+	cairo_surface_t              *content_cache; /* rendered data rows */
 };
 
 static int
@@ -109,8 +139,6 @@ popup_compose(barny_popup_t *p)
 {
 	barny_state_t   *state = p->state;
 	cairo_t         *cr    = p->cr;
-	int              pw    = p->current_w;
-	int              ph    = p->current_h;
 	barny_output_t  *out;
 	cairo_surface_t *bg;
 	int              out_w;
@@ -129,33 +157,375 @@ popup_compose(barny_popup_t *p)
 	}
 
 	cairo_save(cr);
-	barny_rounded_rect_path(cr, 0, 0, pw, ph, POPUP_RADIUS);
+	cairo_translate(cr, 0, p->body_y);
+	cairo_save(cr);
+	barny_rounded_rect_path(cr, 0, 0, p->body_w, p->body_h, POPUP_RADIUS);
 	cairo_clip(cr);
-	barny_paint_glass_bg(cr, bg, out_w, out_h, p->screen_x, p->screen_y, ph,
+	barny_paint_glass_bg(cr, bg, out_w, out_h, p->screen_x,
+	                     p->screen_y + p->body_y, p->body_h,
 	                     state->config.position_top);
 	cairo_restore(cr);
 
-	barny_draw_glass_frame(cr, pw, ph, POPUP_RADIUS);
+	barny_draw_glass_frame(cr, p->body_w, p->body_h, POPUP_RADIUS);
 
 	if (p->cb.render) {
-		content_w = pw - 2 * BARNY_POPUP_PAD_X;
-		content_h = ph - 2 * BARNY_POPUP_PAD_Y;
+		content_w = p->body_w - 2 * BARNY_POPUP_PAD_X;
+		content_h = p->body_h - 2 * BARNY_POPUP_PAD_Y;
 		cairo_save(cr);
 		cairo_translate(cr, BARNY_POPUP_PAD_X, BARNY_POPUP_PAD_Y);
 		p->cb.render(p->cb.userdata, cr, content_w, content_h);
 		cairo_restore(cr);
 	}
+	cairo_restore(cr);
 }
 
 static void
-popup_present(barny_popup_t *p, double alpha, double scale)
+popup_build_glass(barny_popup_t *p)
+{
+	barny_state_t   *state = p->state;
+	barny_output_t  *out   = state->pointer_output;
+	cairo_surface_t *bg    = NULL;
+	int              out_w = 0;
+	int              out_h = 0;
+	cairo_t         *sc;
+
+	if (p->glass_src) {
+		cairo_surface_destroy(p->glass_src);
+		p->glass_src = NULL;
+	}
+	if (out) {
+		bg    = state->displaced_wallpaper ? state->displaced_wallpaper : state->blurred_wallpaper;
+		out_w = out->width;
+		out_h = out->height;
+	}
+
+	p->glass_src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                          p->current_w, p->current_h);
+	if (cairo_surface_status(p->glass_src) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(p->glass_src);
+		p->glass_src = NULL;
+		return;
+	}
+
+	sc = cairo_create(p->glass_src);
+	barny_paint_glass_bg(sc, bg, out_w, out_h, p->screen_x, p->screen_y,
+	                     p->current_h, state->config.position_top);
+	cairo_save(sc);
+	cairo_rectangle(sc, 0, p->body_y, p->body_w, p->body_h);
+	cairo_clip(sc);
+	cairo_translate(sc, 0, p->body_y);
+	barny_draw_broad_frame(sc, p->body_w, p->body_h);
+	cairo_restore(sc);
+	cairo_destroy(sc);
+}
+
+static void
+popup_build_content(barny_popup_t *p)
+{
+	cairo_t *cc;
+
+	if (p->content_cache) {
+		cairo_surface_destroy(p->content_cache);
+		p->content_cache = NULL;
+	}
+
+	p->content_cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                              p->body_w, p->body_h);
+	if (cairo_surface_status(p->content_cache) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(p->content_cache);
+		p->content_cache = NULL;
+		return;
+	}
+
+	if (!p->cb.render)
+		return;
+
+	cc = cairo_create(p->content_cache);
+	cairo_translate(cc, BARNY_POPUP_PAD_X, BARNY_POPUP_PAD_Y);
+	p->cb.render(p->cb.userdata, cc, p->body_w - 2 * BARNY_POPUP_PAD_X,
+	             p->body_h - 2 * BARNY_POPUP_PAD_Y);
+	cairo_destroy(cc);
+}
+
+/* Draw the popup as a liquid-glass blob at morph position m: a droplet
+   squeezing out of the bar edge (m=0) that stretches through a
+   surface-tension neck and opens into the data window (m=1). Shape comes
+   from a round-rect SDF smooth-unioned with the bar half-plane; shading
+   (refraction, veil, lit rim, specular) matches the bar lens and fades out
+   as the window opens, leaving only the frame edge lighting. */
+static void
+popup_draw_liquid(barny_popup_t *p, cairo_t *cr, double m)
+{
+	bool             top    = p->state->config.position_top;
+	int              w      = p->current_w;
+	int              h      = p->current_h;
+	double           mg     = m < 0.0 ? 0.0 : (m > 1.02 ? 1.02 : m);
+	double           inv    = 1.0 - mg > 0.0 ? 1.0 - mg : 0.0;
+	double           bw0    = fmin(w * 0.5, POPUP_BLOB_W);
+	double           bh0    = fmin(p->body_h * 0.8, POPUP_BLOB_H);
+	double           hw0    = bw0 / 2.0;
+	double           hh0    = bh0 / 2.0;
+	double           r0     = fmin(hw0, hh0);
+	double           cy0    = top ? -bh0 * 0.15 : (double)h + bh0 * 0.15;
+	double           hw     = hw0 + (p->body_w / 2.0 - hw0) * mg;
+	double           hh     = hh0 + (p->body_h / 2.0 - hh0) * mg;
+	double           ccx    = w / 2.0 + (p->body_w / 2.0 - w / 2.0) * mg;
+	double           ccy    = cy0 + (p->body_y + p->body_h / 2.0 - cy0) * mg;
+	double           rr     = r0 + (POPUP_RADIUS - r0) * mg;
+	double           smk    = POPUP_NECK_SMIN * (1.0 - 0.6 * mg);
+	double           disp   = POPUP_REFRACT * inv;
+	double           chroma = POPUP_CHROMA * inv;
+	double           edge_h = BARNY_FRAME_EDGE_TOP_STOP * 2.0 * hh;
+	double           shad_h = fmin(10.0, 0.28 * 2.0 * hh);
+	double           ca;
+	cairo_surface_t *patch;
+	uint8_t         *gdata;
+	uint8_t         *ddata;
+	int              gstride;
+	int              dstride;
+	int              gsw;
+	int              gsh;
+	int              x;
+	int              y;
+
+	if (!p->glass_src)
+		return;
+	if (rr > hw)
+		rr = hw;
+	if (rr > hh)
+		rr = hh;
+
+	patch = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	if (cairo_surface_status(patch) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(patch);
+		return;
+	}
+
+	cairo_surface_flush(p->glass_src);
+	gdata   = cairo_image_surface_get_data(p->glass_src);
+	gstride = cairo_image_surface_get_stride(p->glass_src);
+	gsw     = cairo_image_surface_get_width(p->glass_src);
+	gsh     = cairo_image_surface_get_height(p->glass_src);
+	ddata   = cairo_image_surface_get_data(patch);
+	dstride = cairo_image_surface_get_stride(patch);
+
+	for (y = 0; y < h; y++) {
+		uint8_t *drow = ddata + y * dstride;
+		double   ly   = y + 0.5;
+
+		for (x = 0; x < w; x++) {
+			double  lx = x + 0.5;
+			double  d;
+			double  dl;
+			double  dr;
+			double  du;
+			double  dv;
+			double  nnx   = 0.0;
+			double  nny   = 0.0;
+			double  nlen;
+			double  aa;
+			double  depth;
+			double  pedge = 0.0;
+			double  dispx = 0.0;
+			double  dispy = 0.0;
+			double  fr;
+			double  fg;
+			double  fb;
+			double  fa;
+			double  wtop  = 0.0;
+			double  wbot  = 0.0;
+			double  atop  = 0.0;
+			double  abot  = 0.0;
+			double  aw;
+			double  veil;
+			double  ri;
+			double  core;
+			double  rim;
+			double  ty;
+			double  facing;
+			double  lit;
+			double  band;
+			double  spec;
+			double  cntr;
+			double  ap;
+			uint8_t p1[4];
+			uint8_t p2[4];
+			uint8_t p3[4];
+
+#define POPUP_SDF(px, py)                                                     \
+	barny_smin(top ? (py) : (double)h - (py),                             \
+	           barny_sd_round_rect((px) - ccx, (py) - ccy, hw, hh, rr),  \
+	           smk)
+
+			d = POPUP_SDF(lx, ly);
+			aa = 0.5 - d;
+			if (aa <= 0.0) {
+				drow[x * 4 + 0] = 0;
+				drow[x * 4 + 1] = 0;
+				drow[x * 4 + 2] = 0;
+				drow[x * 4 + 3] = 0;
+				continue;
+			}
+			if (aa > 1.0)
+				aa = 1.0;
+
+			dl   = POPUP_SDF(lx - 1.0, ly);
+			dr   = POPUP_SDF(lx + 1.0, ly);
+			du   = POPUP_SDF(lx, ly - 1.0);
+			dv   = POPUP_SDF(lx, ly + 1.0);
+			nlen = sqrt((dr - dl) * (dr - dl) + (dv - du) * (dv - du));
+			if (nlen > 1e-6) {
+				nnx = (dr - dl) / nlen;
+				nny = (dv - du) / nlen;
+			}
+			depth = -d;
+
+			if (d < 0.0 && disp > 0.01) {
+				double zone = hh;
+				double pp   = zone > 0.0 ? depth / zone : 1.0;
+				double srcoff;
+
+				if (pp > 1.0)
+					pp = 1.0;
+				srcoff = zone * (sqrt(2.0 * pp - pp * pp) - pp)
+				         * disp
+				         + 3.0 * (1.0 - pp) * inv;
+				dispx  = -nnx * srcoff;
+				dispy  = -nny * srcoff;
+				pedge  = (1.0 - pp) * (1.0 - pp);
+			}
+
+			if (chroma > 0.01) {
+				double cs = chroma * pedge;
+
+				barny_sample_bilinear(gdata, gstride, gsw, gsh,
+				                      lx + dispx - nnx * cs,
+				                      ly + dispy - nny * cs, p1);
+				barny_sample_bilinear(gdata, gstride, gsw, gsh,
+				                      lx + dispx, ly + dispy,
+				                      p2);
+				barny_sample_bilinear(gdata, gstride, gsw, gsh,
+				                      lx + dispx + nnx * cs,
+				                      ly + dispy + nny * cs, p3);
+				fb = p3[3] > 0 ? p3[0] * 255.0 / p3[3] : 0.0;
+				fg = p2[3] > 0 ? p2[1] * 255.0 / p2[3] : 0.0;
+				fr = p1[3] > 0 ? p1[2] * 255.0 / p1[3] : 0.0;
+				fa = p2[3] / 255.0;
+			} else {
+				barny_sample_bilinear(gdata, gstride, gsw, gsh,
+				                      lx + dispx, ly + dispy,
+				                      p2);
+				fb = p2[3] > 0 ? p2[0] * 255.0 / p2[3] : 0.0;
+				fg = p2[3] > 0 ? p2[1] * 255.0 / p2[3] : 0.0;
+				fr = p2[3] > 0 ? p2[2] * 255.0 / p2[3] : 0.0;
+				fa = p2[3] / 255.0;
+			}
+
+			wtop = nny < 0.0 ? -nny : 0.0;
+			wbot = nny > 0.0 ? nny : 0.0;
+			if (depth < edge_h && edge_h > 0.0)
+				atop = BARNY_FRAME_EDGE_TOP_A
+				       * (1.0 - depth / edge_h) * wtop;
+			if (depth < shad_h && shad_h > 0.0)
+				abot = BARNY_FRAME_EDGE_BOT_A
+				       * (1.0 - depth / shad_h) * wbot;
+
+			veil = depth / POPUP_VEIL_FADE;
+			if (veil < 0.0)
+				veil = 0.0;
+			if (veil > 1.0)
+				veil = 1.0;
+			veil *= POPUP_VEIL * inv;
+			aw    = veil + atop - veil * atop;
+
+			facing = nnx * POPUP_SPEC_LX + nny * POPUP_SPEC_LY;
+			lit    = 0.45 + 0.55 * (facing > 0.15 ? facing : 0.15);
+			ri     = 1.0 - depth / POPUP_RIM_W;
+			if (ri < 0.0 || d > 0.0)
+				ri = 0.0;
+			ri   = ri * ri;
+			core = 1.0 - fabs(d) / 1.4;
+			if (core < 0.0)
+				core = 0.0;
+			rim = (POPUP_RIM_STR * ri + POPUP_RIM_CORE * core * lit)
+			      * inv;
+
+			spec = 0.0;
+			cntr = 0.0;
+			if (d < 0.0 && depth < POPUP_SPEC_W && inv > 0.001) {
+				band = 1.0 - depth / POPUP_SPEC_W;
+				band = band * band * (3.0 - 2.0 * band);
+				if (facing > 0.0)
+					spec = POPUP_SPEC_GAIN * inv * band
+					       * pow(facing, POPUP_SPEC_P);
+				else
+					cntr = 0.22 * POPUP_SPEC_GAIN * inv
+					       * band
+					       * pow(-facing, POPUP_SPEC_P);
+			}
+
+			ty = hh > 0.0 ? (ly - ccy) / hh : 0.0;
+			if (ty < -1.0)
+				ty = -1.0;
+			if (ty > 1.0)
+				ty = 1.0;
+
+			fr  = fr * (1.0 - aw) + 255.0 * aw;
+			fg  = fg * (1.0 - aw) + 255.0 * aw;
+			fb  = fb * (1.0 - aw) + 255.0 * aw;
+			fr *= 1.0 - abot;
+			fg *= 1.0 - abot;
+			fb *= 1.0 - abot;
+			fr += (rim * (1.0 - POPUP_RIM_CHROMA * ty) + spec
+			       + cntr * 0.85)
+			      * 255.0;
+			fg += (rim + spec + cntr * 0.92) * 255.0;
+			fb += (rim * (1.0 + POPUP_RIM_CHROMA * ty) + spec
+			       + cntr)
+			      * 255.0;
+			if (fr > 255.0)
+				fr = 255.0;
+			if (fg > 255.0)
+				fg = 255.0;
+			if (fb > 255.0)
+				fb = 255.0;
+
+			ap              = fa * aa;
+			drow[x * 4 + 0] = (uint8_t)(fb * ap);
+			drow[x * 4 + 1] = (uint8_t)(fg * ap);
+			drow[x * 4 + 2] = (uint8_t)(fr * ap);
+			drow[x * 4 + 3] = (uint8_t)(255.0 * ap);
+#undef POPUP_SDF
+		}
+	}
+
+	cairo_surface_mark_dirty(patch);
+	cairo_set_source_surface(cr, patch, 0, 0);
+	cairo_paint(cr);
+	cairo_surface_destroy(patch);
+
+	/* the data window condenses inside the blob near the end of the morph */
+	ca = (m - POPUP_CONTENT_IN) / (1.0 - POPUP_CONTENT_IN + 0.02);
+	if (ca > 1.0)
+		ca = 1.0;
+	if (ca > 0.003 && p->content_cache) {
+		cairo_save(cr);
+		barny_rounded_rect_path(cr, ccx - hw, ccy - hh, 2.0 * hw,
+		                        2.0 * hh, rr);
+		cairo_clip(cr);
+		cairo_translate(cr, ccx, ccy);
+		cairo_scale(cr, 2.0 * hw / p->body_w, 2.0 * hh / p->body_h);
+		cairo_translate(cr, -p->body_w / 2.0, -p->body_h / 2.0);
+		cairo_set_source_surface(cr, p->content_cache, 0, 0);
+		cairo_paint_with_alpha(cr, ca);
+		cairo_restore(cr);
+	}
+}
+
+static void
+popup_present(barny_popup_t *p, double m)
 {
 	cairo_t *cr = p->cr;
-	int      pw = p->current_w;
-	int      ph = p->current_h;
-	double   ax;
-	double   ay;
-	double   slide;
 
 	if (!cr || !p->buffer)
 		return;
@@ -164,35 +534,14 @@ popup_present(barny_popup_t *p, double alpha, double scale)
 	cairo_paint(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-	if (alpha > 0.003) {
-		ax    = pw / 2.0;
-		ay    = p->state->config.position_top ? 0.0 : (double)ph;
-		slide = (1.0 - alpha) * POPUP_ANIM_SLIDE
-		        * (p->state->config.position_top ? -1.0 : 1.0);
-
-		cairo_save(cr);
-		if (scale < 0.999 || alpha < 0.999 || p->snapshot) {
-			cairo_push_group(cr);
-			cairo_translate(cr, ax, ay + slide);
-			cairo_scale(cr, scale, scale);
-			cairo_translate(cr, -ax, -ay);
-			if (p->snapshot) {
-				cairo_set_source_surface(cr, p->snapshot, 0, 0);
-				cairo_paint(cr);
-			} else {
-				popup_compose(p);
-			}
-			cairo_pop_group_to_source(cr);
-			cairo_paint_with_alpha(cr, alpha);
-		} else {
-			popup_compose(p);
-		}
-		cairo_restore(cr);
-	}
+	if (p->state->config.popup_animations)
+		popup_draw_liquid(p, cr, m);
+	else
+		popup_compose(p);
 
 	cairo_surface_flush(p->cairo_surface);
 	wl_surface_attach(p->surface, p->buffer, 0, 0);
-	wl_surface_damage_buffer(p->surface, 0, 0, pw, ph);
+	wl_surface_damage_buffer(p->surface, 0, 0, p->current_w, p->current_h);
 }
 
 static void
@@ -202,9 +551,13 @@ popup_finalize_destroy(barny_popup_t *p)
 		wl_callback_destroy(p->frame_cb);
 		p->frame_cb = NULL;
 	}
-	if (p->snapshot) {
-		cairo_surface_destroy(p->snapshot);
-		p->snapshot = NULL;
+	if (p->glass_src) {
+		cairo_surface_destroy(p->glass_src);
+		p->glass_src = NULL;
+	}
+	if (p->content_cache) {
+		cairo_surface_destroy(p->content_cache);
+		p->content_cache = NULL;
 	}
 
 	popup_teardown_buffer(p);
@@ -221,57 +574,40 @@ popup_finalize_destroy(barny_popup_t *p)
 	free(p);
 }
 
-static double
-ease_out_cubic(double t)
-{
-	double u = 1.0 - t;
-	return 1.0 - u * u * u;
-}
-
-static double
-ease_in_cubic(double t)
-{
-	return t * t * t;
-}
-
 static void popup_schedule_frame(barny_popup_t *p);
 
 static void
 popup_animate(barny_popup_t *p)
 {
-	uint64_t now = barny_now_ms();
-	double   dur;
-	double   t;
-	double   e;
-	double   alpha;
-	double   scale;
+	uint64_t now     = barny_now_ms();
+	bool     closing = p->anim == POPUP_ANIM_CLOSING;
+	double   dt      = (double)(now - p->last_ms) / 1000.0;
+	double   target  = closing ? 0.0 : 1.0;
+	double   k       = closing ? POPUP_MORPH_K_CLOSE : POPUP_MORPH_K_OPEN;
+	double   z       = closing ? POPUP_MORPH_ZETA_CLOSE
+	                           : POPUP_MORPH_ZETA_OPEN;
+	double   c       = 2.0 * z * sqrt(k);
+	bool     settled;
 
-	if (p->anim == POPUP_ANIM_CLOSING) {
-		dur   = POPUP_ANIM_CLOSE_MS;
-		t     = dur > 0 ? (double)(now - p->anim_start_ms) / dur : 1.0;
-		if (t < 0)
-			t = 0;
-		if (t > 1.0)
-			t = 1.0;
-		e     = ease_in_cubic(t);
-		alpha = 1.0 - e;
-		scale = POPUP_ANIM_SCALE + (1.0 - POPUP_ANIM_SCALE) * (1.0 - e);
-	} else {
-		dur   = POPUP_ANIM_OPEN_MS;
-		t     = dur > 0 ? (double)(now - p->anim_start_ms) / dur : 1.0;
-		if (t < 0)
-			t = 0;
-		if (t > 1.0)
-			t = 1.0;
-		e     = ease_out_cubic(t);
-		alpha = e;
-		scale = POPUP_ANIM_SCALE + (1.0 - POPUP_ANIM_SCALE) * e;
+	p->last_ms = now;
+	if (dt < 0.0)
+		dt = 0.0;
+	if (dt > POPUP_DT_MAX)
+		dt = POPUP_DT_MAX;
+
+	p->morph_v += (k * (target - p->morph) - c * p->morph_v) * dt;
+	p->morph   += p->morph_v * dt;
+
+	settled = fabs(target - p->morph) < 0.004 && fabs(p->morph_v) < 0.08;
+	if (settled) {
+		p->morph   = target;
+		p->morph_v = 0.0;
 	}
 
-	popup_present(p, alpha, scale);
+	popup_present(p, p->morph);
 
-	if (t >= 1.0) {
-		if (p->anim == POPUP_ANIM_CLOSING) {
+	if (settled) {
+		if (closing) {
 			popup_finalize_destroy(p);
 			return;
 		}
@@ -314,7 +650,7 @@ popup_paint(barny_popup_t *p)
 	if (!p->cr || !p->buffer)
 		return;
 
-	popup_present(p, 1.0, 1.0);
+	popup_present(p, 1.0);
 	wl_surface_commit(p->surface);
 }
 
@@ -354,7 +690,8 @@ popup_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 		popup_teardown_buffer(p);
 
 	pw     = (int)width > 0 ? (int)width : popup_compute_width(p);
-	ph     = (int)height > 0 ? (int)height : popup_compute_height(p);
+	ph     = (int)height > 0 ? (int)height
+	                         : popup_compute_height(p) + p->neck_h;
 	stride = pw * 4;
 	size   = stride * ph;
 
@@ -379,16 +716,29 @@ popup_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 
 	p->cairo_surface = cairo_image_surface_create_for_data(
 	        p->shm_data, CAIRO_FORMAT_ARGB32, pw, ph, stride);
-	p->cr         = cairo_create(p->cairo_surface);
-	p->current_w  = pw;
-	p->current_h  = ph;
+	p->cr        = cairo_create(p->cairo_surface);
+	p->current_w = pw;
+	p->current_h = ph;
+	p->body_w    = pw;
+	p->body_h    = ph - p->neck_h;
+	p->body_y    = p->state->config.position_top ? p->neck_h : 0;
+	if (p->body_h < 1) {
+		p->body_h = ph;
+		p->body_y = 0;
+	}
 	p->configured = true;
+
+	popup_build_glass(p);
+	if (p->anim != POPUP_ANIM_CLOSING)
+		popup_build_content(p);
 
 	if (!p->state->config.popup_animations) {
 		popup_paint(p);
 	} else if (p->anim == POPUP_ANIM_NONE) {
-		p->anim          = POPUP_ANIM_OPENING;
-		p->anim_start_ms = barny_now_ms();
+		p->anim    = POPUP_ANIM_OPENING;
+		p->morph   = 0.0;
+		p->morph_v = 0.0;
+		p->last_ms = barny_now_ms();
 		popup_animate(p);
 	} else if (p->anim == POPUP_ANIM_OPEN) {
 		popup_paint(p);
@@ -420,8 +770,6 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 	int               pw, ph;
 	int               left_margin;
 	int               center_off;
-	int               top_margin    = 0;
-	int               bottom_margin = 0;
 	int               reserved;
 	struct wl_region *empty;
 
@@ -440,9 +788,10 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 	p->owner   = owner;
 	p->cb      = *cb;
 	p->gap_px  = gap_px;
+	p->neck_h  = gap_px > 0 ? gap_px : 0;
 
 	pw         = popup_compute_width(p);
-	ph         = popup_compute_height(p);
+	ph         = popup_compute_height(p) + p->neck_h;
 
 	p->surface = wl_compositor_create_surface(state->compositor);
 	if (!p->surface) {
@@ -483,22 +832,19 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 	if (left_margin < 0)
 		left_margin = 0;
 
-	if (state->config.position_top)
-		top_margin = gap_px;
-	else
-		bottom_margin = gap_px;
-
-	zwlr_layer_surface_v1_set_margin(p->layer_surface, top_margin, 0,
-	                                 bottom_margin, left_margin);
+	/* flush against the bar edge: the neck rows at the bar side of the
+	   surface carry the liquid bridge, so no gap margin is needed */
+	zwlr_layer_surface_v1_set_margin(p->layer_surface, 0, 0, 0,
+	                                 left_margin);
 
 	p->screen_x = left_margin;
 
 	reserved    = state->config.height
 	              + (state->config.position_top ? state->config.margin_top : state->config.margin_bottom);
 	if (state->config.position_top)
-		p->screen_y = reserved + gap_px;
+		p->screen_y = reserved;
 	else
-		p->screen_y = out->height - reserved - gap_px - ph;
+		p->screen_y = out->height - reserved - ph;
 
 	wl_surface_commit(p->surface);
 
@@ -508,38 +854,19 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 void
 barny_popup_destroy(barny_popup_t *p)
 {
-	cairo_t *sc;
-
 	if (!p)
 		return;
 
+	/* the caches carry the visuals through the close morph, so the owner's
+	   callbacks are never touched after this point */
 	if (!p->state->config.popup_animations || !p->configured || !p->buffer
-	    || p->anim == POPUP_ANIM_CLOSING) {
+	    || !p->glass_src || p->anim == POPUP_ANIM_CLOSING) {
 		popup_finalize_destroy(p);
 		return;
 	}
 
-	if (!p->snapshot && p->cairo_surface) {
-		p->snapshot = cairo_image_surface_create(
-		        CAIRO_FORMAT_ARGB32, p->current_w, p->current_h);
-		if (cairo_surface_status(p->snapshot) == CAIRO_STATUS_SUCCESS) {
-			sc = cairo_create(p->snapshot);
-			cairo_set_source_surface(sc, p->cairo_surface, 0, 0);
-			cairo_paint(sc);
-			cairo_destroy(sc);
-		} else {
-			cairo_surface_destroy(p->snapshot);
-			p->snapshot = NULL;
-		}
-	}
-
-	if (!p->snapshot) {
-		popup_finalize_destroy(p);
-		return;
-	}
-
-	p->anim          = POPUP_ANIM_CLOSING;
-	p->anim_start_ms = barny_now_ms();
+	p->anim    = POPUP_ANIM_CLOSING;
+	p->last_ms = barny_now_ms();
 	if (!p->frame_cb)
 		popup_animate(p);
 }
@@ -551,6 +878,7 @@ barny_popup_redraw(barny_popup_t *p)
 		return;
 	if (p->anim == POPUP_ANIM_OPENING || p->anim == POPUP_ANIM_CLOSING)
 		return;
+	popup_build_content(p);
 	popup_paint(p);
 }
 

@@ -9,6 +9,7 @@
 #include <setjmp.h>
 
 #include "barny.h"
+#include "util.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -18,9 +19,49 @@
 #define BAR_LENS_DISP  17.0
 #define BAR_LENS_CHROMA 8.0
 
-#define BULGE_CHROMA   2.5
 #define BUBBLE_W       172.0
-#define BUBBLE_DISP    10.0
+
+#define BULGE_NECK      16     /* horizontal patch margin for neck fillets */
+#define BULGE_SMIN      9.0    /* metaball neck fillet scale (surface tension) */
+#define BULGE_REFRACT   2.30   /* lens refraction / magnification gain */
+#define BULGE_BIAS      4.0    /* min inward sample so the rim isn't starved */
+#define BULGE_CHROMA    9.0    /* chromatic dispersion at the lens edge (px) */
+#define BULGE_VEIL      0.06   /* frosted brightness lift inside the bubble */
+#define BULGE_VEIL_FADE 7.0    /* px the veil fades in from the bubble edge */
+#define BULGE_RIM_W     5.0    /* inner glow width of the bubble rim */
+#define BULGE_RIM_STR   0.30   /* soft inner glow of the bubble rim */
+#define BULGE_RIM_CORE  0.55   /* crisp bright line at the bubble outline */
+#define BULGE_RIM_CHROMA 0.28  /* vertical colour dispersion of the rim */
+
+#define LENS_SPRING_K    420.0 /* position spring stiffness, s^-2 */
+#define LENS_SPRING_ZETA 0.82  /* underdamped: slight droplet overshoot */
+#define LENS_POP_K       900.0 /* enter/leave pop spring, critically damped */
+#define LENS_DT_MAX      0.05  /* integration step cap, s */
+#define LENS_SETTLE_X    0.4   /* px */
+#define LENS_SETTLE_V    8.0   /* px/s */
+#define LENS_STRETCH_GAIN 3.2e-4 /* velocity -> horizontal stretch */
+#define LENS_STRETCH_MAX 0.18
+#define LENS_SKEW_GAIN   1.2e-4 /* velocity -> trailing-edge shear */
+#define LENS_SKEW_MAX    0.10
+
+#define LENS_PINCH_MAX   5.5   /* px of bar-edge recession under the droplet */
+#define LENS_PINCH_FADE  24.0  /* px over which the pinch dies near corners */
+#define LENS_FAR_MARGIN  12.0  /* droplet influence radius: beyond it, 1:1 copy */
+
+#define PRISM_STOPS  40
+#define PRISM_CYCLES 2.5
+
+/* Key light for the droplet specular: from above, slightly left, matching
+   the diagonal sheen of the glass frame. */
+#define SPEC_LX      (-0.30)
+#define SPEC_LY      (-0.954)
+#define SPEC_W       7.0   /* px band the specular hugs inside the rim */
+#define SPEC_P       10.0  /* highlight tightness */
+#define SPEC_GAIN    2.4   /* glass_gleam multiplier */
+#define SPEC_COUNTER 0.22  /* strength of the cool counter-arc */
+
+static void
+hsv2rgb(double hh, double s, double v, double *r, double *g, double *b);
 
 static void
 stack_blur_line(uint8_t *src, uint8_t *dst, int width, int radius, int *stack)
@@ -512,8 +553,8 @@ barny_create_displacement_map(int width, int height, barny_refraction_mode_t mod
 	return surface;
 }
 
-static void
-sample_bilinear(uint8_t *data, int stride, int width, int height, double x,
+void
+barny_sample_bilinear(uint8_t *data, int stride, int width, int height, double x,
                 double y, uint8_t *out)
 {
 	int      x0;
@@ -651,16 +692,16 @@ barny_apply_displacement(cairo_surface_t *src, cairo_surface_t *dst,
 			src_y      = y * src_scale_y + dy;
 
 			if (chromatic > 0.01) {
-				sample_bilinear(src_data, src_stride, src_width,
+				barny_sample_bilinear(src_data, src_stride, src_width,
 				                src_height,
 				                src_x + dx * chromatic * 0.1,
 				                src_y + dy * chromatic * 0.1,
 				                pixel_r);
 
-				sample_bilinear(src_data, src_stride, src_width,
+				barny_sample_bilinear(src_data, src_stride, src_width,
 				                src_height, src_x, src_y, pixel_g);
 
-				sample_bilinear(src_data, src_stride, src_width,
+				barny_sample_bilinear(src_data, src_stride, src_width,
 				                src_height,
 				                src_x - dx * chromatic * 0.1,
 				                src_y - dy * chromatic * 0.1,
@@ -675,7 +716,7 @@ barny_apply_displacement(cairo_surface_t *src, cairo_surface_t *dst,
 				dst_row[x * 4 + 3]
 				        = pixel_g[3];
 			} else {
-				sample_bilinear(src_data, src_stride, src_width,
+				barny_sample_bilinear(src_data, src_stride, src_width,
 				                src_height, src_x, src_y, pixel);
 				dst_row[x * 4 + 0] = pixel[0];
 				dst_row[x * 4 + 1] = pixel[1];
@@ -688,8 +729,8 @@ barny_apply_displacement(cairo_surface_t *src, cairo_surface_t *dst,
 	cairo_surface_mark_dirty(dst);
 }
 
-static double
-sd_round_rect(double px, double py, double hw, double hh, double r)
+double
+barny_sd_round_rect(double px, double py, double hw, double hh, double r)
 {
 	double qx      = fabs(px) - (hw - r);
 	double qy      = fabs(py) - (hh - r);
@@ -734,7 +775,7 @@ barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
 		for (x = 0; x < w; x++) {
 			double px     = x - hw + 0.5;
 			double py     = y - hh + 0.5;
-			double d      = sd_round_rect(px, py, hw, hh, r);
+			double d      = barny_sd_round_rect(px, py, hw, hh, r);
 			double dispx  = 0;
 			double dispy  = 0;
 			int    rr;
@@ -744,10 +785,10 @@ barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
 				double depth = -d;
 				double t     = 1.0 - depth / edge_w;
 				double mag   = max_disp * t * t * (3.0 - 2.0 * t);
-				double gx    = sd_round_rect(px + 1, py, hw, hh, r)
-				               - sd_round_rect(px - 1, py, hw, hh, r);
-				double gy    = sd_round_rect(px, py + 1, hw, hh, r)
-				               - sd_round_rect(px, py - 1, hw, hh, r);
+				double gx    = barny_sd_round_rect(px + 1, py, hw, hh, r)
+				               - barny_sd_round_rect(px - 1, py, hw, hh, r);
+				double gy    = barny_sd_round_rect(px, py + 1, hw, hh, r)
+				               - barny_sd_round_rect(px, py - 1, hw, hh, r);
 				double len   = sqrt(gx * gx + gy * gy);
 
 				if (len > 1e-6) {
@@ -783,6 +824,550 @@ barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
 	return surface;
 }
 
+/* Polynomial smooth-minimum: blends two signed distances so the union of two
+   shapes grows a concave "surface tension" fillet instead of a hard corner. */
+double
+barny_smin(double a, double b, double k)
+{
+	double h;
+
+	if (k <= 0.0)
+		return a < b ? a : b;
+
+	h = 0.5 + 0.5 * (b - a) / k;
+	if (h < 0.0)
+		h = 0.0;
+	if (h > 1.0)
+		h = 1.0;
+
+	return (b * (1.0 - h) + a * h) - k * h * (1.0 - h);
+}
+
+/* Render the merged bar+droplet blob into a fully self-contained premultiplied
+   ARGB patch. Coverage comes from the deformed distance field: the bar slab is
+   pinched toward the droplet (surface tension) and smooth-unioned with the
+   pill, so the bar silhouette really recedes around the lens. The interior
+   refracts the clean bar strip (glass_clean); the frame highlight, bottom
+   shadow band and spectral rim are re-derived along the deformed contour; the
+   drop shadow (shadow_cache) shows through wherever the silhouette vacates.
+   In authoritative mode the patch replaces the cached bar pixels wholesale
+   (painted with SOURCE); otherwise it is a plain overlay for the
+   squircle-corner zones the analytic field cannot reproduce. */
+static cairo_surface_t *
+build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
+                 double cxp, double cyp, double hw, double hh, double br,
+                 double skew, double bar_top, double bar_bot, double disp,
+                 double chroma, double strength, double pinch_amp,
+                 bool authoritative)
+{
+	barny_state_t   *state   = output->state;
+	double           prism   = state->config.glass_prism;
+	double           gleam   = state->config.glass_gleam;
+	double           spec_g  = gleam * SPEC_GAIN * strength;
+	double           cx      = output->pad_left;
+	double           cw      = output->width;
+	double           chh     = bar_bot - bar_top;
+	double           edge_h  = BARNY_FRAME_EDGE_TOP_STOP * chh;
+	double           shad_h  = chh * 0.28 > 10.0 ? 10.0 : chh * 0.28;
+	double           pinch_r = pw / 2.0 - 6.0;
+	int              gw      = pw + 2;
+	int              gh      = ph + 2;
+	cairo_surface_t *dst;
+	uint8_t         *gdata;
+	uint8_t         *hdata;
+	uint8_t         *bdata;
+	uint8_t         *ddata;
+	int              gstride;
+	int              hstride;
+	int              bstride;
+	int              dstride;
+	int              gsw;
+	int              gsh;
+	int              bsw;
+	int              bsh;
+	float           *df;
+	float           *ddf;
+	double          *cols;
+	double          *pinch;
+	double          *prm;
+	double           stop_r[PRISM_STOPS + 1];
+	double           stop_g[PRISM_STOPS + 1];
+	double           stop_b[PRISM_STOPS + 1];
+	int              x;
+	int              y;
+	int              i;
+
+	if (!output->glass_clean || !output->shadow_cache || !output->bg_cache)
+		return NULL;
+
+	dst = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	if (cairo_surface_status(dst) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(dst);
+		return NULL;
+	}
+
+	df   = malloc(sizeof(float) * (size_t)gw * gh * 2);
+	cols = malloc(sizeof(double) * ((size_t)gw + (size_t)pw * 3));
+	if (!df || !cols) {
+		free(df);
+		free(cols);
+		cairo_surface_destroy(dst);
+		return NULL;
+	}
+	ddf   = df + (size_t)gw * gh;
+	pinch = cols;
+	prm   = cols + gw;
+
+	cairo_surface_flush(output->glass_clean);
+	cairo_surface_flush(output->shadow_cache);
+	cairo_surface_flush(output->bg_cache);
+	gdata   = cairo_image_surface_get_data(output->glass_clean);
+	gstride = cairo_image_surface_get_stride(output->glass_clean);
+	gsw     = cairo_image_surface_get_width(output->glass_clean);
+	gsh     = cairo_image_surface_get_height(output->glass_clean);
+	hdata   = cairo_image_surface_get_data(output->shadow_cache);
+	hstride = cairo_image_surface_get_stride(output->shadow_cache);
+	bdata   = cairo_image_surface_get_data(output->bg_cache);
+	bstride = cairo_image_surface_get_stride(output->bg_cache);
+	bsw     = cairo_image_surface_get_width(output->bg_cache);
+	bsh     = cairo_image_surface_get_height(output->bg_cache);
+	ddata   = cairo_image_surface_get_data(dst);
+	dstride = cairo_image_surface_get_stride(dst);
+
+	/* replicate the baked stroke's 40-stop rainbow so the analytic rim
+	   matches it exactly at the patch borders */
+	for (i = 0; i <= PRISM_STOPS; i++) {
+		double hue = fmod((double)i / PRISM_STOPS * PRISM_CYCLES, 1.0);
+
+		hsv2rgb(hue, 0.9, 1.0, &stop_r[i], &stop_g[i], &stop_b[i]);
+	}
+	for (x = 0; x < pw; x++) {
+		double pos = ((double)(x + sox) + 0.5 - cx) / cw;
+		double f;
+		int    si;
+
+		if (pos < 0.0)
+			pos = 0.0;
+		if (pos > 1.0)
+			pos = 1.0;
+		f  = pos * PRISM_STOPS;
+		si = (int)f;
+		if (si >= PRISM_STOPS)
+			si = PRISM_STOPS - 1;
+		f             -= si;
+		prm[x * 3 + 0] = stop_r[si] + (stop_r[si + 1] - stop_r[si]) * f;
+		prm[x * 3 + 1] = stop_g[si] + (stop_g[si + 1] - stop_g[si]) * f;
+		prm[x * 3 + 2] = stop_b[si] + (stop_b[si + 1] - stop_b[si]) * f;
+	}
+
+	for (x = 0; x < gw; x++) {
+		double lx = x - 1 + 0.5;
+		double u  = pinch_r > 0.0 ? fabs(lx - cxp) / pinch_r : 1.0;
+		double w  = 0.0;
+
+		if (u < 1.0) {
+			w = 1.0 - u * u;
+			w = w * w;
+		}
+		pinch[x] = pinch_amp * w;
+	}
+
+	for (y = 0; y < gh; y++) {
+		double ly = y - 1 + 0.5;
+
+		for (x = 0; x < gw; x++) {
+			double lx = x - 1 + 0.5 - skew * (ly - cyp);
+			double dd = barny_sd_round_rect(lx - cxp, ly - cyp, hw, hh, br);
+			double db = fmax(bar_top + pinch[x] - ly,
+			                 ly - (bar_bot - pinch[x]));
+
+			ddf[y * gw + x] = (float)dd;
+			df[y * gw + x]  = (float)barny_smin(db, dd, BULGE_SMIN);
+		}
+	}
+
+	for (y = 0; y < ph; y++) {
+		uint8_t *drow = ddata + y * dstride;
+		int      sy   = y + soy;
+		uint8_t *hrow = sy >= 0 && sy < bsh ? hdata + sy * hstride
+		                                    : NULL;
+		uint8_t *brow = sy >= 0 && sy < bsh ? bdata + sy * bstride
+		                                    : NULL;
+
+		for (x = 0; x < pw; x++) {
+			int    gi  = (y + 1) * gw + (x + 1);
+			double d   = df[gi];
+			double dd  = ddf[gi];
+			double ly  = y + 0.5;
+			int    sx  = x + sox;
+			bool   inb = brow && sx >= 0 && sx < bsw;
+			double aa;
+			double cpr;
+			double cpg;
+			double cpb;
+			double ap;
+			double csr;
+			double csg;
+			double csb;
+			double as;
+			double outr;
+			double outg;
+			double outb;
+			double outa;
+			double t;
+			double cov;
+			double pa;
+
+			/* untouched by droplet and pinch: bar cache verbatim */
+			if (dd > LENS_FAR_MARGIN && pinch[x + 1] < 0.004) {
+				if (authoritative && inb) {
+					drow[x * 4 + 0] = brow[sx * 4 + 0];
+					drow[x * 4 + 1] = brow[sx * 4 + 1];
+					drow[x * 4 + 2] = brow[sx * 4 + 2];
+					drow[x * 4 + 3] = brow[sx * 4 + 3];
+				} else {
+					drow[x * 4 + 0] = 0;
+					drow[x * 4 + 1] = 0;
+					drow[x * 4 + 2] = 0;
+					drow[x * 4 + 3] = 0;
+				}
+				continue;
+			}
+
+			aa = 0.5 - d;
+			if (aa < 0.0)
+				aa = 0.0;
+			if (aa > 1.0)
+				aa = 1.0;
+
+			csr = csg = csb = as = 0.0;
+			if (authoritative && inb && hrow) {
+				csb = hrow[sx * 4 + 0];
+				csg = hrow[sx * 4 + 1];
+				csr = hrow[sx * 4 + 2];
+				as  = hrow[sx * 4 + 3];
+			}
+
+			cpr = cpg = cpb = 0.0;
+			ap  = 0.0;
+			if (aa > 0.0) {
+				double  nnx   = 0.0;
+				double  nny   = 0.0;
+				double  pedge = 0.0;
+				double  dispx = 0.0;
+				double  dispy = 0.0;
+				double  gx    = (double)sx + 0.5 - cx;
+				double  gy    = ly;
+				double  fr;
+				double  fg;
+				double  fb;
+				double  fa;
+				double  mnx;
+				double  mny;
+				double  mlen;
+				double  depth = -d;
+				double  wtop  = 0.0;
+				double  wbot  = 0.0;
+				double  atop  = 0.0;
+				double  abot  = 0.0;
+				double  aw;
+				double  veil;
+				double  ri;
+				double  core;
+				double  rim;
+				double  ty;
+				double  facing;
+				double  lit;
+				double  band;
+				double  spec;
+				double  cntr;
+				uint8_t p1[4];
+				uint8_t p2[4];
+				uint8_t p3[4];
+
+				/* Plano-convex lens: sample the strip pulled
+				   inward along the droplet normal. The interior
+				   magnifies; the rim compresses the background
+				   into a bright refractive ring. Offset -> 0 at
+				   the outline, so the bubble blends seamlessly
+				   into the bar. */
+				{
+					double nx   = ddf[gi + 1] - ddf[gi - 1];
+					double ny   = ddf[gi + gw] - ddf[gi - gw];
+					double nlen = sqrt(nx * nx + ny * ny);
+
+					if (nlen > 1e-6) {
+						nnx = nx / nlen;
+						nny = ny / nlen;
+					}
+				}
+				if (dd < 0.0) {
+					double ddep = -dd;
+					double zone = hh;
+					double p    = zone > 0.0 ? ddep / zone
+					                         : 1.0;
+					double srcoff;
+
+					if (p > 1.0)
+						p = 1.0;
+					srcoff = zone
+					         * (sqrt(2.0 * p - p * p) - p)
+					         * disp
+					         + BULGE_BIAS * (1.0 - p);
+					dispx  = -nnx * srcoff;
+					dispy  = -nny * srcoff;
+					pedge  = (1.0 - p) * (1.0 - p);
+				}
+				facing = nnx * SPEC_LX + nny * SPEC_LY;
+
+				if (chroma > 0.01) {
+					double cs = chroma * pedge;
+
+					barny_sample_bilinear(gdata, gstride, gsw, gsh,
+					                gx + dispx - nnx * cs,
+					                gy + dispy - nny * cs,
+					                p1);
+					barny_sample_bilinear(gdata, gstride, gsw, gsh,
+					                gx + dispx, gy + dispy,
+					                p2);
+					barny_sample_bilinear(gdata, gstride, gsw, gsh,
+					                gx + dispx + nnx * cs,
+					                gy + dispy + nny * cs,
+					                p3);
+					fb = p3[3] > 0 ? p3[0] * 255.0 / p3[3]
+					               : 0.0;
+					fg = p2[3] > 0 ? p2[1] * 255.0 / p2[3]
+					               : 0.0;
+					fr = p1[3] > 0 ? p1[2] * 255.0 / p1[3]
+					               : 0.0;
+					fa = p2[3] / 255.0;
+				} else {
+					barny_sample_bilinear(gdata, gstride, gsw, gsh,
+					                gx + dispx, gy + dispy,
+					                p2);
+					fb = p2[3] > 0 ? p2[0] * 255.0 / p2[3]
+					               : 0.0;
+					fg = p2[3] > 0 ? p2[1] * 255.0 / p2[3]
+					               : 0.0;
+					fr = p2[3] > 0 ? p2[2] * 255.0 / p2[3]
+					               : 0.0;
+					fa = p2[3] / 255.0;
+				}
+
+				/* contour normal of the merged field drives
+				   the edge relighting: highlight where the
+				   contour faces up, shadow band where it faces
+				   down */
+				mnx  = df[gi + 1] - df[gi - 1];
+				mny  = df[gi + gw] - df[gi - gw];
+				mlen = sqrt(mnx * mnx + mny * mny);
+				if (mlen > 1e-4) {
+					mny /= mlen;
+					wtop = mny < 0.0 ? -mny : 0.0;
+					wbot = mny > 0.0 ? mny : 0.0;
+				}
+				if (depth < edge_h && edge_h > 0.0)
+					atop = BARNY_FRAME_EDGE_TOP_A
+					       * (1.0 - depth / edge_h) * wtop;
+				if (depth < shad_h && shad_h > 0.0)
+					abot = BARNY_FRAME_EDGE_BOT_A
+					       * (1.0 - depth / shad_h) * wbot;
+
+				/* frosted brightness lift inside the bubble */
+				veil = -dd / BULGE_VEIL_FADE;
+				if (veil < 0.0)
+					veil = 0.0;
+				if (veil > 1.0)
+					veil = 1.0;
+				veil *= BULGE_VEIL * strength;
+				aw    = veil + atop - veil * atop;
+
+				/* crisp bright rim tracing the droplet, lit
+				   from the key light instead of a uniform ring */
+				lit = 0.45
+				      + 0.55 * (facing > 0.15 ? facing : 0.15);
+				ri  = 1.0 + dd / BULGE_RIM_W;
+				if (ri < 0.0 || dd > 0.0)
+					ri = 0.0;
+				ri   = ri * ri;
+				core = 1.0 - fabs(dd) / 1.4;
+				if (core < 0.0)
+					core = 0.0;
+				rim = (BULGE_RIM_STR * ri
+				       + BULGE_RIM_CORE * core * lit)
+				      * strength;
+				if (rim > 1.0)
+					rim = 1.0;
+
+				/* specular: an arc hugging the rim where the
+				   droplet surface faces the light, plus a faint
+				   cool counter-arc opposite it */
+				spec = 0.0;
+				cntr = 0.0;
+				if (dd < 0.0 && -dd < SPEC_W && spec_g > 0.001) {
+					band = 1.0 + dd / SPEC_W;
+					band = band * band * (3.0 - 2.0 * band);
+					if (facing > 0.0)
+						spec = spec_g * band
+						       * pow(facing, SPEC_P);
+					else
+						cntr = SPEC_COUNTER * spec_g
+						       * band
+						       * pow(-facing, SPEC_P);
+				}
+				ty = (ly - cyp) / hh;
+				if (ty < -1.0)
+					ty = -1.0;
+				if (ty > 1.0)
+					ty = 1.0;
+
+				fr  = fr * (1.0 - aw) + 255.0 * aw;
+				fg  = fg * (1.0 - aw) + 255.0 * aw;
+				fb  = fb * (1.0 - aw) + 255.0 * aw;
+				fr *= 1.0 - abot;
+				fg *= 1.0 - abot;
+				fb *= 1.0 - abot;
+				fr += (rim * (1.0 - BULGE_RIM_CHROMA * ty)
+				       + spec + cntr * 0.85)
+				      * 255.0;
+				fg += (rim + spec + cntr * 0.92) * 255.0;
+				fb += (rim * (1.0 + BULGE_RIM_CHROMA * ty)
+				       + spec + cntr)
+				      * 255.0;
+				if (fr > 255.0)
+					fr = 255.0;
+				if (fg > 255.0)
+					fg = 255.0;
+				if (fb > 255.0)
+					fb = 255.0;
+
+				ap  = fa * aa;
+				cpr = fr * ap;
+				cpg = fg * ap;
+				cpb = fb * ap;
+			}
+
+			outb = cpb + csb * (1.0 - ap);
+			outg = cpg + csg * (1.0 - ap);
+			outr = cpr + csr * (1.0 - ap);
+			outa = 255.0 * ap + as * (1.0 - ap);
+
+			/* spectral rim: additive stroke tracing the deformed
+			   contour, matching the baked stroke on the straight
+			   stretches */
+			t   = -d;
+			cov = t < 1.6 - t ? t : 1.6 - t;
+			cov += 0.5;
+			if (cov < 0.0)
+				cov = 0.0;
+			if (cov > 1.0)
+				cov = 1.0;
+			pa = prism > 0.001 ? prism * cov : 0.0;
+			if (!authoritative)
+				pa *= aa;
+			if (pa > 0.0) {
+				outr += prm[x * 3 + 0] * 255.0 * pa;
+				outg += prm[x * 3 + 1] * 255.0 * pa;
+				outb += prm[x * 3 + 2] * 255.0 * pa;
+				outa += 255.0 * pa;
+			}
+			if (outa > 255.0)
+				outa = 255.0;
+			if (outr > outa)
+				outr = outa;
+			if (outg > outa)
+				outg = outa;
+			if (outb > outa)
+				outb = outa;
+
+			drow[x * 4 + 0] = (uint8_t)outb;
+			drow[x * 4 + 1] = (uint8_t)outg;
+			drow[x * 4 + 2] = (uint8_t)outr;
+			drow[x * 4 + 3] = (uint8_t)outa;
+		}
+	}
+
+	free(df);
+	free(cols);
+
+	cairo_surface_mark_dirty(dst);
+
+	return dst;
+}
+
+/* Advance the lens springs by one frame. The pill position chases the
+   pointer with an underdamped spring (droplet inertia); the pop scale
+   grows/dissolves the droplet on bar enter/leave. Returns true while the
+   springs are still in motion, so the caller keeps the frame loop alive. */
+bool
+barny_lens_step(barny_output_t *output)
+{
+	barny_state_t *state = output->state;
+	uint64_t       now;
+	double         dt;
+	double         tx;
+	double         damp;
+	double         pop_damp;
+	double         bmin;
+	double         bmax;
+
+	if (!state->config.dynamic_glass || output != state->dyn_output
+	    || !state->lens_animating)
+		return false;
+
+	now                 = barny_now_ms();
+	dt                  = (double)(now - state->lens_prev_ms) / 1000.0;
+	state->lens_prev_ms = now;
+	if (dt < 0.0)
+		dt = 0.0;
+	if (dt > LENS_DT_MAX)
+		dt = LENS_DT_MAX;
+
+	bmin = output->pad_left + BUBBLE_W / 2.0;
+	bmax = output->pad_left + output->width - BUBBLE_W / 2.0;
+	if (bmax < bmin)
+		bmax = bmin;
+
+	tx = state->pointer_output == output ? state->pointer_x
+	                                     : state->lens_x;
+	if (tx < bmin)
+		tx = bmin;
+	if (tx > bmax)
+		tx = bmax;
+
+	damp     = 2.0 * LENS_SPRING_ZETA * sqrt(LENS_SPRING_K);
+	pop_damp = 2.0 * sqrt(LENS_POP_K);
+
+	state->lens_vx += (LENS_SPRING_K * (tx - state->lens_x)
+	                   - damp * state->lens_vx)
+	                  * dt;
+	state->lens_x  += state->lens_vx * dt;
+
+	state->lens_sv += (LENS_POP_K
+	                           * (state->lens_target_scale
+	                              - state->lens_scale)
+	                   - pop_damp * state->lens_sv)
+	                  * dt;
+	state->lens_scale += state->lens_sv * dt;
+	if (state->lens_scale < 0.0)
+		state->lens_scale = 0.0;
+	if (state->lens_scale > 1.0)
+		state->lens_scale = 1.0;
+
+	if (fabs(tx - state->lens_x) < LENS_SETTLE_X
+	    && fabs(state->lens_vx) < LENS_SETTLE_V
+	    && fabs(state->lens_target_scale - state->lens_scale) < 0.01
+	    && fabs(state->lens_sv) < 0.1) {
+		state->lens_x         = tx;
+		state->lens_vx        = 0.0;
+		state->lens_scale     = state->lens_target_scale;
+		state->lens_sv        = 0.0;
+		state->lens_animating = false;
+	}
+
+	return state->lens_animating;
+}
+
 static void
 render_dynamic(barny_output_t *output, cairo_t *cr)
 {
@@ -792,16 +1377,15 @@ render_dynamic(barny_output_t *output, cairo_t *cr)
 	double           cy     = output->pad_top;
 	double           cw     = output->width;
 	double           ch     = output->height;
-	double           px     = state->pointer_x;
-	double           py     = state->pointer_y;
+	double           px     = state->lens_x;
+	double           s      = state->lens_scale;
 	double           bulge  = state->config.glass_bulge;
-	double           gleam  = state->config.glass_gleam;
 
 	if (!state->config.dynamic_glass)
 		return;
-	if (output != state->pointer_output || !output->bg_cache)
+	if (output != state->dyn_output || !output->bg_cache)
 		return;
-	if (px < cx || px > cx + cw || py < cy || py > cy + ch)
+	if (s < 0.005)
 		return;
 
 	if (bulge > 0.1) {
@@ -810,104 +1394,91 @@ render_dynamic(barny_output_t *output, cairo_t *cr)
 		                                : output->pad_bottom;
 		double           bw   = BUBBLE_W;
 		double           bh   = ch + 2 * over;
-		double           br   = bh * 0.5;
+		double           stretch = 1.0
+		                           + fmin(LENS_STRETCH_GAIN
+		                                          * fabs(state->lens_vx),
+		                                  LENS_STRETCH_MAX);
+		double           hw   = bw / 2.0 * stretch * s;
+		double           hh   = bh / 2.0
+		                        * (1.0 - 0.55 * (stretch - 1.0)) * s;
+		double           br   = hh;
 		double           bcx  = px;
-		double           bcy  = cy + ch / 2.0;
-		int              iw   = (int)bw;
-		int              ih   = (int)bh;
+		int              pw   = (int)(bw * (1.0 + LENS_STRETCH_MAX))
+		                        + 2 * BULGE_NECK;
+		int              ph   = (int)bh;
+		double           straight_l = cx + radius;
+		double           straight_r = cx + cw - radius;
+		double           margin;
+		double           corner_ramp;
+		double           pinch_amp;
+		double           skew;
+		bool             authoritative;
 		int              x0;
 		int              y0;
-		cairo_surface_t *src;
-		cairo_surface_t *warped;
-		cairo_t         *sc;
-		cairo_pattern_t *rim;
-		cairo_pattern_t *sp;
-		cairo_surface_t *bg = state->blurred_wallpaper;
-		double           gl;
-		double           gcy;
+		cairo_surface_t *patch;
 
-		if (br > bw / 2.0)
-			br = bw / 2.0;
+		if (br > hw)
+			br = hw;
 		if (bcx < cx + bw / 2.0)
 			bcx = cx + bw / 2.0;
 		if (bcx > cx + cw - bw / 2.0)
 			bcx = cx + cw - bw / 2.0;
 
-		x0 = (int)(bcx - bw / 2.0);
-		y0 = (int)(bcy - bh / 2.0);
+		x0 = (int)(bcx - pw / 2.0);
+		y0 = (int)(cy - over);
 
-		if (!output->bulge_map)
-			output->bulge_map = barny_create_edge_lens_map(
-			        iw, ih, (int)br, bh * 0.42, BUBBLE_DISP);
+		/* The analytic field cannot reproduce the squircle corners, so
+		   the SOURCE rewrite is only allowed on the straight stretch;
+		   near the corners the pinch dies off and the patch degrades
+		   to a plain overlay. */
+		authoritative = x0 >= straight_l && x0 + pw <= straight_r;
+		margin        = fmin(x0 - straight_l,
+		                     straight_r - (x0 + pw));
+		if (margin < 0.0)
+			margin = 0.0;
+		corner_ramp = margin >= LENS_PINCH_FADE
+		                      ? 1.0
+		                      : margin / LENS_PINCH_FADE;
+		corner_ramp = corner_ramp * corner_ramp
+		              * (3.0 - 2.0 * corner_ramp);
+		pinch_amp   = LENS_PINCH_MAX * (bulge / 15.0) * s * corner_ramp;
+		if (pinch_amp > ch * 0.2)
+			pinch_amp = ch * 0.2;
 
-		if (output->bulge_map && bg) {
-			src    = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
-			warped = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
+		skew = LENS_SKEW_GAIN * state->lens_vx;
+		if (skew > LENS_SKEW_MAX)
+			skew = LENS_SKEW_MAX;
+		if (skew < -LENS_SKEW_MAX)
+			skew = -LENS_SKEW_MAX;
 
-			sc = cairo_create(src);
-			cairo_translate(sc, -(x0 - output->pad_left),
-			                -(y0 - output->pad_top));
-			barny_paint_glass_bg(sc, bg, cw, ch, 0, 0, ch,
-			                     state->config.position_top);
-			cairo_destroy(sc);
+		patch = build_lens_patch(output, x0, y0, pw, ph,
+		                         bcx - x0, ph / 2.0, hw, hh, br, skew,
+		                         over, over + ch,
+		                         BULGE_REFRACT * s, BULGE_CHROMA * s,
+		                         s, pinch_amp, authoritative);
 
-			barny_apply_displacement(src, warped, output->bulge_map,
-			                         BUBBLE_DISP, BULGE_CHROMA);
-
+		if (patch) {
 			cairo_save(cr);
-			barny_rounded_rect_path(cr, cx, cy - over, cw,
-			                        ch + 2 * over, radius);
-			cairo_clip(cr);
-
-			cairo_save(cr);
-			barny_rounded_rect_path(cr, x0, y0, iw, ih, br);
-			cairo_clip(cr);
-			cairo_set_source_surface(cr, warped, x0, y0);
+			if (authoritative) {
+				cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+				cairo_rectangle(cr, x0, y0, pw, ph);
+				cairo_clip(cr);
+			} else {
+				barny_rounded_rect_path(cr, cx, cy - over, cw,
+				                        ch + 2 * over, radius);
+				cairo_clip(cr);
+			}
+			cairo_set_source_surface(cr, patch, x0, y0);
 			cairo_paint(cr);
-
-			gl  = gleam * 3.0;
-			if (gl > 0.95)
-				gl = 0.95;
-			gcy = cy + ch * 0.26;
-			cairo_save(cr);
-			cairo_translate(cr, bcx, gcy);
-			cairo_scale(cr, 1.0, 0.4);
-			sp = cairo_pattern_create_radial(0, 0, 0, 0, 0, bw * 0.14);
-			cairo_pattern_add_color_stop_rgba(sp, 0.00, 1, 1, 1, gl);
-			cairo_pattern_add_color_stop_rgba(sp, 0.42, 1, 1, 1,
-			                                  gl * 0.55);
-			cairo_pattern_add_color_stop_rgba(sp, 0.78, 1, 1, 1,
-			                                  gl * 0.06);
-			cairo_pattern_add_color_stop_rgba(sp, 1.00, 1, 1, 1, 0.0);
-			cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
-			cairo_set_source(cr, sp);
-			cairo_paint(cr);
-			cairo_pattern_destroy(sp);
 			cairo_restore(cr);
-			cairo_restore(cr);
-
-			rim = cairo_pattern_create_linear(bcx, y0, bcx, y0 + ih);
-			cairo_pattern_add_color_stop_rgba(rim, 0.0, 1, 1, 1, 0.30);
-			cairo_pattern_add_color_stop_rgba(rim, 0.5, 1, 1, 1, 0.05);
-			cairo_pattern_add_color_stop_rgba(rim, 1.0, 1, 1, 1, 0.12);
-			barny_rounded_rect_path(cr, x0 + 1, y0 + 1, iw - 2, ih - 2,
-			                        br - 0.5);
-			cairo_set_source(cr, rim);
-			cairo_set_line_width(cr, 1.5);
-			cairo_stroke(cr);
-			cairo_pattern_destroy(rim);
-
-			cairo_restore(cr);
-
-			cairo_surface_destroy(src);
-			cairo_surface_destroy(warped);
+			cairo_surface_destroy(patch);
 		}
 	}
 }
 
-static void
-draw_bar_shadow(cairo_t *cr, int cx, int cy, int cw, int ch, int radius,
-                int surf_w, int surf_h)
+static cairo_surface_t *
+create_bar_shadow(int cx, int cy, int cw, int ch, int radius, int surf_w,
+                  int surf_h)
 {
 	cairo_surface_t *shadow;
 	cairo_t         *sc;
@@ -915,7 +1486,7 @@ draw_bar_shadow(cairo_t *cr, int cx, int cy, int cw, int ch, int radius,
 	shadow = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
 	if (cairo_surface_status(shadow) != CAIRO_STATUS_SUCCESS) {
 		cairo_surface_destroy(shadow);
-		return;
+		return NULL;
 	}
 
 	sc = cairo_create(shadow);
@@ -926,9 +1497,33 @@ draw_bar_shadow(cairo_t *cr, int cx, int cy, int cw, int ch, int radius,
 
 	barny_blur_surface(shadow, 12);
 
-	cairo_set_source_surface(cr, shadow, 0, 0);
+	return shadow;
+}
+
+/* The broad part of the glass frame lighting: the full-height gradient with
+   the contour-keyed edge component removed (see FRAME_TOP_EDGE_*) plus the
+   diagonal sheen. Baked into glass_clean so the lens patch can re-derive the
+   edge lighting along the deformed contour without double-counting. */
+void
+barny_draw_broad_frame(cairo_t *cr, double w, double h)
+{
+	cairo_pattern_t *p;
+
+	p = cairo_pattern_create_linear(0, 0, 0, h);
+	cairo_pattern_add_color_stop_rgba(p, 0.00, 1, 1, 1, 0.05);
+	cairo_pattern_add_color_stop_rgba(p, 0.14, 1, 1, 1, 0.05);
+	cairo_pattern_add_color_stop_rgba(p, 0.55, 1, 1, 1, 0.022);
+	cairo_pattern_add_color_stop_rgba(p, 1.00, 1, 1, 1, 0.035);
+	cairo_set_source(cr, p);
 	cairo_paint(cr);
-	cairo_surface_destroy(shadow);
+	cairo_pattern_destroy(p);
+
+	p = cairo_pattern_create_linear(0, 0, w * 0.55, h);
+	cairo_pattern_add_color_stop_rgba(p, 0.0, 1, 1, 1, 0.10);
+	cairo_pattern_add_color_stop_rgba(p, 0.4, 1, 1, 1, 0.0);
+	cairo_set_source(cr, p);
+	cairo_paint(cr);
+	cairo_pattern_destroy(p);
 }
 
 static void
@@ -995,25 +1590,46 @@ build_glass_bg(barny_output_t *output)
 	int              cy     = output->pad_top;
 	int              cw     = output->width;
 	int              ch     = output->height;
+	int              over   = state->config.position_top
+	                                  ? output->pad_top
+	                                  : output->pad_bottom;
 	cairo_surface_t *cache;
 	cairo_t         *cr;
 	cairo_surface_t *bg;
 	cairo_surface_t *src;
 	cairo_surface_t *lensed;
+	cairo_surface_t *shadow;
+	cairo_surface_t *strip_src;
 	cairo_t         *sc;
 
 	cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sw, sh);
 	cr    = cairo_create(cache);
 	bg    = state->blurred_wallpaper;
 
-	cairo_save(cr);
-	if (state->config.position_top)
-		cairo_rectangle(cr, 0, cy, sw, sh - cy);
-	else
-		cairo_rectangle(cr, 0, 0, sw, cy + ch);
-	cairo_clip(cr);
-	draw_bar_shadow(cr, cx, cy, cw, ch, radius, sw, sh);
-	cairo_restore(cr);
+	/* The clipped shadow is kept as its own cache: it is what shows
+	   through wherever the lens pinches the bar silhouette away. */
+	if (output->shadow_cache) {
+		cairo_surface_destroy(output->shadow_cache);
+		output->shadow_cache = NULL;
+	}
+	shadow = create_bar_shadow(cx, cy, cw, ch, radius, sw, sh);
+	if (shadow) {
+		output->shadow_cache = cairo_image_surface_create(
+		        CAIRO_FORMAT_ARGB32, sw, sh);
+		sc = cairo_create(output->shadow_cache);
+		if (state->config.position_top)
+			cairo_rectangle(sc, 0, cy, sw, sh - cy);
+		else
+			cairo_rectangle(sc, 0, 0, sw, cy + ch);
+		cairo_clip(sc);
+		cairo_set_source_surface(sc, shadow, 0, 0);
+		cairo_paint(sc);
+		cairo_destroy(sc);
+		cairo_surface_destroy(shadow);
+
+		cairo_set_source_surface(cr, output->shadow_cache, 0, 0);
+		cairo_paint(cr);
+	}
 
 	src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
 	sc  = cairo_create(src);
@@ -1047,6 +1663,29 @@ build_glass_bg(barny_output_t *output)
 	barny_draw_glass_frame(cr, cw, ch, radius);
 	draw_spectral_rim(cr, cw, ch, radius, state->config.glass_prism);
 	cairo_restore(cr);
+
+	/* Clean strip for the lens patch: bar interior + broad lighting only
+	   (no contour-keyed edge light, no spectral rim, no rounded clip);
+	   the overrun rows pad-extend the edge rows for the droplet caps. */
+	if (output->glass_clean) {
+		cairo_surface_destroy(output->glass_clean);
+		output->glass_clean = NULL;
+	}
+	strip_src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
+	sc        = cairo_create(strip_src);
+	cairo_set_source_surface(sc, lensed, 0, 0);
+	cairo_paint(sc);
+	barny_draw_broad_frame(sc, cw, ch);
+	cairo_destroy(sc);
+
+	output->glass_clean = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                                 cw, ch + 2 * over);
+	sc                  = cairo_create(output->glass_clean);
+	cairo_set_source_surface(sc, strip_src, 0, over);
+	cairo_pattern_set_extend(cairo_get_source(sc), CAIRO_EXTEND_PAD);
+	cairo_paint(sc);
+	cairo_destroy(sc);
+	cairo_surface_destroy(strip_src);
 
 	cairo_surface_destroy(src);
 	cairo_surface_destroy(lensed);

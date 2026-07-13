@@ -15,6 +15,14 @@
 #define BARNY_MAX_MODULES    32
 #define BARNY_BAR_OVERRUN    6
 
+/* Analytic split of the glass frame lighting: the broad part is painted by
+   barny_draw_broad_frame, the edge part is re-derived along the (possibly
+   deformed) contour; broad + edge must sum to the gradients painted by
+   barny_draw_glass_frame (glass.c). */
+#define BARNY_FRAME_EDGE_TOP_A    0.08
+#define BARNY_FRAME_EDGE_TOP_STOP 0.14
+#define BARNY_FRAME_EDGE_BOT_A    0.16
+
 typedef struct barny_config barny_config_t;
 typedef struct barny_state  barny_state_t;
 typedef struct barny_output barny_output_t;
@@ -218,7 +226,8 @@ struct barny_output {
 
 	cairo_surface_t              *bg_cache;
 	cairo_surface_t              *lens_map;
-	cairo_surface_t              *bulge_map;
+	cairo_surface_t              *shadow_cache;
+	cairo_surface_t              *glass_clean;
 
 	barny_state_t                *state;
 	struct barny_output          *next;
@@ -241,6 +250,12 @@ struct barny_state {
 
 	barny_output_t             *dyn_output;
 	bool                        dyn_dirty;
+
+	double                      lens_x, lens_vx;
+	double                      lens_scale, lens_sv;
+	double                      lens_target_scale;
+	uint64_t                    lens_prev_ms;
+	bool                        lens_animating;
 
 	barny_menu_t               *menu;
 
@@ -289,6 +304,8 @@ void
 barny_render_frame(barny_output_t *output);
 void
 barny_render_liquid_glass(barny_output_t *output, cairo_t *cr);
+bool
+barny_lens_step(barny_output_t *output);
 void
 barny_render_modules(barny_output_t *output, cairo_t *cr);
 
@@ -302,6 +319,15 @@ barny_paint_glass_bg(cairo_t *cr, cairo_surface_t *bg, int out_w, int out_h,
 void
 barny_draw_glass_frame(cairo_t *cr, double w, double h, double r);
 
+void
+barny_draw_broad_frame(cairo_t *cr, double w, double h);
+double
+barny_sd_round_rect(double px, double py, double hw, double hh, double r);
+double
+barny_smin(double a, double b, double k);
+void
+barny_sample_bilinear(uint8_t *data, int stride, int width, int height,
+                      double x, double y, uint8_t *out);
 void
 barny_blur_surface(cairo_surface_t *surface, int radius);
 void

@@ -232,6 +232,7 @@ barny_render_frame(barny_output_t *output)
 	barny_state_t *state;
 	int            saved_widths[BARNY_MAX_MODULES];
 	bool           width_changed = false;
+	bool           lens_anim;
 	int            i;
 	int            new_w;
 
@@ -245,6 +246,8 @@ barny_render_frame(barny_output_t *output)
 	}
 
 	output->redraw_queued = false;
+
+	lens_anim             = barny_lens_step(output);
 
 	cr                    = output->cr;
 	state                 = output->state;
@@ -274,6 +277,10 @@ barny_render_frame(barny_output_t *output)
 		if (state->modules[i]) {
 			state->modules[i]->dirty = false;
 		}
+	}
+
+	if (lens_anim) {
+		output->redraw_queued = true;
 	}
 
 	barny_output_request_frame(output);

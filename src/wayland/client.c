@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include "barny.h"
+#include "util.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 static void
@@ -119,6 +120,14 @@ pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
 	if (state->pointer_output) {
 		state->dyn_output = state->pointer_output;
 		state->dyn_dirty  = true;
+
+		if (state->lens_scale < 0.01) {
+			state->lens_x       = state->pointer_x;
+			state->lens_vx      = 0.0;
+			state->lens_prev_ms = barny_now_ms();
+		}
+		state->lens_target_scale = 1.0;
+		state->lens_animating    = true;
 	}
 }
 
@@ -139,6 +148,9 @@ pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
 
 	state->pointer_output  = NULL;
 	state->pointer_surface = NULL;
+
+	state->lens_target_scale = 0.0;
+	state->lens_animating    = true;
 
 	state->dyn_dirty       = true;
 }
@@ -166,8 +178,9 @@ pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time,
 	}
 
 	if (state->pointer_output) {
-		state->dyn_output = state->pointer_output;
-		state->dyn_dirty  = true;
+		state->dyn_output      = state->pointer_output;
+		state->dyn_dirty       = true;
+		state->lens_animating  = true;
 	}
 
 	mx               = (int)state->pointer_x;
