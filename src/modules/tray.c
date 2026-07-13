@@ -13,7 +13,6 @@ typedef struct {
 	int            icon_size;
 	int            icon_spacing;
 	int            item_count;
-	int            render_x;
 } tray_data_t;
 
 static int
@@ -151,9 +150,7 @@ tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	cfg  = &data->state->config;
 	(void)w;
 
-	data->render_x = x;
-
-	items          = barny_sni_host_get_items(data->state);
+	items = barny_sni_host_get_items(data->state);
 	if (!items) {
 		return;
 	}
@@ -222,6 +219,7 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 {
 	tray_data_t *data;
 	sni_item_t  *items;
+	int          base_x;
 	int          rel_x;
 	int          icon_x;
 	sni_item_t  *item;
@@ -233,7 +231,11 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 		return;
 	}
 
-	rel_x  = x - data->render_x;
+	if (!barny_pointer_module_rect(data->state, self, &base_x, NULL)) {
+		return;
+	}
+
+	rel_x  = x - base_x;
 	icon_x = 4;
 
 	for (item = items; item; item = item->next) {
@@ -247,7 +249,7 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 		icon_end = icon_x + data->icon_size;
 
 		if (rel_x >= icon_x && rel_x < icon_end) {
-			int   icon_abs = data->render_x + icon_x;
+			int   icon_abs = base_x + icon_x;
 			char *menu_path;
 
 			if (button == 272) {

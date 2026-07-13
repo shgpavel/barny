@@ -174,11 +174,12 @@ pick_victim(barny_state_t *state,
 }
 
 static void
-render_section(barny_state_t *state, cairo_t *cr, const int *idx, int n,
+render_section(barny_output_t *output, cairo_t *cr, const int *idx, int n,
                int start_x, int base_y, int avail_h, int spacing,
                bool include_gaps, const bool *dropped)
 {
-	int             x = start_x;
+	barny_state_t  *state = output->state;
+	int             x     = start_x;
 	int             i;
 	int             j;
 	barny_module_t *mod;
@@ -192,13 +193,10 @@ render_section(barny_state_t *state, cairo_t *cr, const int *idx, int n,
 		if (!mod)
 			continue;
 
-		if (is_gap_placeholder(mod) && !include_gaps) {
-			mod->render_x = -1;
+		if (is_gap_placeholder(mod) && !include_gaps)
 			continue;
-		}
 
 		if (dropped[j]) {
-			mod->render_x = -1;
 			if (mod->render) {
 				h = mod->height > 0 ? mod->height : avail_h;
 				cairo_save(cr);
@@ -211,11 +209,13 @@ render_section(barny_state_t *state, cairo_t *cr, const int *idx, int n,
 			continue;
 		}
 
-		w             = mod->width > 0 ? mod->width : 0;
-		h             = mod->height > 0 ? mod->height : avail_h;
-		y             = base_y + (avail_h - h) / 2;
+		w                = mod->width > 0 ? mod->width : 0;
+		h                = mod->height > 0 ? mod->height : avail_h;
+		y                = base_y + (avail_h - h) / 2;
 
-		mod->render_x = x;
+		output->mod_x[j] = x;
+		output->mod_w[j] = w;
+
 		cairo_save(cr);
 		if (mod->render)
 			mod->render(mod, cr, x, y, w, h);
@@ -320,10 +320,9 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 	int             center_start;
 	int             right_start;
 
-	for (i = 0; i < state->module_count; i++) {
-		if (state->modules[i]) {
-			state->modules[i]->render_x = -1;
-		}
+	for (i = 0; i < BARNY_MAX_MODULES; i++) {
+		output->mod_x[i] = -1;
+		output->mod_w[i] = 0;
 	}
 
 	for (i = 0; i < state->module_count; i++) {
@@ -372,18 +371,18 @@ barny_render_modules(barny_output_t *output, cairo_t *cr)
 	}
 
 layout_ready:
-	render_section(state, cr, left, lc, cx0 + pad_l, cy0, height, spacing,
+	render_section(output, cr, left, lc, cx0 + pad_l, cy0, height, spacing,
 	               include_gaps, dropped);
 
 	center_start = (width / 2) - total_c / 2;
 	if (center_start < pad_l)
 		center_start = pad_l;
-	render_section(state, cr, center, cc, cx0 + center_start, cy0, height,
+	render_section(output, cr, center, cc, cx0 + center_start, cy0, height,
 	               spacing, include_gaps, dropped);
 
 	right_start = (width - pad_r) - total_r;
 	if (right_start < pad_l)
 		right_start = pad_l;
-	render_section(state, cr, right, rc, cx0 + right_start, cy0, height,
+	render_section(output, cr, right, rc, cx0 + right_start, cy0, height,
 	               spacing, include_gaps, dropped);
 }

@@ -25,7 +25,6 @@ typedef struct {
 	workspace_info_t      workspaces[MAX_WORKSPACES];
 	int                   workspace_count;
 	PangoFontDescription *font_desc;
-	int                   render_x;
 } workspace_data_t;
 
 static void
@@ -211,9 +210,7 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	int               i;
 	(void)w;
 
-	data->render_x = x;
-
-	layout         = pango_cairo_create_layout(cr);
+	layout = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, data->font_desc);
 
 	for (i = 0; i < data->workspace_count; i++) {
@@ -279,13 +276,19 @@ workspace_click(barny_module_t *self, int button, int click_x, int click_y)
 	workspace_data_t *data           = self->data;
 	int               indicator_size = data->state->config.workspace_indicator_size;
 	int               spacing        = data->state->config.workspace_spacing;
-	int               rel_x          = click_x - data->render_x;
+	int               base_x;
+	int               rel_x;
 	int               x              = 0;
 	int               i;
 	(void)click_y;
 
 	if (button != 272)
 		return;
+
+	if (!barny_pointer_module_rect(data->state, self, &base_x, NULL))
+		return;
+
+	rel_x = click_x - base_x;
 
 	for (i = 0; i < data->workspace_count; i++) {
 		int      cx   = x + indicator_size / 2;

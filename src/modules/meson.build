@@ -9,6 +9,7 @@ barny_sources += files(
     'layout_apply.c',
     'menu.c',
     'module.c',
+    'module_geom.c',
     'network.c',
     'popup.c',
     'ram.c',

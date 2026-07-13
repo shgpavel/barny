@@ -732,19 +732,19 @@ popup_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 	if (p->anim != POPUP_ANIM_CLOSING)
 		popup_build_content(p);
 
-	if (!p->state->config.popup_animations) {
+	if (!p->state->config.popup_animations || p->anim == POPUP_ANIM_OPEN) {
 		popup_paint(p);
-	} else if (p->anim == POPUP_ANIM_NONE) {
+		return;
+	}
+
+	if (p->anim == POPUP_ANIM_NONE) {
 		p->anim    = POPUP_ANIM_OPENING;
 		p->morph   = 0.0;
 		p->morph_v = 0.0;
 		p->last_ms = barny_now_ms();
-		popup_animate(p);
-	} else if (p->anim == POPUP_ANIM_OPEN) {
-		popup_paint(p);
-	} else {
-		popup_animate(p);
 	}
+
+	popup_animate(p);
 }
 
 static void
@@ -768,6 +768,8 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 	barny_output_t   *out;
 	uint32_t          anchor;
 	int               pw, ph;
+	int               owner_x;
+	int               owner_w;
 	int               left_margin;
 	int               center_off;
 	int               reserved;
@@ -778,6 +780,11 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 
 	out = state->pointer_output;
 	if (!out)
+		return NULL;
+
+	/* the popup hangs under the module as it is laid out on the pointer's
+	   output; without a rect there the module is not on screen here */
+	if (!barny_output_module_rect(out, owner, &owner_x, &owner_w))
 		return NULL;
 
 	p = calloc(1, sizeof(*p));
@@ -826,8 +833,8 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 	zwlr_layer_surface_v1_set_size(p->layer_surface, pw, ph);
 	zwlr_layer_surface_v1_set_exclusive_zone(p->layer_surface, 0);
 
-	left_margin  = (state->config.margin_left - out->pad_left) + owner->render_x;
-	center_off   = (pw - owner->width) / 2;
+	left_margin  = (state->config.margin_left - out->pad_left) + owner_x;
+	center_off   = (pw - owner_w) / 2;
 	left_margin -= center_off;
 	if (left_margin < 0)
 		left_margin = 0;

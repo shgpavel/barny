@@ -46,7 +46,6 @@ struct barny_module {
 	void             (*on_click)(barny_module_t *self, int button, int x, int y);
 	void             (*on_hover)(barny_module_t *self, bool hovering, int x, int y);
 	void            *data;
-	int              render_x;
 	int              width;
 	int              height;
 	bool             dirty;
@@ -224,6 +223,12 @@ struct barny_output {
 	bool                          frame_pending;
 	bool                          redraw_queued;
 
+	/* where each module landed on THIS output; the layout differs per
+	   output (widths differ, modules get dropped), so input hit-testing
+	   must never share one geometry across outputs */
+	int                           mod_x[BARNY_MAX_MODULES];
+	int                           mod_w[BARNY_MAX_MODULES];
+
 	cairo_surface_t              *bg_cache;
 	cairo_surface_t              *lens_map;
 	cairo_surface_t              *shadow_cache;
@@ -308,6 +313,14 @@ bool
 barny_lens_step(barny_output_t *output);
 void
 barny_render_modules(barny_output_t *output, cairo_t *cr);
+/* rect the module occupies on this output, false when it is not drawn there */
+bool
+barny_output_module_rect(const barny_output_t *output,
+                         const barny_module_t *mod, int *x, int *w);
+/* same, for the output the pointer is currently on */
+bool
+barny_pointer_module_rect(barny_state_t *state, const barny_module_t *mod,
+                          int *x, int *w);
 
 void
 barny_rounded_rect_path(cairo_t *cr, double x, double y, double w, double h,

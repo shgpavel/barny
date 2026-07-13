@@ -32,7 +32,7 @@ test_get_workspace_label(void);
 extern void
 test_is_square_shape(void);
 extern void
-test_workspace_click_uses_render_x(void);
+test_workspace_click_uses_module_rect(void);
 
 extern void
 test_tray_update_width_and_dirty(void);
@@ -65,7 +65,7 @@ printf("\n--- Workspace Internal Functions ---\n");
 RUN_SUITE(test_parse_workspaces);
 RUN_SUITE(test_get_workspace_label);
 RUN_SUITE(test_is_square_shape);
-RUN_SUITE(test_workspace_click_uses_render_x);
+RUN_SUITE(test_workspace_click_uses_module_rect);
 
 printf("\n--- Tray Internal Functions ---\n");
 RUN_SUITE(test_tray_update_width_and_dirty);

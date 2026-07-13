@@ -37,6 +37,30 @@ barny_sni_item_secondary_activate(barny_state_t *state, sni_item_t *item, int x,
 	last_y    = y;
 }
 
+bool
+barny_sni_item_is_menu(barny_state_t *state, sni_item_t *item)
+{
+	(void)state;
+	(void)item;
+	return false;
+}
+
+char *
+barny_sni_item_menu_path(barny_state_t *state, sni_item_t *item)
+{
+	(void)state;
+	(void)item;
+	return NULL;
+}
+
+void
+barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x)
+{
+	(void)state;
+	(void)item;
+	(void)anchor_x;
+}
+
 #include "../src/modules/tray.c"
 
 static void
@@ -116,10 +140,12 @@ test_tray_click_handling(void)
 	TEST_SUITE_BEGIN("tray_on_click");
 
 	barny_state_t  state;
+	barny_output_t output;
 	tray_data_t    data;
 	barny_module_t mod;
 	sni_item_t     item1;
 	sni_item_t     item2;
+	int            base_x = 100;
 
 	memset(&state, 0, sizeof(state));
 	barny_config_defaults(&state.config);
@@ -127,11 +153,18 @@ test_tray_click_handling(void)
 	memset(&data, 0, sizeof(data));
 	data.icon_size    = 24;
 	data.icon_spacing = 4;
-	data.render_x     = 100;
 	data.state        = &state;
 
 	memset(&mod, 0, sizeof(mod));
 	mod.data     = &data;
+
+	memset(&output, 0, sizeof(output));
+	output.state         = &state;
+	output.mod_x[0]      = base_x;
+	output.mod_w[0]      = 64;
+	state.modules[0]     = &mod;
+	state.module_count   = 1;
+	state.pointer_output = &output;
 
 	item1        = (sni_item_t){ 0 };
 	item2        = (sni_item_t){ 0 };
@@ -144,7 +177,7 @@ test_tray_click_handling(void)
 	{
 		reset_tray_mocks();
 		test_items = &item1;
-		tray_on_click(&mod, 272, data.render_x + 5, 10);
+		tray_on_click(&mod, 272, base_x + 5, 10);
 		ASSERT_EQ_INT(1, activate_calls);
 		ASSERT_EQ_INT(0, secondary_calls);
 		ASSERT_TRUE(last_item == &item1);
@@ -157,7 +190,7 @@ test_tray_click_handling(void)
 		reset_tray_mocks();
 		test_items = &item1;
 
-		second_x   = data.render_x
+		second_x   = base_x
 		             + 4
 		             + data.icon_size
 		             + data.icon_spacing
@@ -172,10 +205,21 @@ test_tray_click_handling(void)
 	{
 		reset_tray_mocks();
 		test_items = &item1;
-		tray_on_click(&mod, 272, data.render_x + 500, 10);
+		tray_on_click(&mod, 272, base_x + 500, 10);
 		ASSERT_EQ_INT(0, activate_calls);
 		ASSERT_EQ_INT(0, secondary_calls);
 		ASSERT_NULL(last_item);
+	}
+
+	TEST("tray absent from the pointer's output ignores clicks")
+	{
+		reset_tray_mocks();
+		test_items      = &item1;
+		output.mod_x[0] = -1;
+		tray_on_click(&mod, 272, base_x + 5, 10);
+		ASSERT_EQ_INT(0, activate_calls);
+		ASSERT_NULL(last_item);
+		output.mod_x[0] = base_x;
 	}
 
 	TEST_SUITE_END();

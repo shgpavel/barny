@@ -20,6 +20,7 @@ test_support_sources = files(
     '../src/modules/layout.c',
     '../src/modules/layout_apply.c',
     '../src/modules/module.c',
+    '../src/modules/module_geom.c',
     '../src/modules/network.c',
     '../src/modules/popup.c',
     '../src/modules/ram.c',
@@ -59,7 +60,7 @@ test_internals_sources = files(
 barny_test_internals = executable(
     'barny_test_internals',
     test_internals_sources,
-    files('../src/util.c'),
+    files('../src/util.c', '../src/modules/module_geom.c'),
     dependencies: all_deps,
     include_directories: test_inc_dirs,
     build_by_default: false,

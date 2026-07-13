@@ -155,15 +155,37 @@ pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
 	state->dyn_dirty       = true;
 }
 
+/* Hit-testing runs against the layout of the output the pointer is on: the
+   same module sits at a different x on every output, and narrow outputs drop
+   modules entirely. */
+static barny_module_t *
+module_at(barny_state_t *state, int x)
+{
+	barny_output_t *out = state->pointer_output;
+	barny_module_t *mod;
+	int             i;
+
+	if (!out)
+		return NULL;
+
+	for (i = 0; i < state->module_count; i++) {
+		mod = state->modules[i];
+		if (!mod || out->mod_x[i] < 0 || out->mod_w[i] <= 0)
+			continue;
+		if (x >= out->mod_x[i] && x < out->mod_x[i] + out->mod_w[i])
+			return mod;
+	}
+
+	return NULL;
+}
+
 static void
 pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time,
                wl_fixed_t sx, wl_fixed_t sy)
 {
 	barny_state_t  *state = data;
 	barny_module_t *hovered;
-	barny_module_t *mod;
 	int             mx;
-	int             i;
 
 	(void)pointer;
 	(void)time;
@@ -183,16 +205,10 @@ pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time,
 		state->lens_animating  = true;
 	}
 
-	mx               = (int)state->pointer_x;
-	hovered          = NULL;
-
-	for (i = 0; i < state->module_count; i++) {
-		mod = state->modules[i];
-		if (mod && mod->on_hover && mod->width > 0 && mod->render_x >= 0 && mx >= mod->render_x && mx < mod->render_x + mod->width) {
-			hovered = mod;
-			break;
-		}
-	}
+	mx      = (int)state->pointer_x;
+	hovered = module_at(state, mx);
+	if (hovered && !hovered->on_hover)
+		hovered = NULL;
 
 	if (hovered != state->hover_module) {
 		if (state->hover_module && state->hover_module->on_hover) {
@@ -216,7 +232,6 @@ pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial,
 	barny_module_t *mod;
 	int             x;
 	int             y;
-	int             i;
 
 	(void)pointer;
 	(void)serial;
@@ -239,14 +254,12 @@ pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial,
 		return;
 	}
 
-	x = (int)state->pointer_x;
-	y = (int)state->pointer_y;
+	x   = (int)state->pointer_x;
+	y   = (int)state->pointer_y;
 
-	for (i = 0; i < state->module_count; i++) {
-		mod = state->modules[i];
-		if (mod && mod->on_click) {
-			mod->on_click(mod, button, x, y);
-		}
+	mod = module_at(state, x);
+	if (mod && mod->on_click) {
+		mod->on_click(mod, button, x, y);
 	}
 }
 

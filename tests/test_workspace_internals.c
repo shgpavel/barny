@@ -297,13 +297,15 @@ test_is_square_shape(void)
 }
 
 void
-test_workspace_click_uses_render_x(void)
+test_workspace_click_uses_module_rect(void)
 {
 	TEST_SUITE_BEGIN("workspace_click");
 
 	barny_state_t    state;
+	barny_output_t   output;
 	workspace_data_t data;
 	barny_module_t   mod;
+	int              base_x = 100;
 
 	memset(&state, 0, sizeof(state));
 	barny_config_defaults(&state.config);
@@ -315,15 +317,22 @@ test_workspace_click_uses_render_x(void)
 	data.workspace_count   = 2;
 	data.workspaces[0].num = 1;
 	data.workspaces[1].num = 2;
-	data.render_x          = 100;
 
 	memset(&mod, 0, sizeof(mod));
 	mod.data = &data;
 
-	TEST("click uses render_x offset for hit testing")
+	memset(&output, 0, sizeof(output));
+	output.state          = &state;
+	output.mod_x[0]       = base_x;
+	output.mod_w[0]       = 60;
+	state.modules[0]      = &mod;
+	state.module_count    = 1;
+	state.pointer_output  = &output;
+
+	TEST("click uses the module rect on the pointer's output")
 	{
 		reset_ipc_state();
-		workspace_click(&mod, 272, data.render_x + 10, 0);
+		workspace_click(&mod, 272, base_x + 10, 0);
 		ASSERT_EQ_INT(1, test_ipc_send_called);
 		ASSERT_EQ_INT(0, (int)test_ipc_last_type);
 		ASSERT_EQ_STR("workspace number 1", test_ipc_last_payload);
@@ -332,7 +341,7 @@ test_workspace_click_uses_render_x(void)
 	TEST("second workspace hit is offset-aware")
 	{
 		reset_ipc_state();
-		workspace_click(&mod, 272, data.render_x + 10 + 20 + 5 + 10, 0);
+		workspace_click(&mod, 272, base_x + 10 + 20 + 5 + 10, 0);
 		ASSERT_EQ_INT(1, test_ipc_send_called);
 		ASSERT_EQ_STR("workspace number 2", test_ipc_last_payload);
 	}
@@ -342,6 +351,15 @@ test_workspace_click_uses_render_x(void)
 		reset_ipc_state();
 		workspace_click(&mod, 272, 10, 0);
 		ASSERT_EQ_INT(0, test_ipc_send_called);
+	}
+
+	TEST("module absent from the pointer's output ignores clicks")
+	{
+		reset_ipc_state();
+		output.mod_x[0] = -1;
+		workspace_click(&mod, 272, base_x + 10, 0);
+		ASSERT_EQ_INT(0, test_ipc_send_called);
+		output.mod_x[0] = base_x;
 	}
 
 	TEST_SUITE_END();
