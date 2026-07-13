@@ -10,6 +10,17 @@
 #include "barny.h"
 #include "util.h"
 
+int
+barny_config_exclusive_zone(const barny_config_t *config)
+{
+	int anchor = config->position_top ? config->margin_top
+	                                  : config->margin_bottom;
+	int inner  = config->position_top ? config->margin_bottom
+	                                  : config->margin_top;
+
+	return config->height + anchor + inner;
+}
+
 void
 barny_config_validate_font(const barny_config_t *config)
 {

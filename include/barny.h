@@ -538,6 +538,8 @@ barny_config_cleanup(barny_config_t *config);
 void
 barny_config_validate_font(const barny_config_t *config);
 int
+barny_config_exclusive_zone(const barny_config_t *config);
+int
 barny_config_write_module_layout(const char *path,
                                  const char *modules_left,
                                  const char *modules_center,

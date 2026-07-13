@@ -165,8 +165,7 @@ menu_compute_rect(barny_menu_t *m)
 	if (x < 0)
 		x = 0;
 
-	reserved = cfg->height + cfg->tray_menu_gap
-	           + (cfg->position_top ? cfg->margin_top : cfg->margin_bottom);
+	reserved = barny_config_exclusive_zone(cfg) + cfg->tray_menu_gap;
 
 	if (cfg->position_top)
 		y = reserved;

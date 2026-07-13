@@ -164,8 +164,9 @@ barny_output_create_surface(barny_output_t *output)
 	zwlr_layer_surface_v1_set_size(output->layer_surface, 0,
 	                               state->config.height + pad_t + pad_b);
 
-	zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface,
-	                                         state->config.height);
+	zwlr_layer_surface_v1_set_exclusive_zone(
+	        output->layer_surface,
+	        barny_config_exclusive_zone(&state->config));
 
 	zwlr_layer_surface_v1_set_margin(
 	        output->layer_surface,

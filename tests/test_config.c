@@ -391,6 +391,21 @@ test_config_load(void)
 		cleanup_temp_config(path);
 	}
 
+	TEST("exclusive zone includes bar height and both vertical margins")
+	{
+		barny_config_t config;
+
+		barny_config_defaults(&config);
+		config.height        = 47;
+		config.margin_top    = 8;
+		config.margin_bottom = 10;
+		config.position_top  = false;
+		ASSERT_EQ_INT(65, barny_config_exclusive_zone(&config));
+
+		config.position_top = true;
+		ASSERT_EQ_INT(65, barny_config_exclusive_zone(&config));
+	}
+
 	TEST("parses position top")
 	{
 		barny_config_t config;
