@@ -255,7 +255,8 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 			if (button == 272) {
 				if (barny_sni_item_is_menu(data->state, item)) {
 					barny_menu_open(data->state, item,
-					                icon_abs);
+					                icon_abs,
+					                data->icon_size);
 				} else {
 					barny_sni_item_activate(data->state,
 					                        item, x, y);
@@ -266,7 +267,8 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 				if (menu_path) {
 					free(menu_path);
 					barny_menu_open(data->state, item,
-					                icon_abs);
+					                icon_abs,
+					                data->icon_size);
 				} else {
 					barny_sni_item_secondary_activate(
 					        data->state, item, x, y);

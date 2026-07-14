@@ -82,6 +82,9 @@ barny_paint_glass_bg(cairo_t *cr, cairo_surface_t *bg, int out_w, int out_h,
 		cairo_scale(cr, 1.0 / scale, 1.0 / scale);
 		cairo_set_source_surface(cr, bg, -screen_x * scale,
 		                         -((double)screen_y * scale + src_y_off));
+		/* a panel at the screen edge reaches a fraction past the
+		   wallpaper; pad the edge rather than punch a hole in the glass */
+		cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
 		cairo_paint(cr);
 		cairo_restore(cr);
 	} else {

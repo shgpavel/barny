@@ -542,7 +542,8 @@ barny_dbusmenu_event_clicked(barny_state_t *state, const char *service,
                              const char *menu_path, int id);
 
 void
-barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x);
+barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x,
+                int anchor_w);
 void
 barny_menu_close(barny_state_t *state);
 bool

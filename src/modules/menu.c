@@ -10,9 +10,10 @@
 
 #include "barny.h"
 #include "popup.h"
+#include "util.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
-#define MENU_RADIUS    12
+#define MENU_RADIUS    BARNY_POPUP_RADIUS
 #define MENU_PAD_X     14
 #define MENU_PAD_Y     8
 #define MENU_ROW_H     30
@@ -33,6 +34,13 @@ typedef struct {
 	bool               enabled;
 } menu_row_t;
 
+enum menu_anim {
+	MENU_ANIM_NONE = 0,
+	MENU_ANIM_OPENING,
+	MENU_ANIM_OPEN,
+	MENU_ANIM_CLOSING,
+};
+
 struct barny_menu {
 	barny_state_t                *state;
 	barny_output_t               *out;
@@ -48,6 +56,7 @@ struct barny_menu {
 	int                           hover;
 
 	int                           anchor_x;
+	int                           anchor_w;
 
 	PangoFontDescription         *font;
 
@@ -61,13 +70,39 @@ struct barny_menu {
 
 	int                           surf_w;
 	int                           surf_h;
+
+	/* the menu body, and the patch it lives in: body plus the neck rows
+	   bridging it to the bar, exactly as a module popup is laid out */
 	int                           menu_x;
 	int                           menu_y;
 	int                           menu_w;
 	int                           menu_h;
+	int                           neck;
+	int                           patch_x;
+	int                           patch_y;
+	int                           patch_w;
+	int                           patch_h;
+	int                           damage_x;
+	int                           damage_y;
+	int                           damage_w;
+	int                           damage_h;
+
+	cairo_surface_t              *glass_src;
+	cairo_surface_t              *content_cache;
+
+	enum menu_anim                anim;
+	double                        morph;
+	double                        morph_v;
+	uint64_t                      last_ms;
+	struct wl_callback           *frame_cb;
 
 	bool                          configured;
 };
+
+static void
+menu_finalize_destroy(barny_menu_t *m);
+static void
+menu_schedule_frame(barny_menu_t *m);
 
 static barny_menu_item_t *
 menu_current_parent(const barny_menu_t *m)
@@ -151,34 +186,69 @@ menu_build_rows(barny_menu_t *m)
 	m->hover  = -1;
 }
 
+/* The menu hangs off the bar the way a module popup does: the body sits a gap
+   away from the bar edge, and the gap rows are the neck the droplet stretches
+   through. The patch is flush against the bar's exclusive edge, so the panel
+   geometry -- and with it the glass -- is the popup's. */
 static void
 menu_compute_rect(barny_menu_t *m)
 {
-	barny_config_t *cfg = &m->state->config;
+	barny_config_t *cfg      = &m->state->config;
+	int             reserved = barny_config_exclusive_zone(cfg);
+	int             right    = m->surf_w - cfg->margin_right;
 	int             x;
 	int             y;
-	int             reserved;
 
 	x = (cfg->margin_left - m->out->pad_left) + m->anchor_x;
-	if (x + m->menu_w > m->surf_w)
-		x = m->surf_w - m->menu_w;
-	if (x < 0)
-		x = 0;
 
-	reserved = barny_config_exclusive_zone(cfg) + cfg->tray_menu_gap;
+	/* stay inside the bar's own margins: run to the screen edge instead and
+	   the corner has no room to round, and the glass has no wallpaper left
+	   to sample */
+	if (x + m->menu_w > right)
+		x = right - m->menu_w;
+	if (x < cfg->margin_left)
+		x = cfg->margin_left;
+
+	m->neck    = cfg->tray_menu_gap;
+	m->patch_w = m->menu_w;
+	m->patch_h = m->menu_h + m->neck;
+	m->patch_x = x;
 
 	if (cfg->position_top)
 		y = reserved;
 	else
-		y = m->surf_h - reserved - m->menu_h;
-
-	if (y + m->menu_h > m->surf_h)
-		y = m->surf_h - m->menu_h;
+		y = m->surf_h - reserved - m->patch_h;
+	if (y + m->patch_h > m->surf_h)
+		y = m->surf_h - m->patch_h;
 	if (y < 0)
 		y = 0;
 
-	m->menu_x = x;
-	m->menu_y = y;
+	m->patch_y = y;
+	m->menu_x  = m->patch_x;
+	m->menu_y  = m->patch_y + (cfg->position_top ? m->neck : 0);
+}
+
+static void
+menu_panel(const barny_menu_t *m, barny_glass_panel_t *panel)
+{
+	const barny_config_t *cfg = &m->state->config;
+	int                   icon_cx;
+
+	/* the droplet is born under the icon that was clicked, then slides to
+	   the centre of the body as it opens */
+	icon_cx = (cfg->margin_left - m->out->pad_left) + m->anchor_x
+	          + m->anchor_w / 2 - m->patch_x;
+
+	panel->w            = m->patch_w;
+	panel->h            = m->patch_h;
+	panel->body_w       = m->menu_w;
+	panel->body_h       = m->menu_h;
+	panel->body_y       = cfg->position_top ? m->neck : 0;
+	panel->anchor_x     = icon_cx;
+	panel->glass_x      = barny_glass_panel_glass_x(cfg, m->patch_x);
+	panel->glass_y      = barny_glass_panel_glass_y(cfg, m->out->height,
+	                                                m->patch_h);
+	panel->position_top = cfg->position_top;
 }
 
 static int
@@ -212,8 +282,8 @@ menu_create_shm(int size)
 }
 
 static void
-menu_draw_label(barny_menu_t *m, PangoLayout *layout, const char *text, int x,
-                int y, int row_h, double alpha)
+menu_draw_label(barny_menu_t *m, cairo_t *cr, PangoLayout *layout,
+                const char *text, int x, int y, int row_h, double alpha)
 {
 	barny_config_t *cfg = &m->state->config;
 	double          tr  = cfg->text_color_set ? cfg->text_color_r : 0.95;
@@ -225,58 +295,21 @@ menu_draw_label(barny_menu_t *m, PangoLayout *layout, const char *text, int x,
 	pango_layout_get_pixel_size(layout, &tw, &th);
 	ty = y + (row_h - th) / 2;
 
-	cairo_set_source_rgba(m->cr, 0, 0, 0, 0.4 * alpha);
-	cairo_move_to(m->cr, x + 1, ty + 1);
-	pango_cairo_show_layout(m->cr, layout);
+	cairo_set_source_rgba(cr, 0, 0, 0, 0.4 * alpha);
+	cairo_move_to(cr, x + 1, ty + 1);
+	pango_cairo_show_layout(cr, layout);
 
-	cairo_set_source_rgba(m->cr, tr, tg, tb, alpha);
-	cairo_move_to(m->cr, x, ty);
-	pango_cairo_show_layout(m->cr, layout);
+	cairo_set_source_rgba(cr, tr, tg, tb, alpha);
+	cairo_move_to(cr, x, ty);
+	pango_cairo_show_layout(cr, layout);
 }
 
 static void
-menu_paint(barny_menu_t *m)
+menu_render_rows(barny_menu_t *m, cairo_t *cr)
 {
-	barny_state_t   *state = m->state;
-	cairo_t         *cr;
-	int              mw, mh;
-	cairo_surface_t *bg;
-	int              out_w = 0, out_h = 0;
-	PangoLayout     *layout;
-	int              i;
-
-	if (!m->cr || !m->buffer)
-		return;
-
-	cr = m->cr;
-	mw = m->menu_w;
-	mh = m->menu_h;
-
-	cairo_save(cr);
-	cairo_rectangle(cr, m->menu_x, m->menu_y, mw, mh);
-	cairo_clip(cr);
-	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-	cairo_paint(cr);
-	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-	cairo_translate(cr, m->menu_x, m->menu_y);
-
-	if (m->out) {
-		bg    = state->displaced_wallpaper ? state->displaced_wallpaper
-		                                   : state->blurred_wallpaper;
-		out_w = m->out->width;
-		out_h = m->out->height;
-	} else {
-		bg = NULL;
-	}
-
-	cairo_save(cr);
-	barny_rounded_rect_path(cr, 0, 0, mw, mh, MENU_RADIUS);
-	cairo_clip(cr);
-	barny_paint_glass_bg(cr, bg, out_w, out_h, m->menu_x, m->menu_y, mh,
-	                     state->config.position_top);
-	cairo_restore(cr);
-
-	barny_draw_glass_frame(cr, mw, mh, MENU_RADIUS);
+	int          mw = m->menu_w;
+	PangoLayout *layout;
+	int          i;
 
 	layout = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(layout, m->font);
@@ -303,16 +336,17 @@ menu_paint(barny_menu_t *m)
 			         menu_current_parent(m)->label
 			                 ? menu_current_parent(m)->label
 			                 : "Back");
-			menu_draw_label(m, layout, back, MENU_PAD_X, r->y, r->h, 0.95);
+			menu_draw_label(m, cr, layout, back, MENU_PAD_X, r->y,
+			                r->h, 0.95);
 			continue;
 		}
 
-		menu_draw_label(m, layout, r->item->label, MENU_PAD_X, r->y, r->h,
-		                r->enabled ? 0.95 : 0.4);
+		menu_draw_label(m, cr, layout, r->item->label, MENU_PAD_X, r->y,
+		                r->h, r->enabled ? 0.95 : 0.4);
 
 		if (r->item->toggle_state == 1) {
-			menu_draw_label(m, layout, "\xE2\x9C\x93", MENU_PAD_X, r->y,
-			                r->h, 0.9);
+			menu_draw_label(m, cr, layout, "\xE2\x9C\x93", MENU_PAD_X,
+			                r->y, r->h, 0.9);
 		}
 		if (r->item->has_submenu) {
 			int aw, ah, ay;
@@ -327,12 +361,160 @@ menu_paint(barny_menu_t *m)
 	}
 
 	g_object_unref(layout);
+}
 
+/* The rows are cached like a popup's content: the morph scales them into the
+   droplet, and a hover only has to redraw this one small surface. */
+static void
+menu_build_content(barny_menu_t *m)
+{
+	cairo_t *cc;
+
+	if (m->content_cache) {
+		cairo_surface_destroy(m->content_cache);
+		m->content_cache = NULL;
+	}
+
+	m->content_cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                              m->menu_w, m->menu_h);
+	if (cairo_surface_status(m->content_cache) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(m->content_cache);
+		m->content_cache = NULL;
+		return;
+	}
+
+	cc = cairo_create(m->content_cache);
+	menu_render_rows(m, cc);
+	cairo_destroy(cc);
+}
+
+static void
+menu_build_glass(barny_menu_t *m)
+{
+	barny_glass_panel_t panel;
+
+	if (m->glass_src) {
+		cairo_surface_destroy(m->glass_src);
+		m->glass_src = NULL;
+	}
+
+	menu_panel(m, &panel);
+	m->glass_src = barny_glass_panel_bg(m->state, m->out, &panel);
+}
+
+static void
+menu_present(barny_menu_t *m, double morph)
+{
+	barny_glass_panel_t panel;
+	cairo_t            *cr = m->cr;
+	int                 x0, y0, x1, y1;
+
+	if (!cr || !m->buffer)
+		return;
+
+	menu_panel(m, &panel);
+
+	/* a submenu resizes the panel, so wipe and repost the union of the old
+	   rect and the new one or the wider layout leaves a ghost behind */
+	x0 = m->patch_x;
+	y0 = m->patch_y;
+	x1 = m->patch_x + m->patch_w;
+	y1 = m->patch_y + m->patch_h;
+	if (m->damage_w > 0 && m->damage_h > 0) {
+		if (m->damage_x < x0)
+			x0 = m->damage_x;
+		if (m->damage_y < y0)
+			y0 = m->damage_y;
+		if (m->damage_x + m->damage_w > x1)
+			x1 = m->damage_x + m->damage_w;
+		if (m->damage_y + m->damage_h > y1)
+			y1 = m->damage_y + m->damage_h;
+	}
+
+	cairo_save(cr);
+	cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
+	cairo_clip(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+
+	cairo_translate(cr, m->patch_x, m->patch_y);
+	if (m->state->config.popup_animations) {
+		barny_glass_panel_morph(cr, &panel, m->glass_src,
+		                        m->content_cache, morph);
+	} else {
+		barny_glass_panel_compose(cr, m->state, m->out, &panel,
+		                          m->content_cache);
+	}
 	cairo_restore(cr);
 
 	cairo_surface_flush(m->cairo_surface);
 	wl_surface_attach(m->surface, m->buffer, 0, 0);
-	wl_surface_damage_buffer(m->surface, m->menu_x, m->menu_y, mw, mh);
+	wl_surface_damage_buffer(m->surface, x0, y0, x1 - x0, y1 - y0);
+
+	m->damage_x = m->patch_x;
+	m->damage_y = m->patch_y;
+	m->damage_w = m->patch_w;
+	m->damage_h = m->patch_h;
+}
+
+static void
+menu_animate(barny_menu_t *m)
+{
+	bool closing = m->anim == MENU_ANIM_CLOSING;
+	bool settled;
+
+	settled = barny_glass_panel_step(&m->morph, &m->morph_v, &m->last_ms,
+	                                 closing);
+
+	menu_present(m, m->morph);
+
+	if (settled) {
+		if (closing) {
+			wl_surface_commit(m->surface);
+			menu_finalize_destroy(m);
+			return;
+		}
+		m->anim = MENU_ANIM_OPEN;
+		wl_surface_commit(m->surface);
+		return;
+	}
+
+	menu_schedule_frame(m);
+	wl_surface_commit(m->surface);
+}
+
+static void
+menu_frame_done(void *data, struct wl_callback *cb, uint32_t time)
+{
+	barny_menu_t *m = data;
+	(void)time;
+
+	wl_callback_destroy(cb);
+	m->frame_cb = NULL;
+	menu_animate(m);
+}
+
+static const struct wl_callback_listener menu_frame_listener = {
+	.done = menu_frame_done,
+};
+
+static void
+menu_schedule_frame(barny_menu_t *m)
+{
+	if (m->frame_cb)
+		return;
+	m->frame_cb = wl_surface_frame(m->surface);
+	wl_callback_add_listener(m->frame_cb, &menu_frame_listener, m);
+}
+
+static void
+menu_paint(barny_menu_t *m)
+{
+	if (!m->cr || !m->buffer)
+		return;
+
+	menu_present(m, m->anim == MENU_ANIM_NONE ? 1.0 : m->morph);
 	wl_surface_commit(m->surface);
 }
 
@@ -413,7 +595,22 @@ menu_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 	m->configured = true;
 
 	menu_compute_rect(m);
-	menu_paint(m);
+	menu_build_glass(m);
+	menu_build_content(m);
+
+	if (!m->state->config.popup_animations) {
+		menu_paint(m);
+		return;
+	}
+
+	if (m->anim == MENU_ANIM_NONE) {
+		m->anim    = MENU_ANIM_OPENING;
+		m->morph   = 0.0;
+		m->morph_v = 0.0;
+		m->last_ms = barny_now_ms();
+	}
+
+	menu_animate(m);
 }
 
 static void
@@ -421,7 +618,16 @@ menu_layer_closed(void *userdata, struct zwlr_layer_surface_v1 *surface)
 {
 	barny_menu_t *m = userdata;
 	(void)surface;
+
 	m->configured = false;
+
+	/* a menu already riding its close morph has no frame callbacks left to
+	   come, so it has to be torn down here or it never is */
+	if (m->state->menu != m) {
+		menu_finalize_destroy(m);
+		return;
+	}
+
 	barny_menu_close(m->state);
 }
 
@@ -446,18 +652,25 @@ menu_configure_surface(barny_menu_t *m)
 	wl_surface_commit(m->surface);
 }
 
+/* A submenu is a new body: new rows, new size, so the glass under it and the
+   cached rows both have to be rebuilt. The panel does not re-morph -- it is the
+   same droplet, just holding different rows. */
 static void
 menu_relayout(barny_menu_t *m)
 {
 	menu_build_rows(m);
-	if (m->configured) {
-		menu_compute_rect(m);
-		menu_paint(m);
-	}
+	if (!m->configured)
+		return;
+
+	menu_compute_rect(m);
+	menu_build_glass(m);
+	menu_build_content(m);
+	menu_paint(m);
 }
 
 void
-barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x)
+barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x,
+                int anchor_w)
 {
 	barny_menu_t *m;
 	char         *path;
@@ -482,6 +695,7 @@ barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x)
 	m->service   = strdup(item->service);
 	m->menu_path = path;
 	m->anchor_x  = anchor_x;
+	m->anchor_w  = anchor_w > 0 ? anchor_w : 1;
 	m->hover     = -1;
 
 	if (!m->out)
@@ -546,16 +760,23 @@ barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x)
 	menu_configure_surface(m);
 }
 
-void
-barny_menu_close(barny_state_t *state)
+static void
+menu_finalize_destroy(barny_menu_t *m)
 {
-	barny_menu_t *m;
+	barny_state_t *state = m->state;
 
-	if (!state || !state->menu)
-		return;
-
-	m           = state->menu;
-	state->menu = NULL;
+	if (m->frame_cb) {
+		wl_callback_destroy(m->frame_cb);
+		m->frame_cb = NULL;
+	}
+	if (m->glass_src) {
+		cairo_surface_destroy(m->glass_src);
+		m->glass_src = NULL;
+	}
+	if (m->content_cache) {
+		cairo_surface_destroy(m->content_cache);
+		m->content_cache = NULL;
+	}
 
 	menu_teardown_buffer(m);
 
@@ -572,6 +793,42 @@ barny_menu_close(barny_state_t *state)
 	free(m->service);
 	free(m->menu_path);
 	free(m);
+
+	wl_display_flush(state->display);
+}
+
+void
+barny_menu_close(barny_state_t *state)
+{
+	barny_menu_t     *m;
+	struct wl_region *empty;
+
+	if (!state || !state->menu)
+		return;
+
+	m           = state->menu;
+	state->menu = NULL;
+
+	/* the caches carry the menu through the close morph; nothing else may
+	   reach it once it is off the state, so it also stops swallowing input */
+	if (!state->config.popup_animations || !m->configured || !m->buffer
+	    || !m->glass_src) {
+		menu_finalize_destroy(m);
+		return;
+	}
+
+	empty = wl_compositor_create_region(state->compositor);
+	wl_surface_set_input_region(m->surface, empty);
+	wl_region_destroy(empty);
+	zwlr_layer_surface_v1_set_keyboard_interactivity(
+	        m->layer_surface,
+	        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+
+	m->anim    = MENU_ANIM_CLOSING;
+	m->hover   = -1;
+	m->last_ms = barny_now_ms();
+	if (!m->frame_cb)
+		menu_animate(m);
 
 	wl_display_flush(state->display);
 }
@@ -626,6 +883,7 @@ barny_menu_pointer_motion(barny_state_t *state, double sx, double sy)
 
 	if (row != m->hover) {
 		m->hover = row;
+		menu_build_content(m);
 		menu_paint(m);
 	}
 }

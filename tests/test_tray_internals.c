@@ -54,11 +54,13 @@ barny_sni_item_menu_path(barny_state_t *state, sni_item_t *item)
 }
 
 void
-barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x)
+barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x,
+                int anchor_w)
 {
 	(void)state;
 	(void)item;
 	(void)anchor_x;
+	(void)anchor_w;
 }
 
 #include "../src/modules/tray.c"
