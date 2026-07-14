@@ -47,7 +47,7 @@ barny_glass_panel_glass_y(const barny_config_t *cfg, int bar_h, int panel_h);
 
 /* advance the open/close spring; true once the morph has settled */
 bool
-barny_glass_panel_step(double *morph, double *vel, uint64_t *last_ms,
+barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
                        bool closing);
 
 /* wallpaper plus broad lighting over the whole patch; the morph refracts it */

@@ -16,11 +16,12 @@
 
 /* Liquid morph: the popup is born as a droplet squeezing out of the bar edge
    and springs open into the data window; closing runs the morph backwards. */
-#define POPUP_MORPH_K_OPEN     200.0 /* open spring stiffness, s^-2 */
-#define POPUP_MORPH_ZETA_OPEN  0.86  /* slight jelly overshoot */
-#define POPUP_MORPH_K_CLOSE    430.0
+#define POPUP_MORPH_K_OPEN     420.0 /* open spring stiffness, s^-2 */
+#define POPUP_MORPH_ZETA_OPEN  0.78  /* slight jelly overshoot */
+#define POPUP_MORPH_K_CLOSE    820.0
 #define POPUP_MORPH_ZETA_CLOSE 1.0
 #define POPUP_DT_MAX           0.05
+#define POPUP_STEP_MAX         0.003 /* spring substep, s */
 
 #define POPUP_BLOB_W     96.0 /* droplet size at birth */
 #define POPUP_BLOB_H     40.0
@@ -36,9 +37,9 @@
 #define POPUP_SPEC_LX    (-0.30)
 #define POPUP_SPEC_LY    (-0.954)
 #define POPUP_SPEC_W     7.0
-#define POPUP_SPEC_P     10.0
+#define POPUP_SPEC_P     10 /* see popup_spec_pow */
 #define POPUP_SPEC_GAIN  0.55
-#define POPUP_CONTENT_IN 0.68 /* morph point where the data fades in */
+#define POPUP_CONTENT_IN 0.58 /* morph point where the data fades in */
 
 enum popup_anim {
 	POPUP_ANIM_NONE = 0,
@@ -74,7 +75,7 @@ struct barny_popup {
 	enum popup_anim               anim;
 	double                        morph; /* 0 = droplet in the bar, 1 = window */
 	double                        morph_v;
-	uint64_t                      last_ms;
+	uint64_t                      last_us;
 	struct wl_callback           *frame_cb;
 	cairo_surface_t              *glass_src;     /* wallpaper + broad lighting */
 	cairo_surface_t              *content_cache; /* rendered data rows */
@@ -201,6 +202,47 @@ popup_build_content(barny_popup_t *p)
 	cairo_destroy(cc);
 }
 
+/* facing^POPUP_SPEC_P by squaring: the specular runs on every rim pixel of
+   every frame, and libm's pow dominated the morph's inner loop. */
+static double
+popup_spec_pow(double x)
+{
+	double x2 = x * x;
+	double x4 = x2 * x2;
+	double x8 = x4 * x4;
+
+	return x8 * x2;
+}
+
+/* One scratch patch serves every panel: only one is ever being rasterised at a
+   time, and every pixel of it is written each pass, so it never needs clearing.
+   A fresh surface per frame was the morph's only allocation. */
+static cairo_surface_t *s_patch;
+static int              s_patch_w;
+static int              s_patch_h;
+
+static cairo_surface_t *
+panel_patch(int w, int h)
+{
+	if (s_patch && s_patch_w == w && s_patch_h == h)
+		return s_patch;
+
+	if (s_patch)
+		cairo_surface_destroy(s_patch);
+
+	s_patch = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	if (cairo_surface_status(s_patch) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(s_patch);
+		s_patch = NULL;
+		return NULL;
+	}
+
+	s_patch_w = w;
+	s_patch_h = h;
+
+	return s_patch;
+}
+
 /* Draw the panel as a liquid-glass blob at morph position m: a droplet
    squeezing out of the bar edge (m=0) that stretches through a
    surface-tension neck and opens into the data window (m=1). Shape comes
@@ -251,11 +293,9 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 	if (rr > hh)
 		rr = hh;
 
-	patch = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-	if (cairo_surface_status(patch) != CAIRO_STATUS_SUCCESS) {
-		cairo_surface_destroy(patch);
+	patch = panel_patch(w, h);
+	if (!patch)
 		return;
-	}
 
 	cairo_surface_flush(bg);
 	gdata   = cairo_image_surface_get_data(bg);
@@ -313,17 +353,20 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 	           barny_sd_round_rect((px) - ccx, (py) - ccy, hw, hh, rr),  \
 	           smk)
 
+			/* The smooth union flattens the field where the neck
+			   meets the bar, so the raw distance there covers far
+			   more than a pixel: shading it by d alone smeared that
+			   edge. Normalising by the local gradient puts a true
+			   one-pixel ramp on the whole silhouette. |grad| <= 1
+			   for this field, so d >= 0.5 is still safely outside. */
 			d = POPUP_SDF(lx, ly);
-			aa = 0.5 - d;
-			if (aa <= 0.0) {
+			if (d >= 0.5) {
 				drow[x * 4 + 0] = 0;
 				drow[x * 4 + 1] = 0;
 				drow[x * 4 + 2] = 0;
 				drow[x * 4 + 3] = 0;
 				continue;
 			}
-			if (aa > 1.0)
-				aa = 1.0;
 
 			dl   = POPUP_SDF(lx - 1.0, ly);
 			dr   = POPUP_SDF(lx + 1.0, ly);
@@ -333,7 +376,19 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 			if (nlen > 1e-6) {
 				nnx = (dr - dl) / nlen;
 				nny = (dv - du) / nlen;
+				aa  = 0.5 - d / (nlen * 0.5);
+			} else {
+				aa = d < 0.0 ? 1.0 : 0.0;
 			}
+			if (aa <= 0.0) {
+				drow[x * 4 + 0] = 0;
+				drow[x * 4 + 1] = 0;
+				drow[x * 4 + 2] = 0;
+				drow[x * 4 + 3] = 0;
+				continue;
+			}
+			if (aa > 1.0)
+				aa = 1.0;
 			depth = -d;
 
 			if (d < 0.0 && disp > 0.01) {
@@ -413,11 +468,11 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 				band = band * band * (3.0 - 2.0 * band);
 				if (facing > 0.0)
 					spec = POPUP_SPEC_GAIN * inv * band
-					       * pow(facing, POPUP_SPEC_P);
+					       * popup_spec_pow(facing);
 				else
 					cntr = 0.22 * POPUP_SPEC_GAIN * inv
 					       * band
-					       * pow(-facing, POPUP_SPEC_P);
+					       * popup_spec_pow(-facing);
 			}
 
 			ty = hh > 0.0 ? (ly - ccy) / hh : 0.0;
@@ -458,7 +513,9 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 	cairo_surface_mark_dirty(patch);
 	cairo_set_source_surface(cr, patch, 0, 0);
 	cairo_paint(cr);
-	cairo_surface_destroy(patch);
+	/* let go of the shared scratch: the next panel may need it at a
+	   different size */
+	cairo_set_source_rgba(cr, 0, 0, 0, 0);
 
 	/* the data window condenses inside the blob near the end of the morph */
 	ca = (m - POPUP_CONTENT_IN) / (1.0 - POPUP_CONTENT_IN + 0.02);
@@ -567,30 +624,44 @@ barny_glass_panel_compose(cairo_t *cr, barny_state_t *state,
 	cairo_restore(cr);
 }
 
-/* One spring drives every panel's open and close morph. */
+/* One spring drives every panel's open and close morph. It is integrated in
+   fixed substeps rather than one step per frame: these springs are stiff enough
+   that a single 16 ms step already distorts the curve, and a hitched frame at
+   the 50 ms clamp would fling the droplet clean past its target. */
 bool
-barny_glass_panel_step(double *morph, double *vel, uint64_t *last_ms,
+barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
                        bool closing)
 {
-	uint64_t now     = barny_now_ms();
-	double   dt      = (double)(now - *last_ms) / 1000.0;
-	double   target  = closing ? 0.0 : 1.0;
-	double   k       = closing ? POPUP_MORPH_K_CLOSE : POPUP_MORPH_K_OPEN;
-	double   z       = closing ? POPUP_MORPH_ZETA_CLOSE
-	                           : POPUP_MORPH_ZETA_OPEN;
-	double   c       = 2.0 * z * sqrt(k);
+	uint64_t now    = barny_now_us();
+	double   dt     = (double)(now - *last_us) / 1000000.0;
+	double   target = closing ? 0.0 : 1.0;
+	double   k      = closing ? POPUP_MORPH_K_CLOSE : POPUP_MORPH_K_OPEN;
+	double   z      = closing ? POPUP_MORPH_ZETA_CLOSE
+	                          : POPUP_MORPH_ZETA_OPEN;
+	double   c      = 2.0 * z * sqrt(k);
+	int      steps;
+	int      i;
+	double   h;
 	bool     settled;
 
-	*last_ms = now;
+	*last_us = now;
 	if (dt < 0.0)
 		dt = 0.0;
 	if (dt > POPUP_DT_MAX)
 		dt = POPUP_DT_MAX;
 
-	*vel   += (k * (target - *morph) - c * *vel) * dt;
-	*morph += *vel * dt;
+	steps = (int)(dt / POPUP_STEP_MAX) + 1;
+	h     = dt / steps;
 
-	settled = fabs(target - *morph) < 0.004 && fabs(*vel) < 0.08;
+	for (i = 0; i < steps; i++) {
+		*vel   += (k * (target - *morph) - c * *vel) * h;
+		*morph += *vel * h;
+	}
+
+	/* Retire the spring's exponential tail: below this the panel is still
+	   creeping, but by under a pixel, so the last ~100 ms of it were frames
+	   nobody could see. */
+	settled = fabs(target - *morph) < 0.008 && fabs(*vel) < 0.15;
 	if (settled) {
 		*morph = target;
 		*vel   = 0.0;
@@ -663,7 +734,7 @@ popup_animate(barny_popup_t *p)
 	bool closing = p->anim == POPUP_ANIM_CLOSING;
 	bool settled;
 
-	settled = barny_glass_panel_step(&p->morph, &p->morph_v, &p->last_ms,
+	settled = barny_glass_panel_step(&p->morph, &p->morph_v, &p->last_us,
 	                                 closing);
 
 	popup_present(p, p->morph);
@@ -803,7 +874,7 @@ popup_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 		p->anim    = POPUP_ANIM_OPENING;
 		p->morph   = 0.0;
 		p->morph_v = 0.0;
-		p->last_ms = barny_now_ms();
+		p->last_us = barny_now_us();
 	}
 
 	popup_animate(p);
@@ -928,7 +999,7 @@ barny_popup_destroy(barny_popup_t *p)
 	}
 
 	p->anim    = POPUP_ANIM_CLOSING;
-	p->last_ms = barny_now_ms();
+	p->last_us = barny_now_us();
 	if (!p->frame_cb)
 		popup_animate(p);
 }

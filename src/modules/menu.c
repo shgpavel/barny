@@ -93,7 +93,7 @@ struct barny_menu {
 	enum menu_anim                anim;
 	double                        morph;
 	double                        morph_v;
-	uint64_t                      last_ms;
+	uint64_t                      last_us;
 	struct wl_callback           *frame_cb;
 
 	bool                          configured;
@@ -464,7 +464,7 @@ menu_animate(barny_menu_t *m)
 	bool closing = m->anim == MENU_ANIM_CLOSING;
 	bool settled;
 
-	settled = barny_glass_panel_step(&m->morph, &m->morph_v, &m->last_ms,
+	settled = barny_glass_panel_step(&m->morph, &m->morph_v, &m->last_us,
 	                                 closing);
 
 	menu_present(m, m->morph);
@@ -607,7 +607,7 @@ menu_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 		m->anim    = MENU_ANIM_OPENING;
 		m->morph   = 0.0;
 		m->morph_v = 0.0;
-		m->last_ms = barny_now_ms();
+		m->last_us = barny_now_us();
 	}
 
 	menu_animate(m);
@@ -826,7 +826,7 @@ barny_menu_close(barny_state_t *state)
 
 	m->anim    = MENU_ANIM_CLOSING;
 	m->hover   = -1;
-	m->last_ms = barny_now_ms();
+	m->last_us = barny_now_us();
 	if (!m->frame_cb)
 		menu_animate(m);
 

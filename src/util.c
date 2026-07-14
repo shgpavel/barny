@@ -129,6 +129,19 @@ barny_now_ms(void)
 	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
+/* Springs integrate against this: at 60 Hz a millisecond clock quantises the
+   frame delta to 16 or 17 ms, and that 3% jitter is visible as a shimmer in a
+   stiff spring. */
+uint64_t
+barny_now_us(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+
+	return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+}
+
 void
 barny_format_bytes(char *buf, size_t buflen, unsigned long long bytes,
                    int decimals, bool unit_space)

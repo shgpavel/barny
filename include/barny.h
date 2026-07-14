@@ -1,6 +1,7 @@
 #ifndef BARNY_H
 #define BARNY_H
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <wayland-client.h>
@@ -362,13 +363,90 @@ barny_draw_glass_frame(cairo_t *cr, double w, double h, double r);
 
 void
 barny_draw_broad_frame(cairo_t *cr, double w, double h);
-double
-barny_sd_round_rect(double px, double py, double hw, double hh, double r);
-double
-barny_smin(double a, double b, double k);
-void
+/* The three below run per pixel inside the lens and morph loops -- five signed
+   distances and a sample each. They live in the header so those loops can
+   inline them: as calls into another unit they cost the droplet more time than
+   its own shading did. */
+
+static inline double
+barny_sd_round_rect(double px, double py, double hw, double hh, double r)
+{
+	double qx      = fabs(px) - (hw - r);
+	double qy      = fabs(py) - (hh - r);
+	double ax      = qx > 0 ? qx : 0;
+	double ay      = qy > 0 ? qy : 0;
+	double outside = sqrt(ax * ax + ay * ay);
+	double mq      = qx > qy ? qx : qy;
+	double inside  = mq < 0 ? mq : 0;
+
+	return outside + inside - r;
+}
+
+/* Polynomial smooth-minimum: blends two signed distances so the union of two
+   shapes grows a concave "surface tension" fillet instead of a hard corner. */
+static inline double
+barny_smin(double a, double b, double k)
+{
+	double h;
+
+	if (k <= 0.0)
+		return a < b ? a : b;
+
+	h = 0.5 + 0.5 * (b - a) / k;
+	if (h < 0.0)
+		h = 0.0;
+	if (h > 1.0)
+		h = 1.0;
+
+	return (b * (1.0 - h) + a * h) - k * h * (1.0 - h);
+}
+
+static inline void
 barny_sample_bilinear(uint8_t *data, int stride, int width, int height,
-                      double x, double y, uint8_t *out);
+                      double x, double y, uint8_t *out)
+{
+	int      x0;
+	int      y0;
+	int      x1;
+	int      y1;
+	double   fx;
+	double   fy;
+	uint8_t *p00;
+	uint8_t *p10;
+	uint8_t *p01;
+	uint8_t *p11;
+	int      i;
+
+	if (x < 0)
+		x = 0;
+	if (y < 0)
+		y = 0;
+	if (x >= width - 1)
+		x = width - 1.001;
+	if (y >= height - 1)
+		y = height - 1.001;
+
+	x0  = (int)x;
+	y0  = (int)y;
+	x1  = x0 + 1;
+	y1  = y0 + 1;
+
+	fx  = x - x0;
+	fy  = y - y0;
+
+	p00 = data + y0 * stride + x0 * 4;
+	p10 = data + y0 * stride + x1 * 4;
+	p01 = data + y1 * stride + x0 * 4;
+	p11 = data + y1 * stride + x1 * 4;
+
+	for (i = 0; i < 4; i++) {
+		double v0 = p00[i] + (p10[i] - p00[i]) * fx;
+		double v1 = p01[i] + (p11[i] - p01[i]) * fx;
+		double v  = v0 + (v1 - v0) * fy;
+
+		out[i] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+	}
+}
 void
 barny_blur_surface(cairo_surface_t *surface, int radius);
 void

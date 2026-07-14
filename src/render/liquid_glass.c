@@ -556,65 +556,6 @@ barny_create_displacement_map(int width, int height, barny_refraction_mode_t mod
 }
 
 void
-barny_sample_bilinear(uint8_t *data, int stride, int width, int height, double x,
-                double y, uint8_t *out)
-{
-	int      x0;
-	int      y0;
-	int      x1;
-	int      y1;
-	double   fx;
-	double   fy;
-	uint8_t *p00;
-	uint8_t *p10;
-	uint8_t *p01;
-	uint8_t *p11;
-	int      i;
-	double   v00;
-	double   v10;
-	double   v01;
-	double   v11;
-	double   v0;
-	double   v1;
-	double   v;
-
-	if (x < 0)
-		x = 0;
-	if (y < 0)
-		y = 0;
-	if (x >= width - 1)
-		x = width - 1.001;
-	if (y >= height - 1)
-		y = height - 1.001;
-
-	x0  = (int)x;
-	y0  = (int)y;
-	x1  = x0 + 1;
-	y1  = y0 + 1;
-
-	fx  = x - x0;
-	fy  = y - y0;
-
-	p00 = data + y0 * stride + x0 * 4;
-	p10 = data + y0 * stride + x1 * 4;
-	p01 = data + y1 * stride + x0 * 4;
-	p11 = data + y1 * stride + x1 * 4;
-
-	for (i = 0; i < 4; i++) {
-		v00    = p00[i];
-		v10    = p10[i];
-		v01    = p01[i];
-		v11    = p11[i];
-
-		v0     = v00 + (v10 - v00) * fx;
-		v1     = v01 + (v11 - v01) * fx;
-		v      = v0 + (v1 - v0) * fy;
-
-		out[i] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
-	}
-}
-
-void
 barny_apply_displacement(cairo_surface_t *src, cairo_surface_t *dst,
                          cairo_surface_t *displacement_map, double scale,
                          double chromatic)
@@ -731,20 +672,6 @@ barny_apply_displacement(cairo_surface_t *src, cairo_surface_t *dst,
 	cairo_surface_mark_dirty(dst);
 }
 
-double
-barny_sd_round_rect(double px, double py, double hw, double hh, double r)
-{
-	double qx      = fabs(px) - (hw - r);
-	double qy      = fabs(py) - (hh - r);
-	double ax      = qx > 0 ? qx : 0;
-	double ay      = qy > 0 ? qy : 0;
-	double outside = sqrt(ax * ax + ay * ay);
-	double mq      = qx > qy ? qx : qy;
-	double inside  = mq < 0 ? mq : 0;
-
-	return outside + inside - r;
-}
-
 cairo_surface_t *
 barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
                            double max_disp)
@@ -824,25 +751,6 @@ barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
 	cairo_surface_mark_dirty(surface);
 
 	return surface;
-}
-
-/* Polynomial smooth-minimum: blends two signed distances so the union of two
-   shapes grows a concave "surface tension" fillet instead of a hard corner. */
-double
-barny_smin(double a, double b, double k)
-{
-	double h;
-
-	if (k <= 0.0)
-		return a < b ? a : b;
-
-	h = 0.5 + 0.5 * (b - a) / k;
-	if (h < 0.0)
-		h = 0.0;
-	if (h > 1.0)
-		h = 1.0;
-
-	return (b * (1.0 - h) + a * h) - k * h * (1.0 - h);
 }
 
 /* x^10, the SPEC_P specular exponent, without a libm call: pow() ran on every

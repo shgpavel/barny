@@ -17,6 +17,9 @@ barny_free_string_array(char **arr, size_t count);
 uint64_t
 barny_now_ms(void);
 
+uint64_t
+barny_now_us(void);
+
 void
 barny_format_bytes(char *buf, size_t buflen, unsigned long long bytes,
                    int decimals, bool unit_space);
