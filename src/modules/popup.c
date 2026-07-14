@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -533,6 +534,268 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 		cairo_paint_with_alpha(cr, ca);
 		cairo_restore(cr);
 	}
+}
+
+/* The bead is a shallower droplet than the panel: it sits on glass that is
+   already lit, so it refracts gently and leans on its rim to read as raised.
+   The dome is kept to a narrow band inside the edge -- a bead that bends light
+   all the way through its middle embosses the very label it is meant to
+   highlight, and text is far too fine to survive that. */
+#define BUBBLE_REFRACT   0.7
+#define BUBBLE_ZONE      6.0 /* px the dome reaches in from the edge */
+#define BUBBLE_CHROMA    1.0 /* a lens over a glyph fringes it; keep it faint */
+#define BUBBLE_VEIL      0.12 /* the wash that marks the row as hovered */
+#define BUBBLE_VEIL_FADE 6.0
+#define BUBBLE_PAD       6 /* px of slack around the bead for rim and edge */
+
+static cairo_surface_t *s_bub;
+static int              s_bub_w;
+static int              s_bub_h;
+
+static cairo_surface_t *
+bubble_patch(int w, int h)
+{
+	if (s_bub && s_bub_w == w && s_bub_h == h)
+		return s_bub;
+
+	if (s_bub)
+		cairo_surface_destroy(s_bub);
+
+	s_bub = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	if (cairo_surface_status(s_bub) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(s_bub);
+		s_bub = NULL;
+		return NULL;
+	}
+
+	s_bub_w = w;
+	s_bub_h = h;
+
+	return s_bub;
+}
+
+void
+barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
+                        const barny_glass_bubble_t *bub)
+{
+	double           hw = bub->hw;
+	double           hh = bub->hh;
+	double           rr = bub->radius;
+	double           a  = bub->alpha;
+	cairo_surface_t *patch;
+	uint8_t         *sdata;
+	uint8_t         *ddata;
+	int              sstride;
+	int              dstride;
+	int              sw;
+	int              sh;
+	int              x0;
+	int              y0;
+	int              x1;
+	int              y1;
+	int              pw;
+	int              ph;
+	int              x;
+	int              y;
+
+	if (!src || a <= 0.004 || hw < 1.0 || hh < 1.0)
+		return;
+	if (a > 1.0)
+		a = 1.0;
+	if (rr > hw)
+		rr = hw;
+	if (rr > hh)
+		rr = hh;
+
+	cairo_surface_flush(src);
+	sdata   = cairo_image_surface_get_data(src);
+	sstride = cairo_image_surface_get_stride(src);
+	sw      = cairo_image_surface_get_width(src);
+	sh      = cairo_image_surface_get_height(src);
+	if (!sdata)
+		return;
+
+	x0 = (int)floor(bub->cx - hw) - BUBBLE_PAD;
+	y0 = (int)floor(bub->cy - hh) - BUBBLE_PAD;
+	x1 = (int)ceil(bub->cx + hw) + BUBBLE_PAD;
+	y1 = (int)ceil(bub->cy + hh) + BUBBLE_PAD;
+	if (x0 < 0)
+		x0 = 0;
+	if (y0 < 0)
+		y0 = 0;
+	if (x1 > sw)
+		x1 = sw;
+	if (y1 > sh)
+		y1 = sh;
+
+	pw = x1 - x0;
+	ph = y1 - y0;
+	if (pw <= 0 || ph <= 0)
+		return;
+
+	patch = bubble_patch(pw, ph);
+	if (!patch)
+		return;
+
+	ddata   = cairo_image_surface_get_data(patch);
+	dstride = cairo_image_surface_get_stride(patch);
+
+	for (y = 0; y < ph; y++) {
+		uint8_t *drow = ddata + (ptrdiff_t)y * dstride;
+		double   ly   = y0 + y + 0.5;
+
+		for (x = 0; x < pw; x++) {
+			double  lx = x0 + x + 0.5;
+			double  d;
+			double  dl;
+			double  dr;
+			double  du;
+			double  dv;
+			double  nnx = 0.0;
+			double  nny = 0.0;
+			double  nlen;
+			double  aa;
+			double  depth;
+			double  zone;
+			double  pp;
+			double  srcoff;
+			double  pedge;
+			double  dispx;
+			double  dispy;
+			double  cs;
+			double  fr;
+			double  fg;
+			double  fb;
+			double  veil;
+			double  ri;
+			double  core;
+			double  rim;
+			double  ty;
+			double  facing;
+			double  lit;
+			double  band;
+			double  spec = 0.0;
+			double  ap;
+			uint8_t s1[4];
+			uint8_t s2[4];
+			uint8_t s3[4];
+
+#define BUBBLE_SDF(px, py) \
+	barny_sd_round_rect((px) - bub->cx, (py) - bub->cy, hw, hh, rr)
+
+			d = BUBBLE_SDF(lx, ly);
+			if (d >= 0.5) {
+				drow[x * 4 + 0] = 0;
+				drow[x * 4 + 1] = 0;
+				drow[x * 4 + 2] = 0;
+				drow[x * 4 + 3] = 0;
+				continue;
+			}
+
+			dl   = BUBBLE_SDF(lx - 1.0, ly);
+			dr   = BUBBLE_SDF(lx + 1.0, ly);
+			du   = BUBBLE_SDF(lx, ly - 1.0);
+			dv   = BUBBLE_SDF(lx, ly + 1.0);
+			nlen = sqrt((dr - dl) * (dr - dl) + (dv - du) * (dv - du));
+			if (nlen > 1e-6) {
+				nnx = (dr - dl) / nlen;
+				nny = (dv - du) / nlen;
+				aa  = 0.5 - d / (nlen * 0.5);
+			} else {
+				aa = d < 0.0 ? 1.0 : 0.0;
+			}
+			if (aa <= 0.0) {
+				drow[x * 4 + 0] = 0;
+				drow[x * 4 + 1] = 0;
+				drow[x * 4 + 2] = 0;
+				drow[x * 4 + 3] = 0;
+				continue;
+			}
+			if (aa > 1.0)
+				aa = 1.0;
+
+			/* dome of glass: the surface it sits on is pulled in
+			   toward the bead's edge, hardest right at the rim,
+			   and dead flat by the time it reaches the label */
+			depth  = -d;
+			zone   = hh < BUBBLE_ZONE ? hh : BUBBLE_ZONE;
+			pp     = zone > 0.0 ? depth / zone : 1.0;
+			if (pp > 1.0)
+				pp = 1.0;
+			srcoff = zone * (sqrt(2.0 * pp - pp * pp) - pp)
+			         * BUBBLE_REFRACT;
+			dispx  = -nnx * srcoff;
+			dispy  = -nny * srcoff;
+			pedge  = (1.0 - pp) * (1.0 - pp);
+			cs     = BUBBLE_CHROMA * pedge;
+
+			barny_sample_bilinear(sdata, sstride, sw, sh,
+			                      lx + dispx - nnx * cs,
+			                      ly + dispy - nny * cs, s1);
+			barny_sample_bilinear(sdata, sstride, sw, sh, lx + dispx,
+			                      ly + dispy, s2);
+			barny_sample_bilinear(sdata, sstride, sw, sh,
+			                      lx + dispx + nnx * cs,
+			                      ly + dispy + nny * cs, s3);
+			fb = s3[3] > 0 ? s3[0] * 255.0 / s3[3] : 0.0;
+			fg = s2[3] > 0 ? s2[1] * 255.0 / s2[3] : 0.0;
+			fr = s1[3] > 0 ? s1[2] * 255.0 / s1[3] : 0.0;
+
+			veil = depth / BUBBLE_VEIL_FADE;
+			if (veil > 1.0)
+				veil = 1.0;
+			veil *= BUBBLE_VEIL;
+
+			facing = nnx * POPUP_SPEC_LX + nny * POPUP_SPEC_LY;
+			lit    = 0.45 + 0.55 * (facing > 0.15 ? facing : 0.15);
+			ri     = 1.0 - depth / POPUP_RIM_W;
+			if (ri < 0.0)
+				ri = 0.0;
+			ri   = ri * ri;
+			core = 1.0 - fabs(d) / 1.4;
+			if (core < 0.0)
+				core = 0.0;
+			rim = POPUP_RIM_STR * ri + POPUP_RIM_CORE * core * lit;
+
+			if (depth < POPUP_SPEC_W && facing > 0.0) {
+				band = 1.0 - depth / POPUP_SPEC_W;
+				band = band * band * (3.0 - 2.0 * band);
+				spec = POPUP_SPEC_GAIN * band
+				       * popup_spec_pow(facing);
+			}
+
+			ty = hh > 0.0 ? (ly - bub->cy) / hh : 0.0;
+			if (ty < -1.0)
+				ty = -1.0;
+			if (ty > 1.0)
+				ty = 1.0;
+
+			fr  = fr * (1.0 - veil) + 255.0 * veil;
+			fg  = fg * (1.0 - veil) + 255.0 * veil;
+			fb  = fb * (1.0 - veil) + 255.0 * veil;
+			fr += (rim * (1.0 - POPUP_RIM_CHROMA * ty) + spec) * 255.0;
+			fg += (rim + spec) * 255.0;
+			fb += (rim * (1.0 + POPUP_RIM_CHROMA * ty) + spec) * 255.0;
+			if (fr > 255.0)
+				fr = 255.0;
+			if (fg > 255.0)
+				fg = 255.0;
+			if (fb > 255.0)
+				fb = 255.0;
+
+			ap              = aa * a;
+			drow[x * 4 + 0] = (uint8_t)(fb * ap);
+			drow[x * 4 + 1] = (uint8_t)(fg * ap);
+			drow[x * 4 + 2] = (uint8_t)(fr * ap);
+			drow[x * 4 + 3] = (uint8_t)(255.0 * ap);
+#undef BUBBLE_SDF
+		}
+	}
+
+	cairo_surface_mark_dirty(patch);
+	cairo_set_source_surface(cr, patch, x0, y0);
+	cairo_paint(cr);
+	cairo_set_source_rgba(cr, 0, 0, 0, 0);
 }
 
 int

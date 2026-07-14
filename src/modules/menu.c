@@ -25,6 +25,22 @@
 
 #define MENU_BACK_ID   (-100000)
 
+/* The hover bead: a droplet of glass that chases the pointer down the rows the
+   way the bar's cursor lens chases it along the modules -- it leads with a
+   spring, stretches along its own velocity, and pops in and out. */
+#define MENU_BEAD_K            520.0 /* travel spring stiffness, s^-2 */
+#define MENU_BEAD_ZETA         0.72  /* underdamped: it arrives with a wobble */
+#define MENU_BEAD_POP_K        900.0 /* pop in/out, critically damped */
+#define MENU_BEAD_DT_MAX       0.05
+#define MENU_BEAD_STEP_MAX     0.003
+#define MENU_BEAD_SETTLE_X     0.3 /* px */
+#define MENU_BEAD_SETTLE_V     6.0 /* px/s */
+#define MENU_BEAD_STRETCH_GAIN 7.0e-4 /* velocity -> stretch along travel */
+#define MENU_BEAD_STRETCH_MAX  0.30
+#define MENU_BEAD_POP_SIZE     0.72 /* size it grows from as it pops in */
+#define MENU_BEAD_INSET        4    /* px it keeps from the body's edge */
+#define MENU_BEAD_RADIUS       9
+
 typedef struct {
 	barny_menu_item_t *item;
 	int                y;
@@ -89,12 +105,21 @@ struct barny_menu {
 
 	cairo_surface_t              *glass_src;
 	cairo_surface_t              *content_cache;
+	cairo_surface_t              *rest_src; /* the open panel, bead aside */
 
 	enum menu_anim                anim;
 	double                        morph;
 	double                        morph_v;
 	uint64_t                      last_us;
 	struct wl_callback           *frame_cb;
+
+	/* the hover bead, in patch coordinates */
+	double                        bead_y;
+	double                        bead_vy;
+	double                        bead_hh;
+	double                        bead_scale;
+	double                        bead_sv;
+	uint64_t                      bead_us;
 
 	bool                          configured;
 };
@@ -103,6 +128,12 @@ static void
 menu_finalize_destroy(barny_menu_t *m);
 static void
 menu_schedule_frame(barny_menu_t *m);
+static void
+menu_animate(barny_menu_t *m);
+static bool
+menu_point_inside(const barny_menu_t *m, double sx, double sy);
+static int
+menu_row_at(barny_menu_t *m, double ly);
 
 static barny_menu_item_t *
 menu_current_parent(const barny_menu_t *m)
@@ -324,12 +355,6 @@ menu_render_rows(barny_menu_t *m, cairo_t *cr)
 			continue;
 		}
 
-		if (i == m->hover && r->enabled) {
-			barny_rounded_rect_path(cr, 4, r->y + 1, mw - 8, r->h - 2, 7);
-			cairo_set_source_rgba(cr, 1, 1, 1, 0.16);
-			cairo_fill(cr);
-		}
-
 		if (r->is_back) {
 			char back[256];
 			snprintf(back, sizeof(back), "\xE2\x80\xB9 %s",
@@ -364,7 +389,7 @@ menu_render_rows(barny_menu_t *m, cairo_t *cr)
 }
 
 /* The rows are cached like a popup's content: the morph scales them into the
-   droplet, and a hover only has to redraw this one small surface. */
+   droplet, and the bead lenses them without ever re-running pango. */
 static void
 menu_build_content(barny_menu_t *m)
 {
@@ -402,8 +427,163 @@ menu_build_glass(barny_menu_t *m)
 	m->glass_src = barny_glass_panel_bg(m->state, m->out, &panel);
 }
 
+/* The open panel with its rows, held ready: it is what the bead lenses, and
+   what every frame of a bead's travel is painted over, so the menu at rest
+   costs a blit rather than another pass over the whole droplet. */
 static void
-menu_present(barny_menu_t *m, double morph)
+menu_build_rest(barny_menu_t *m)
+{
+	barny_glass_panel_t panel;
+	cairo_t            *rc;
+
+	if (m->rest_src) {
+		cairo_surface_destroy(m->rest_src);
+		m->rest_src = NULL;
+	}
+	if (!m->glass_src || m->patch_w <= 0 || m->patch_h <= 0)
+		return;
+
+	m->rest_src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                         m->patch_w, m->patch_h);
+	if (cairo_surface_status(m->rest_src) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(m->rest_src);
+		m->rest_src = NULL;
+		return;
+	}
+
+	menu_panel(m, &panel);
+	rc = cairo_create(m->rest_src);
+	if (m->state->config.popup_animations) {
+		barny_glass_panel_morph(rc, &panel, m->glass_src,
+		                        m->content_cache, 1.0);
+	} else {
+		barny_glass_panel_compose(rc, m->state, m->out, &panel,
+		                          m->content_cache);
+	}
+	cairo_destroy(rc);
+}
+
+static int
+menu_body_y(const barny_menu_t *m)
+{
+	return m->state->config.position_top ? m->neck : 0;
+}
+
+/* Advance the bead. It chases the hovered row with an underdamped spring and
+   pops open when a row first takes it; true while it is still in motion. */
+static bool
+menu_bead_step(barny_menu_t *m)
+{
+	double   ty    = m->bead_y;
+	double   thh   = m->bead_hh;
+	double   ts    = 0.0;
+	double   damp  = 2.0 * MENU_BEAD_ZETA * sqrt(MENU_BEAD_K);
+	double   pdamp = 2.0 * sqrt(MENU_BEAD_POP_K);
+	uint64_t now   = barny_now_us();
+	double   dt    = (double)(now - m->bead_us) / 1000000.0;
+	double   h;
+	int      steps;
+	int      i;
+
+	m->bead_us = now;
+
+	if (m->hover >= 0 && m->hover < m->row_count) {
+		menu_row_t *r = &m->rows[m->hover];
+
+		ty  = menu_body_y(m) + r->y + r->h / 2.0;
+		thh = (r->h - 2) / 2.0;
+		ts  = 1.0;
+	}
+
+	/* a bead that is not on screen has nowhere to travel from: pop it in
+	   where it is wanted rather than sliding it down from the last row */
+	if (m->bead_scale < 0.01) {
+		m->bead_y  = ty;
+		m->bead_vy = 0.0;
+	}
+	m->bead_hh = thh;
+
+	if (!m->state->config.popup_animations) {
+		m->bead_y     = ty;
+		m->bead_vy    = 0.0;
+		m->bead_scale = ts;
+		m->bead_sv    = 0.0;
+		return false;
+	}
+
+	if (dt < 0.0)
+		dt = 0.0;
+	if (dt > MENU_BEAD_DT_MAX)
+		dt = MENU_BEAD_DT_MAX;
+
+	steps = (int)(dt / MENU_BEAD_STEP_MAX) + 1;
+	h     = dt / steps;
+
+	for (i = 0; i < steps; i++) {
+		m->bead_vy += (MENU_BEAD_K * (ty - m->bead_y)
+		               - damp * m->bead_vy)
+		              * h;
+		m->bead_y  += m->bead_vy * h;
+
+		m->bead_sv += (MENU_BEAD_POP_K * (ts - m->bead_scale)
+		               - pdamp * m->bead_sv)
+		              * h;
+		m->bead_scale += m->bead_sv * h;
+	}
+
+	if (m->bead_scale < 0.0)
+		m->bead_scale = 0.0;
+	if (m->bead_scale > 1.0)
+		m->bead_scale = 1.0;
+
+	if (fabs(ty - m->bead_y) < MENU_BEAD_SETTLE_X
+	    && fabs(m->bead_vy) < MENU_BEAD_SETTLE_V
+	    && fabs(ts - m->bead_scale) < 0.01 && fabs(m->bead_sv) < 0.1) {
+		m->bead_y     = ty;
+		m->bead_vy    = 0.0;
+		m->bead_scale = ts;
+		m->bead_sv    = 0.0;
+		return false;
+	}
+
+	return true;
+}
+
+static void
+menu_draw_bead(barny_menu_t *m, cairo_t *cr)
+{
+	barny_glass_bubble_t bead;
+	double               s = m->bead_scale;
+	double               stretch;
+	double               size;
+	double               hw;
+
+	if (!m->rest_src || s <= 0.004 || m->bead_hh < 1.0)
+		return;
+	if (s > 1.0)
+		s = 1.0;
+
+	/* travelling stretches it along its own velocity and pulls it thin, the
+	   way a drop of water elongates when it is flicked */
+	stretch = fabs(m->bead_vy) * MENU_BEAD_STRETCH_GAIN;
+	if (stretch > MENU_BEAD_STRETCH_MAX)
+		stretch = MENU_BEAD_STRETCH_MAX;
+
+	size = MENU_BEAD_POP_SIZE + (1.0 - MENU_BEAD_POP_SIZE) * s;
+	hw   = (m->menu_w - 2.0 * MENU_BEAD_INSET) / 2.0;
+
+	bead.cx     = m->menu_w / 2.0;
+	bead.cy     = m->bead_y;
+	bead.hw     = hw * size * (1.0 - 0.25 * stretch);
+	bead.hh     = m->bead_hh * size * (1.0 + stretch);
+	bead.radius = MENU_BEAD_RADIUS;
+	bead.alpha  = s;
+
+	barny_glass_bubble_draw(cr, m->rest_src, &bead);
+}
+
+static void
+menu_present(barny_menu_t *m)
 {
 	barny_glass_panel_t panel;
 	cairo_t            *cr = m->cr;
@@ -439,9 +619,16 @@ menu_present(barny_menu_t *m, double morph)
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
 	cairo_translate(cr, m->patch_x, m->patch_y);
-	if (m->state->config.popup_animations) {
+	if (m->anim == MENU_ANIM_OPENING || m->anim == MENU_ANIM_CLOSING) {
+		/* mid-morph the panel is still a droplet; the bead only rides a
+		   panel that has finished opening */
 		barny_glass_panel_morph(cr, &panel, m->glass_src,
-		                        m->content_cache, morph);
+		                        m->content_cache, m->morph);
+	} else if (m->rest_src) {
+		cairo_set_source_surface(cr, m->rest_src, 0, 0);
+		cairo_paint(cr);
+		cairo_set_source_rgba(cr, 0, 0, 0, 0);
+		menu_draw_bead(m, cr);
 	} else {
 		barny_glass_panel_compose(cr, m->state, m->out, &panel,
 		                          m->content_cache);
@@ -458,30 +645,50 @@ menu_present(barny_menu_t *m, double morph)
 	m->damage_h = m->patch_h;
 }
 
+/* One frame of whatever is in motion: the panel's own morph, the bead chasing
+   a row, or both. The loop stops as soon as everything has settled. */
 static void
 menu_animate(barny_menu_t *m)
 {
-	bool closing = m->anim == MENU_ANIM_CLOSING;
-	bool settled;
+	bool closing  = m->anim == MENU_ANIM_CLOSING;
+	bool morphing = m->anim == MENU_ANIM_OPENING || closing;
+	bool settled  = true;
+	bool travelling;
 
-	settled = barny_glass_panel_step(&m->morph, &m->morph_v, &m->last_us,
-	                                 closing);
+	if (morphing)
+		settled = barny_glass_panel_step(&m->morph, &m->morph_v,
+		                                 &m->last_us, closing);
 
-	menu_present(m, m->morph);
+	travelling = menu_bead_step(m);
 
-	if (settled) {
+	menu_present(m);
+
+	if (morphing && settled) {
 		if (closing) {
 			wl_surface_commit(m->surface);
 			menu_finalize_destroy(m);
 			return;
 		}
 		m->anim = MENU_ANIM_OPEN;
-		wl_surface_commit(m->surface);
-		return;
 	}
 
-	menu_schedule_frame(m);
+	if ((morphing && !settled) || travelling)
+		menu_schedule_frame(m);
+
 	wl_surface_commit(m->surface);
+}
+
+/* Wake the frame loop for a bead that has somewhere new to be. */
+static void
+menu_kick(barny_menu_t *m)
+{
+	if (!m->configured)
+		return;
+	if (m->frame_cb)
+		return; /* a frame is already coming; it will pick the row up */
+
+	m->bead_us = barny_now_us();
+	menu_animate(m);
 }
 
 static void
@@ -514,7 +721,7 @@ menu_paint(barny_menu_t *m)
 	if (!m->cr || !m->buffer)
 		return;
 
-	menu_present(m, m->anim == MENU_ANIM_NONE ? 1.0 : m->morph);
+	menu_present(m);
 	wl_surface_commit(m->surface);
 }
 
@@ -597,6 +804,9 @@ menu_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 	menu_compute_rect(m);
 	menu_build_glass(m);
 	menu_build_content(m);
+	menu_build_rest(m);
+
+	m->bead_us = barny_now_us();
 
 	if (!m->state->config.popup_animations) {
 		menu_paint(m);
@@ -658,6 +868,8 @@ menu_configure_surface(barny_menu_t *m)
 static void
 menu_relayout(barny_menu_t *m)
 {
+	int row;
+
 	menu_build_rows(m);
 	if (!m->configured)
 		return;
@@ -665,7 +877,23 @@ menu_relayout(barny_menu_t *m)
 	menu_compute_rect(m);
 	menu_build_glass(m);
 	menu_build_content(m);
-	menu_paint(m);
+	menu_build_rest(m);
+
+	/* the pointer has not moved, but the row under it has: pick the bead's
+	   new row up here or it stays hidden until the pointer twitches */
+	if (menu_point_inside(m, m->state->pointer_x, m->state->pointer_y)) {
+		row = menu_row_at(m, m->state->pointer_y - m->menu_y);
+		if (row >= 0
+		    && (m->rows[row].separator || !m->rows[row].enabled))
+			row = -1;
+		m->hover = row;
+	}
+
+	/* menu_kick paints; if a frame is already pending it will, in a moment */
+	if (m->frame_cb)
+		menu_paint(m);
+	else
+		menu_kick(m);
 }
 
 void
@@ -777,6 +1005,10 @@ menu_finalize_destroy(barny_menu_t *m)
 		cairo_surface_destroy(m->content_cache);
 		m->content_cache = NULL;
 	}
+	if (m->rest_src) {
+		cairo_surface_destroy(m->rest_src);
+		m->rest_src = NULL;
+	}
 
 	menu_teardown_buffer(m);
 
@@ -883,8 +1115,7 @@ barny_menu_pointer_motion(barny_state_t *state, double sx, double sy)
 
 	if (row != m->hover) {
 		m->hover = row;
-		menu_build_content(m);
-		menu_paint(m);
+		menu_kick(m);
 	}
 }
 

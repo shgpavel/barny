@@ -69,6 +69,24 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
                         cairo_surface_t *bg, cairo_surface_t *content,
                         double m);
 
+/* A bead of liquid riding on a finished panel -- the menu's hover highlight is
+   one. It lenses whatever is already composed beneath it, glass and label
+   alike, the way the bar's cursor droplet lenses the bar, so a hovered row
+   reads as glass swelling over it rather than a rectangle painted on top.
+   Coordinates are those of src, which is the panel as already drawn. */
+typedef struct {
+	double cx;
+	double cy;
+	double hw; /* half extents, the spring's stretch already in them */
+	double hh;
+	double radius;
+	double alpha;
+} barny_glass_bubble_t;
+
+void
+barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
+                        const barny_glass_bubble_t *bub);
+
 barny_popup_t *
 barny_popup_create(barny_state_t *state, barny_module_t *owner,
                    const barny_popup_callbacks_t *cb, int gap_px);
