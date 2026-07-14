@@ -10,6 +10,12 @@ project(
         'strip=true',
         'werror=true',
         'prefix=/usr',
+        # The renderers are per-pixel loops that call across units on every
+        # pixel -- the sampler, the signed distances, the colour helpers. LTO
+        # is what lets those inline, so it buys the droplet more than any
+        # single tweak inside the loop.
+        'b_lto=true',
+        'b_ndebug=if-release',
     ],
 )
 
