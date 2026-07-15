@@ -17,9 +17,9 @@
 
 /* Liquid morph: the popup is born as a droplet squeezing out of the bar edge
    and springs open into the data window; closing runs the morph backwards. */
-#define POPUP_MORPH_K_OPEN     420.0 /* open spring stiffness, s^-2 */
-#define POPUP_MORPH_ZETA_OPEN  0.78  /* slight jelly overshoot */
-#define POPUP_MORPH_K_CLOSE    820.0
+#define POPUP_MORPH_K_OPEN     120.0 /* ~0.5 s open, s^-2 */
+#define POPUP_MORPH_ZETA_OPEN  0.88  /* soft landing, slight overshoot */
+#define POPUP_MORPH_K_CLOSE    300.0 /* quicker than open, still readable */
 #define POPUP_MORPH_ZETA_CLOSE 1.0
 #define POPUP_DT_MAX           0.05
 #define POPUP_STEP_MAX         0.003 /* spring substep, s */
@@ -40,7 +40,7 @@
 #define POPUP_SPEC_W     7.0
 #define POPUP_SPEC_P     10 /* see popup_spec_pow */
 #define POPUP_SPEC_GAIN  0.55
-#define POPUP_CONTENT_IN 0.58 /* morph point where the data fades in */
+#define POPUP_CONTENT_IN 0.68 /* panel forms before the data condenses in */
 
 enum popup_anim {
 	POPUP_ANIM_NONE = 0,
@@ -222,6 +222,30 @@ static cairo_surface_t *s_patch;
 static int              s_patch_w;
 static int              s_patch_h;
 
+static double
+popup_phase(double p, double start, double end)
+{
+	double t = (p - start) / (end - start);
+
+	if (t < 0.0)
+		t = 0.0;
+	if (t > 1.0)
+		t = 1.0;
+	return t * t * (3.0 - 2.0 * t);
+}
+
+static double
+popup_phase_out(double p, double start, double end)
+{
+	double t = (p - start) / (end - start);
+
+	if (t < 0.0)
+		t = 0.0;
+	if (t > 1.0)
+		t = 1.0;
+	return t * (2.0 - t);
+}
+
 static cairo_surface_t *
 panel_patch(int w, int h)
 {
@@ -244,9 +268,9 @@ panel_patch(int w, int h)
 	return s_patch;
 }
 
-/* Draw the panel as a liquid-glass blob at morph position m: a droplet
-   squeezing out of the bar edge (m=0) that stretches through a
-   surface-tension neck and opens into the data window (m=1). Shape comes
+/* Draw the panel as a liquid-glass blob at morph position m: a zero-size seed
+   at the bar edge (m=0) inflates into an attached droplet, stretches through a
+   surface-tension neck, then opens into the data window (m=1). Shape comes
    from a round-rect SDF smooth-unioned with the bar half-plane; shading
    (refraction, veil, lit rim, specular) matches the bar lens and fades out
    as the window opens, leaving only the frame edge lighting. */
@@ -257,21 +281,38 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 	bool             top    = panel->position_top;
 	int              w      = panel->w;
 	int              h      = panel->h;
-	double           mg     = m < 0.0 ? 0.0 : (m > 1.02 ? 1.02 : m);
-	double           inv    = 1.0 - mg > 0.0 ? 1.0 - mg : 0.0;
+	double           p      = m < 0.0 ? 0.0 : (m > 1.0 ? 1.0 : m);
+	double           over   = m > 1.0 ? fmin(m - 1.0, 0.02) : 0.0;
+	/* Birth leads, then travel and panel growth overlap it. Keeping these
+	   phases separate makes the glass visibly emerge from the bar instead of
+	   replacing one prebuilt silhouette with another. */
+	double           birth  = popup_phase_out(p, 0.0, 0.22);
+	double           travel = popup_phase_out(p, 0.08, 0.94) + over;
+	double           grow_h = popup_phase_out(p, 0.14, 0.90) + over;
+	double           grow_w = popup_phase(p, 0.20, 1.0) + over;
+	double           finish = popup_phase(p, 0.0, 1.0) + over;
+	double           inv    = 1.0 - finish > 0.0 ? 1.0 - finish : 0.0;
 	double           bw0    = fmin(w * 0.5, POPUP_BLOB_W);
 	double           bh0    = fmin(panel->body_h * 0.8, POPUP_BLOB_H);
 	double           hw0    = bw0 / 2.0;
 	double           hh0    = bh0 / 2.0;
 	double           r0     = fmin(hw0, hh0);
+	double           edge_y = top ? 0.0 : (double)h;
+	double           seed_x = fmin(fmax((double)panel->anchor_x, 0.0), (double)w);
 	double           cy0    = top ? -bh0 * 0.15 : (double)h + bh0 * 0.15;
 	double           cx0    = fmin(fmax((double)panel->anchor_x, hw0), w - hw0);
-	double           hw     = hw0 + (panel->body_w / 2.0 - hw0) * mg;
-	double           hh     = hh0 + (panel->body_h / 2.0 - hh0) * mg;
-	double           ccx    = cx0 + (panel->body_w / 2.0 - cx0) * mg;
-	double           ccy    = cy0 + (panel->body_y + panel->body_h / 2.0 - cy0) * mg;
-	double           rr     = r0 + (POPUP_RADIUS - r0) * mg;
-	double           smk    = POPUP_NECK_SMIN * (1.0 - 0.6 * mg);
+	double           hw     = hw0 * birth
+	                        + (panel->body_w / 2.0 - hw0) * grow_w;
+	double           hh     = hh0 * birth
+	                        + (panel->body_h / 2.0 - hh0) * grow_h;
+	double           ccx    = seed_x + (cx0 - seed_x) * birth
+	                        + (panel->body_w / 2.0 - cx0) * travel;
+	double           ccy    = edge_y + (cy0 - edge_y) * birth
+	                        + (panel->body_y + panel->body_h / 2.0 - cy0)
+	                                  * travel;
+	double           rr     = r0 * birth + (POPUP_RADIUS - r0) * grow_w;
+	double           smk    = POPUP_NECK_SMIN * birth
+	                         * (1.0 - 0.6 * travel);
 	double           disp   = POPUP_REFRACT * inv;
 	double           chroma = POPUP_CHROMA * inv;
 	double           edge_h = BARNY_FRAME_EDGE_TOP_STOP * 2.0 * hh;
@@ -519,9 +560,7 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 	cairo_set_source_rgba(cr, 0, 0, 0, 0);
 
 	/* the data window condenses inside the blob near the end of the morph */
-	ca = (m - POPUP_CONTENT_IN) / (1.0 - POPUP_CONTENT_IN + 0.02);
-	if (ca > 1.0)
-		ca = 1.0;
+	ca = popup_phase(p, POPUP_CONTENT_IN, 1.0);
 	if (ca > 0.003 && content) {
 		cairo_save(cr);
 		barny_rounded_rect_path(cr, ccx - hw, ccy - hh, 2.0 * hw,
@@ -924,7 +963,7 @@ barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
 	/* Retire the spring's exponential tail: below this the panel is still
 	   creeping, but by under a pixel, so the last ~100 ms of it were frames
 	   nobody could see. */
-	settled = fabs(target - *morph) < 0.008 && fabs(*vel) < 0.15;
+	settled = fabs(target - *morph) < 0.006 && fabs(*vel) < 0.10;
 	if (settled) {
 		*morph = target;
 		*vel   = 0.0;

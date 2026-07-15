@@ -127,6 +127,9 @@ struct barny_menu {
 	struct wl_callback           *frame_cb;
 
 	/* the hover bead, in patch coordinates */
+	double                        bead_x;
+	double                        bead_vx;
+	double                        bead_hw;
 	double                        bead_y;
 	double                        bead_vy;
 	double                        bead_hh;
@@ -615,12 +618,14 @@ menu_body_y(const barny_menu_t *m)
 	return m->state->config.position_top ? m->neck : 0;
 }
 
-/* Advance the bead. It chases the hovered row with an underdamped spring and
-   pops open when a row first takes it; true while it is still in motion. */
+/* Advance the bead. It chases the hovered row or tray cell with an underdamped
+   spring and pops open when an item first takes it; true while in motion. */
 static bool
 menu_bead_step(barny_menu_t *m)
 {
+	double   tx    = m->bead_x;
 	double   ty    = m->bead_y;
+	double   thw   = m->bead_hw;
 	double   thh   = m->bead_hh;
 	double   ts    = 0.0;
 	double   damp  = 2.0 * MENU_BEAD_ZETA * sqrt(MENU_BEAD_K);
@@ -632,13 +637,24 @@ menu_bead_step(barny_menu_t *m)
 	int      i;
 
 	m->bead_us = now;
-	if (m->kind == MENU_KIND_TRAY)
-		return false;
+	if (m->kind == MENU_KIND_TRAY && m->hover >= 0
+	    && m->hover < m->tray_count) {
+		int col = m->hover % m->tray_columns;
+		int row = m->hover / m->tray_columns;
 
-	if (m->hover >= 0 && m->hover < m->row_count) {
+		tx  = TRAY_MENU_PAD + col * m->tray_cell + m->tray_cell / 2.0;
+		ty  = menu_body_y(m) + TRAY_MENU_PAD + row * m->tray_cell
+		      + m->tray_cell / 2.0;
+		thw = (m->tray_cell - 2.0 * MENU_BEAD_INSET) / 2.0;
+		thh = thw;
+		ts  = 1.0;
+	} else if (m->kind == MENU_KIND_SNI && m->hover >= 0
+	           && m->hover < m->row_count) {
 		menu_row_t *r = &m->rows[m->hover];
 
+		tx  = m->menu_w / 2.0;
 		ty  = menu_body_y(m) + r->y + r->h / 2.0;
+		thw = (m->menu_w - 2.0 * MENU_BEAD_INSET) / 2.0;
 		thh = (r->h - 2) / 2.0;
 		ts  = 1.0;
 	}
@@ -646,12 +662,17 @@ menu_bead_step(barny_menu_t *m)
 	/* a bead that is not on screen has nowhere to travel from: pop it in
 	   where it is wanted rather than sliding it down from the last row */
 	if (m->bead_scale < 0.01) {
+		m->bead_x  = tx;
+		m->bead_vx = 0.0;
 		m->bead_y  = ty;
 		m->bead_vy = 0.0;
 	}
+	m->bead_hw = thw;
 	m->bead_hh = thh;
 
 	if (!m->state->config.popup_animations) {
+		m->bead_x     = tx;
+		m->bead_vx    = 0.0;
 		m->bead_y     = ty;
 		m->bead_vy    = 0.0;
 		m->bead_scale = ts;
@@ -668,6 +689,11 @@ menu_bead_step(barny_menu_t *m)
 	h     = dt / steps;
 
 	for (i = 0; i < steps; i++) {
+		m->bead_vx += (MENU_BEAD_K * (tx - m->bead_x)
+		               - damp * m->bead_vx)
+		              * h;
+		m->bead_x  += m->bead_vx * h;
+
 		m->bead_vy += (MENU_BEAD_K * (ty - m->bead_y)
 		               - damp * m->bead_vy)
 		              * h;
@@ -684,9 +710,13 @@ menu_bead_step(barny_menu_t *m)
 	if (m->bead_scale > 1.0)
 		m->bead_scale = 1.0;
 
-	if (fabs(ty - m->bead_y) < MENU_BEAD_SETTLE_X
+	if (fabs(tx - m->bead_x) < MENU_BEAD_SETTLE_X
+	    && fabs(m->bead_vx) < MENU_BEAD_SETTLE_V
+	    && fabs(ty - m->bead_y) < MENU_BEAD_SETTLE_X
 	    && fabs(m->bead_vy) < MENU_BEAD_SETTLE_V
 	    && fabs(ts - m->bead_scale) < 0.01 && fabs(m->bead_sv) < 0.1) {
+		m->bead_x     = tx;
+		m->bead_vx    = 0.0;
 		m->bead_y     = ty;
 		m->bead_vy    = 0.0;
 		m->bead_scale = ts;
@@ -702,11 +732,11 @@ menu_draw_bead(barny_menu_t *m, cairo_t *cr)
 {
 	barny_glass_bubble_t bead;
 	double               s = m->bead_scale;
-	double               stretch;
+	double               stretch_x;
+	double               stretch_y;
 	double               size;
-	double               hw;
 
-	if (m->kind == MENU_KIND_TRAY || !m->rest_src || s <= 0.004
+	if (!m->rest_src || s <= 0.004 || m->bead_hw < 1.0
 	    || m->bead_hh < 1.0)
 		return;
 	if (s > 1.0)
@@ -714,17 +744,21 @@ menu_draw_bead(barny_menu_t *m, cairo_t *cr)
 
 	/* travelling stretches it along its own velocity and pulls it thin, the
 	   way a drop of water elongates when it is flicked */
-	stretch = fabs(m->bead_vy) * MENU_BEAD_STRETCH_GAIN;
-	if (stretch > MENU_BEAD_STRETCH_MAX)
-		stretch = MENU_BEAD_STRETCH_MAX;
+	stretch_x = fabs(m->bead_vx) * MENU_BEAD_STRETCH_GAIN;
+	if (stretch_x > MENU_BEAD_STRETCH_MAX)
+		stretch_x = MENU_BEAD_STRETCH_MAX;
+	stretch_y = fabs(m->bead_vy) * MENU_BEAD_STRETCH_GAIN;
+	if (stretch_y > MENU_BEAD_STRETCH_MAX)
+		stretch_y = MENU_BEAD_STRETCH_MAX;
 
 	size = MENU_BEAD_POP_SIZE + (1.0 - MENU_BEAD_POP_SIZE) * s;
-	hw   = (m->menu_w - 2.0 * MENU_BEAD_INSET) / 2.0;
 
-	bead.cx     = m->menu_w / 2.0;
+	bead.cx     = m->bead_x;
 	bead.cy     = m->bead_y;
-	bead.hw     = hw * size * (1.0 - 0.25 * stretch);
-	bead.hh     = m->bead_hh * size * (1.0 + stretch);
+	bead.hw     = m->bead_hw * size
+	              * (1.0 + stretch_x - 0.25 * stretch_y);
+	bead.hh     = m->bead_hh * size
+	              * (1.0 + stretch_y - 0.25 * stretch_x);
 	bead.radius = MENU_BEAD_RADIUS;
 	bead.alpha  = s;
 
@@ -1320,6 +1354,26 @@ menu_row_at(barny_menu_t *m, double ly)
 	return -1;
 }
 
+static int
+menu_tray_index_at(const barny_menu_t *m, double sx, double sy)
+{
+	int rel_x = (int)sx - m->menu_x - TRAY_MENU_PAD;
+	int rel_y = (int)sy - m->menu_y - TRAY_MENU_PAD;
+	int col;
+	int row;
+	int index;
+
+	if (rel_x < 0 || rel_y < 0)
+		return -1;
+	col   = rel_x / m->tray_cell;
+	row   = rel_y / m->tray_cell;
+	index = row * m->tray_columns + col;
+	if (col < 0 || col >= m->tray_columns || index < 0
+	    || index >= m->tray_count)
+		return -1;
+	return index;
+}
+
 void
 barny_menu_pointer_motion(barny_state_t *state, double sx, double sy)
 {
@@ -1328,13 +1382,15 @@ barny_menu_pointer_motion(barny_state_t *state, double sx, double sy)
 
 	if (!m || !m->configured)
 		return;
-	if (m->kind == MENU_KIND_TRAY)
-		return;
-
 	row = -1;
-	if (menu_point_inside(m, sx, sy))
-		row = menu_row_at(m, sy - m->menu_y);
-	if (row >= 0 && (m->rows[row].separator || !m->rows[row].enabled))
+	if (menu_point_inside(m, sx, sy)) {
+		if (m->kind == MENU_KIND_TRAY)
+			row = menu_tray_index_at(m, sx, sy);
+		else
+			row = menu_row_at(m, sy - m->menu_y);
+	}
+	if (m->kind == MENU_KIND_SNI && row >= 0
+	    && (m->rows[row].separator || !m->rows[row].enabled))
 		row = -1;
 
 	if (row != m->hover) {
@@ -1360,21 +1416,14 @@ barny_menu_pointer_button(barny_state_t *state, uint32_t button,
 		return;
 	}
 	if (m->kind == MENU_KIND_TRAY) {
-		int          col;
-		int          row;
 		int          index;
 		sni_item_t  *tray_item;
 		char         *menu_path;
-		int          rel_x = (int)state->pointer_x - m->menu_x - TRAY_MENU_PAD;
-		int          rel_y = (int)state->pointer_y - m->menu_y - TRAY_MENU_PAD;
 
-		if (rel_x < 0 || rel_y < 0
-		    || (button != BTN_LEFT && button != BTN_RIGHT))
+		if (button != BTN_LEFT && button != BTN_RIGHT)
 			return;
-		col   = rel_x / m->tray_cell;
-		row   = rel_y / m->tray_cell;
-		index = row * m->tray_columns + col;
-		if (col < 0 || col >= m->tray_columns || index >= m->tray_count)
+		index = menu_tray_index_at(m, state->pointer_x, state->pointer_y);
+		if (index < 0)
 			return;
 		tray_item = menu_tray_item_at(m, index);
 		if (!tray_item)

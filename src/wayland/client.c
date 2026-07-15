@@ -129,7 +129,7 @@ pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
 		if (state->lens_scale < 0.01) {
 			state->lens_x       = state->pointer_x;
 			state->lens_vx      = 0.0;
-			state->lens_prev_ms = barny_now_ms();
+			state->lens_prev_us = barny_now_us();
 		}
 		state->lens_target_scale = 1.0;
 		state->lens_animating    = true;

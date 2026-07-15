@@ -39,6 +39,7 @@
 #define LENS_SPRING_ZETA 0.82  /* underdamped: slight droplet overshoot */
 #define LENS_POP_K       900.0 /* enter/leave pop spring, critically damped */
 #define LENS_DT_MAX      0.05  /* integration step cap, s */
+#define LENS_STEP_MAX    0.003 /* fixed spring substep, s */
 #define LENS_SETTLE_X    0.4   /* px */
 #define LENS_SETTLE_V    8.0   /* px/s */
 #define LENS_STRETCH_GAIN 3.2e-4 /* velocity -> horizontal stretch */
@@ -1372,14 +1373,17 @@ barny_lens_step(barny_output_t *output)
 	double         pop_damp;
 	double         bmin;
 	double         bmax;
+	double         h;
+	int            steps;
+	int            i;
 
 	if (!state->config.dynamic_glass || output != state->dyn_output
 	    || !state->lens_animating)
 		return false;
 
-	now                 = barny_now_ms();
-	dt                  = (double)(now - state->lens_prev_ms) / 1000.0;
-	state->lens_prev_ms = now;
+	now                 = barny_now_us();
+	dt                  = (double)(now - state->lens_prev_us) / 1000000.0;
+	state->lens_prev_us = now;
 	if (dt < 0.0)
 		dt = 0.0;
 	if (dt > LENS_DT_MAX)
@@ -1400,17 +1404,24 @@ barny_lens_step(barny_output_t *output)
 	damp     = 2.0 * LENS_SPRING_ZETA * sqrt(LENS_SPRING_K);
 	pop_damp = 2.0 * sqrt(LENS_POP_K);
 
-	state->lens_vx += (LENS_SPRING_K * (tx - state->lens_x)
-	                   - damp * state->lens_vx)
-	                  * dt;
-	state->lens_x  += state->lens_vx * dt;
+	/* Match the popup/menu integrators: short fixed substeps keep the droplet
+	   on the same curve after a compositor hitch instead of flinging it past
+	   the pointer in one large Euler step. */
+	steps = (int)(dt / LENS_STEP_MAX) + 1;
+	h     = dt / steps;
+	for (i = 0; i < steps; i++) {
+		state->lens_vx += (LENS_SPRING_K * (tx - state->lens_x)
+		                   - damp * state->lens_vx)
+		                  * h;
+		state->lens_x  += state->lens_vx * h;
 
-	state->lens_sv += (LENS_POP_K
-	                           * (state->lens_target_scale
-	                              - state->lens_scale)
-	                   - pop_damp * state->lens_sv)
-	                  * dt;
-	state->lens_scale += state->lens_sv * dt;
+		state->lens_sv += (LENS_POP_K
+		                           * (state->lens_target_scale
+		                              - state->lens_scale)
+		                   - pop_damp * state->lens_sv)
+		                  * h;
+		state->lens_scale += state->lens_sv * h;
+	}
 	if (state->lens_scale < 0.0)
 		state->lens_scale = 0.0;
 	if (state->lens_scale > 1.0)

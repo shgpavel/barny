@@ -284,7 +284,7 @@ struct barny_state {
 	double                      lens_x, lens_vx;
 	double                      lens_scale, lens_sv;
 	double                      lens_target_scale;
-	uint64_t                    lens_prev_ms;
+	uint64_t                    lens_prev_us;
 	bool                        lens_animating;
 
 	barny_menu_t               *menu;
