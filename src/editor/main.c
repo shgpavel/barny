@@ -632,6 +632,8 @@ module_details_init_tray(module_details_t *details, barny_config_t *config)
 	module_details_add_enum_str(details, "Icon shape", "tray_icon_shape",
 	                            &config->tray_icon_shape, "circle",
 	                            shape_options, 2);
+	module_details_add_bool(details, "Put icons in overflow menu",
+	                        "tray_overflow", &config->tray_overflow);
 }
 
 static void

@@ -134,6 +134,14 @@ test_config_defaults(void)
 		ASSERT_EQ_INT(0, config.weather_popup_gap);
 	}
 
+	TEST("tray overflow is disabled by default")
+	{
+		barny_config_t config;
+
+		barny_config_defaults(&config);
+		ASSERT_FALSE(config.tray_overflow);
+	}
+
 	TEST("popup content defaults match docs")
 	{
 		barny_config_t config;
@@ -640,6 +648,18 @@ test_config_load(void)
 		path = create_temp_config("clock_show_time = false\n");
 		barny_config_load(&config, path);
 		ASSERT_FALSE(config.clock_show_time);
+		cleanup_temp_config(path);
+	}
+
+	TEST("parses tray overflow")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("tray_overflow = true\n");
+		barny_config_load(&config, path);
+		ASSERT_TRUE(config.tray_overflow);
 		cleanup_temp_config(path);
 	}
 

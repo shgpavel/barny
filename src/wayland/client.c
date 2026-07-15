@@ -117,6 +117,11 @@ pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
 		}
 	}
 
+	if (barny_menu_owns_surface(state, surface)) {
+		barny_menu_pointer_enter(state);
+		return;
+	}
+
 	if (state->pointer_output) {
 		state->dyn_output = state->pointer_output;
 		state->dyn_dirty  = true;

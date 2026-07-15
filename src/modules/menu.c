@@ -23,6 +23,9 @@
 #define MENU_ARROW_W   18
 #define MENU_MAX_DEPTH 16
 
+#define TRAY_MENU_PAD       12
+#define TRAY_MENU_MAX_ROWS  6
+
 #define MENU_BACK_ID   (-100000)
 
 /* The hover bead: a droplet of glass that chases the pointer down the rows the
@@ -57,12 +60,21 @@ enum menu_anim {
 	MENU_ANIM_CLOSING,
 };
 
+enum menu_kind {
+	MENU_KIND_SNI = 0,
+	MENU_KIND_TRAY,
+};
+
 struct barny_menu {
 	barny_state_t                *state;
 	barny_output_t               *out;
 	char                         *service;
 	char                         *menu_path;
 	barny_menu_item_t            *root;
+	enum menu_kind                kind;
+	int                           tray_count;
+	int                           tray_columns;
+	int                           tray_cell;
 
 	barny_menu_item_t            *stack[MENU_MAX_DEPTH];
 	int                           depth;
@@ -72,6 +84,7 @@ struct barny_menu {
 	int                           hover;
 
 	int                           anchor_x;
+	int                           anchor_y;
 	int                           anchor_w;
 
 	PangoFontDescription         *font;
@@ -147,6 +160,56 @@ menu_text_width(barny_menu_t *m, const char *s)
 	return barny_popup_measure_text(m->font, s ? s : "");
 }
 
+static bool
+tray_item_visible(const sni_item_t *item)
+{
+	return !item->status || strcmp(item->status, "Passive") == 0
+	       || strcmp(item->status, "Active") == 0
+	       || strcmp(item->status, "NeedsAttention") == 0;
+}
+
+static sni_item_t *
+menu_tray_item_at(const barny_menu_t *m, int index)
+{
+	sni_item_t *item;
+	int         current = 0;
+
+	for (item = barny_sni_host_get_items(m->state); item; item = item->next) {
+		if (!tray_item_visible(item))
+			continue;
+		if (current++ == index)
+			return item;
+	}
+
+	return NULL;
+}
+
+static void
+menu_build_tray(barny_menu_t *m)
+{
+	barny_config_t *cfg = &m->state->config;
+	sni_item_t     *item;
+	int             rows;
+
+	m->tray_count = 0;
+	for (item = barny_sni_host_get_items(m->state); item; item = item->next) {
+		if (tray_item_visible(item))
+			m->tray_count++;
+	}
+
+	m->tray_cell = cfg->tray_icon_size + 16;
+	if (m->tray_cell < 32)
+		m->tray_cell = 32;
+	m->tray_columns = (m->tray_count + TRAY_MENU_MAX_ROWS - 1)
+	                  / TRAY_MENU_MAX_ROWS;
+	if (m->tray_columns < 3)
+		m->tray_columns = 3;
+	rows = (m->tray_count + m->tray_columns - 1) / m->tray_columns;
+
+	m->menu_w = m->tray_columns * m->tray_cell + 2 * TRAY_MENU_PAD;
+	m->menu_h = rows * m->tray_cell + 2 * TRAY_MENU_PAD;
+}
+
 static void
 menu_build_rows(barny_menu_t *m)
 {
@@ -215,6 +278,86 @@ menu_build_rows(barny_menu_t *m)
 	m->menu_w = w;
 	m->menu_h = y + MENU_PAD_Y;
 	m->hover  = -1;
+}
+
+static void
+menu_draw_tray_icon(cairo_t *cr, const barny_config_t *cfg, sni_item_t *item,
+                    int x, int y, int size)
+{
+	bool   square = cfg->tray_icon_shape
+	                && strcmp(cfg->tray_icon_shape, "square") == 0;
+	double half   = size / 2.0 - 1;
+	double cx     = x + size / 2.0;
+	double cy     = y + size / 2.0;
+	int    iw;
+	int    ih;
+	int    pad;
+	int    target;
+	double scale;
+	double dx;
+	double dy;
+
+	if (half < 1)
+		half = 1;
+	cairo_set_source_rgba(cr, cfg->tray_icon_bg_r, cfg->tray_icon_bg_g,
+	                     cfg->tray_icon_bg_b, cfg->tray_icon_bg_opacity);
+	if (square) {
+		double radius = cfg->tray_icon_corner_radius;
+		if (radius > half)
+			radius = half;
+		barny_rounded_rect_path(cr, cx - half, cy - half, half * 2, half * 2,
+		                        radius);
+	} else {
+		cairo_arc(cr, cx, cy, half, 0, 2 * M_PI);
+	}
+	cairo_fill(cr);
+
+	if (!item->icon
+	    || cairo_surface_status(item->icon) != CAIRO_STATUS_SUCCESS)
+		return;
+	iw = cairo_image_surface_get_width(item->icon);
+	ih = cairo_image_surface_get_height(item->icon);
+	if (iw <= 0 || ih <= 0)
+		return;
+
+	pad    = 4;
+	target = size - 2 * pad;
+	if (target < 1)
+		target = 1;
+	scale = (double)target / (iw > ih ? iw : ih);
+	dx    = x + pad + (target - iw * scale) / 2.0;
+	dy    = y + pad + (target - ih * scale) / 2.0;
+	cairo_save(cr);
+	cairo_translate(cr, dx, dy);
+	cairo_scale(cr, scale, scale);
+	cairo_set_source_surface(cr, item->icon, 0, 0);
+	cairo_paint_with_alpha(cr, 0.95);
+	cairo_restore(cr);
+}
+
+static void
+menu_render_tray(barny_menu_t *m, cairo_t *cr)
+{
+	barny_config_t *cfg = &m->state->config;
+	int             i;
+	int             col;
+	int             row;
+	int             x;
+	int             y;
+	sni_item_t     *item;
+
+	for (i = 0; i < m->tray_count; i++) {
+		item = menu_tray_item_at(m, i);
+		if (!item)
+			break;
+		col = i % m->tray_columns;
+		row = i / m->tray_columns;
+		x   = TRAY_MENU_PAD + col * m->tray_cell
+		      + (m->tray_cell - cfg->tray_icon_size) / 2;
+		y   = TRAY_MENU_PAD + row * m->tray_cell
+		      + (m->tray_cell - cfg->tray_icon_size) / 2;
+		menu_draw_tray_icon(cr, cfg, item, x, y, cfg->tray_icon_size);
+	}
 }
 
 /* The menu hangs off the bar the way a module popup does: the body sits a gap
@@ -409,7 +552,10 @@ menu_build_content(barny_menu_t *m)
 	}
 
 	cc = cairo_create(m->content_cache);
-	menu_render_rows(m, cc);
+	if (m->kind == MENU_KIND_TRAY)
+		menu_render_tray(m, cc);
+	else
+		menu_render_rows(m, cc);
 	cairo_destroy(cc);
 }
 
@@ -486,6 +632,8 @@ menu_bead_step(barny_menu_t *m)
 	int      i;
 
 	m->bead_us = now;
+	if (m->kind == MENU_KIND_TRAY)
+		return false;
 
 	if (m->hover >= 0 && m->hover < m->row_count) {
 		menu_row_t *r = &m->rows[m->hover];
@@ -558,7 +706,8 @@ menu_draw_bead(barny_menu_t *m, cairo_t *cr)
 	double               size;
 	double               hw;
 
-	if (!m->rest_src || s <= 0.004 || m->bead_hh < 1.0)
+	if (m->kind == MENU_KIND_TRAY || !m->rest_src || s <= 0.004
+	    || m->bead_hh < 1.0)
 		return;
 	if (s > 1.0)
 		s = 1.0;
@@ -870,7 +1019,10 @@ menu_relayout(barny_menu_t *m)
 {
 	int row;
 
-	menu_build_rows(m);
+	if (m->kind == MENU_KIND_TRAY)
+		menu_build_tray(m);
+	else
+		menu_build_rows(m);
 	if (!m->configured)
 		return;
 
@@ -920,6 +1072,7 @@ barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x,
 
 	m->state     = state;
 	m->out       = state->pointer_output;
+	m->kind      = MENU_KIND_SNI;
 	m->service   = strdup(item->service);
 	m->menu_path = path;
 	m->anchor_x  = anchor_x;
@@ -986,6 +1139,64 @@ barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x,
 
 	menu_build_rows(m);
 	menu_configure_surface(m);
+}
+
+void
+barny_tray_menu_open(barny_state_t *state, int anchor_x, int anchor_y,
+                     int anchor_w)
+{
+	barny_menu_t *m;
+
+	if (!state || !state->compositor || !state->layer_shell)
+		return;
+
+	barny_menu_close(state);
+
+	m = calloc(1, sizeof(*m));
+	if (!m)
+		return;
+
+	m->state    = state;
+	m->out      = state->pointer_output;
+	m->kind     = MENU_KIND_TRAY;
+	m->anchor_x = anchor_x;
+	m->anchor_y = anchor_y;
+	m->anchor_w = anchor_w > 0 ? anchor_w : 1;
+	if (!m->out)
+		m->out = state->outputs;
+	if (!m->out)
+		goto fail;
+
+	menu_build_tray(m);
+	if (m->tray_count == 0)
+		goto fail;
+
+	m->surface = wl_compositor_create_surface(state->compositor);
+	if (!m->surface)
+		goto fail;
+
+	m->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+	        state->layer_shell, m->surface, m->out->wl_output,
+	        ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "barny-tray-menu");
+	if (!m->layer_surface)
+		goto fail;
+
+	zwlr_layer_surface_v1_add_listener(m->layer_surface,
+	                                   &menu_layer_listener, m);
+	zwlr_layer_surface_v1_set_keyboard_interactivity(
+	        m->layer_surface,
+	        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
+
+	state->menu = m;
+	menu_configure_surface(m);
+	return;
+
+fail:
+	if (m->layer_surface)
+		zwlr_layer_surface_v1_destroy(m->layer_surface);
+	if (m->surface)
+		wl_surface_destroy(m->surface);
+	free(m);
 }
 
 static void
@@ -1078,6 +1289,17 @@ barny_menu_owns_surface(barny_state_t *state, struct wl_surface *surface)
 	       && state->menu->surface == surface;
 }
 
+void
+barny_menu_pointer_enter(barny_state_t *state)
+{
+	if (!state || !state->menu)
+		return;
+
+	/* The menu covers an output but is not that output's bar surface. Keep its
+	   owner so nested tray menus stay on the monitor that opened them. */
+	state->pointer_output = state->menu->out;
+}
+
 static bool
 menu_point_inside(const barny_menu_t *m, double sx, double sy)
 {
@@ -1106,6 +1328,8 @@ barny_menu_pointer_motion(barny_state_t *state, double sx, double sy)
 
 	if (!m || !m->configured)
 		return;
+	if (m->kind == MENU_KIND_TRAY)
+		return;
 
 	row = -1;
 	if (menu_point_inside(m, sx, sy))
@@ -1132,6 +1356,51 @@ barny_menu_pointer_button(barny_state_t *state, uint32_t button,
 		return;
 
 	if (!menu_point_inside(m, state->pointer_x, state->pointer_y)) {
+		barny_menu_close(state);
+		return;
+	}
+	if (m->kind == MENU_KIND_TRAY) {
+		int          col;
+		int          row;
+		int          index;
+		sni_item_t  *tray_item;
+		char         *menu_path;
+		int          rel_x = (int)state->pointer_x - m->menu_x - TRAY_MENU_PAD;
+		int          rel_y = (int)state->pointer_y - m->menu_y - TRAY_MENU_PAD;
+
+		if (rel_x < 0 || rel_y < 0
+		    || (button != BTN_LEFT && button != BTN_RIGHT))
+			return;
+		col   = rel_x / m->tray_cell;
+		row   = rel_y / m->tray_cell;
+		index = row * m->tray_columns + col;
+		if (col < 0 || col >= m->tray_columns || index >= m->tray_count)
+			return;
+		tray_item = menu_tray_item_at(m, index);
+		if (!tray_item)
+			return;
+		if (button == BTN_LEFT && barny_sni_item_is_menu(state, tray_item)) {
+			barny_menu_open(state, tray_item, m->anchor_x, m->anchor_w);
+			return;
+		}
+		menu_path = button == BTN_RIGHT
+		                    ? barny_sni_item_menu_path(state, tray_item)
+		                    : NULL;
+		if (menu_path) {
+			free(menu_path);
+			barny_menu_open(state, tray_item, m->anchor_x, m->anchor_w);
+			return;
+		}
+		/* SNI activation receives a coordinate hint. Keep the bar coordinate
+		   that opened this overflow instead of the popup's full-output space. */
+		if (button == BTN_LEFT)
+			barny_sni_item_activate(state, tray_item,
+			                        m->anchor_x + m->anchor_w / 2,
+			                        m->anchor_y);
+		else
+			barny_sni_item_secondary_activate(state, tray_item,
+			                                  m->anchor_x + m->anchor_w / 2,
+			                                  m->anchor_y);
 		barny_menu_close(state);
 		return;
 	}

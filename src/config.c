@@ -150,6 +150,7 @@ barny_config_defaults(barny_config_t *config)
 	config->tray_icon_bg_b                = 0.0;
 	config->tray_icon_bg_opacity          = 0.3;
 	config->tray_menu_gap                 = 8;
+	config->tray_overflow                 = false;
 
 	config->dynamic_glass                 = true;
 	config->glass_gleam                   = 0.24;
@@ -445,6 +446,8 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 		config->tray_icon_bg_opacity = v;
 	} else if (strcmp(key, "tray_menu_gap") == 0) {
 		config->tray_menu_gap = parse_int_clamped(value, 0, 128);
+	} else if (strcmp(key, "tray_overflow") == 0) {
+		config->tray_overflow = parse_bool(value);
 	} else if (strcmp(key, "dynamic_glass") == 0) {
 		config->dynamic_glass = parse_bool(value);
 	} else if (strcmp(key, "glass_gleam") == 0) {

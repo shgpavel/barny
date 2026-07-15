@@ -15,6 +15,8 @@ typedef struct {
 	int            item_count;
 } tray_data_t;
 
+#define TRAY_OVERFLOW_BUTTON_W 28
+
 static int
 tray_init(barny_module_t *self, barny_state_t *state)
 {
@@ -66,7 +68,9 @@ tray_update(barny_module_t *self)
 		self->dirty      = true;
 	}
 
-	if (count > 0) {
+	if (count > 0 && data->state->config.tray_overflow) {
+		self->width = TRAY_OVERFLOW_BUTTON_W;
+	} else if (count > 0) {
 		self->width = count * data->icon_size
 		              + (count - 1) * data->icon_spacing
 		              + 8;
@@ -154,6 +158,22 @@ tray_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	if (!items) {
 		return;
 	}
+	if (cfg->tray_overflow) {
+		double cx = x + w / 2.0;
+		double cy = y + h / 2.0;
+		double r  = cfg->text_color_set ? cfg->text_color_r : 0.95;
+		double g  = cfg->text_color_set ? cfg->text_color_g : 0.95;
+		double b  = cfg->text_color_set ? cfg->text_color_b : 0.97;
+
+		cairo_set_source_rgba(cr, r, g, b, 0.9);
+		cairo_set_line_width(cr, 1.75);
+		cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+		cairo_move_to(cr, cx - 4, cy + 2);
+		cairo_line_to(cr, cx, cy - 2);
+		cairo_line_to(cr, cx + 4, cy + 2);
+		cairo_stroke(cr);
+		return;
+	}
 
 	square        = cfg->tray_icon_shape
 	                && strcmp(cfg->tray_icon_shape, "square") == 0;
@@ -226,6 +246,14 @@ tray_on_click(barny_module_t *self, int button, int x, int y)
 	int          icon_end;
 
 	data  = self->data;
+	if (data->state->config.tray_overflow) {
+		int base_x;
+
+		if (button == 272
+		    && barny_pointer_module_rect(data->state, self, &base_x, NULL))
+			barny_tray_menu_open(data->state, base_x, y, self->width);
+		return;
+	}
 	items = barny_sni_host_get_items(data->state);
 	if (!items) {
 		return;

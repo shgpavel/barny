@@ -8,6 +8,7 @@ static int         secondary_calls = 0;
 static sni_item_t *last_item       = NULL;
 static int         last_x          = 0;
 static int         last_y          = 0;
+static int         overflow_calls  = 0;
 
 sni_item_t *
 barny_sni_host_get_items(barny_state_t *state)
@@ -63,6 +64,17 @@ barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x,
 	(void)anchor_w;
 }
 
+void
+barny_tray_menu_open(barny_state_t *state, int anchor_x, int anchor_y,
+                     int anchor_w)
+{
+	(void)state;
+	(void)anchor_x;
+	(void)anchor_y;
+	(void)anchor_w;
+	overflow_calls++;
+}
+
 #include "../src/modules/tray.c"
 
 static void
@@ -73,6 +85,7 @@ reset_tray_mocks(void)
 	last_item       = NULL;
 	last_x          = 0;
 	last_y          = 0;
+	overflow_calls  = 0;
 	test_items      = NULL;
 }
 
@@ -131,6 +144,21 @@ test_tray_update_width_and_dirty(void)
 		tray_update(&mod);
 
 		ASSERT_EQ_INT(0, mod.width);
+	}
+
+	TEST("uses an overflow button when configured")
+	{
+		sni_item_t item;
+
+		reset_tray_mocks();
+		item        = (sni_item_t){ 0 };
+		item.status = "Active";
+		test_items  = &item;
+		state.config.tray_overflow = true;
+		tray_init(&mod, &state);
+		tray_update(&mod);
+		ASSERT_EQ_INT(TRAY_OVERFLOW_BUTTON_W, mod.width);
+		state.config.tray_overflow = false;
 	}
 
 	TEST_SUITE_END();
@@ -222,6 +250,16 @@ test_tray_click_handling(void)
 		ASSERT_EQ_INT(0, activate_calls);
 		ASSERT_NULL(last_item);
 		output.mod_x[0] = base_x;
+	}
+
+	TEST("overflow button opens the tray menu")
+	{
+		reset_tray_mocks();
+		state.config.tray_overflow = true;
+		tray_on_click(&mod, 272, base_x + 5, 10);
+		ASSERT_EQ_INT(1, overflow_calls);
+		ASSERT_EQ_INT(0, activate_calls);
+		state.config.tray_overflow = false;
 	}
 
 	TEST_SUITE_END();

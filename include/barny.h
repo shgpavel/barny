@@ -121,6 +121,7 @@ struct barny_config {
 	double                  tray_icon_bg_b;
 	double                  tray_icon_bg_opacity;
 	int                     tray_menu_gap;
+	bool                    tray_overflow;
 
 	bool                    dynamic_glass;
 	double                  glass_gleam;
@@ -623,11 +624,16 @@ void
 barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x,
                 int anchor_w);
 void
+barny_tray_menu_open(barny_state_t *state, int anchor_x, int anchor_y,
+                     int anchor_w);
+void
 barny_menu_close(barny_state_t *state);
 bool
 barny_menu_is_open(barny_state_t *state);
 bool
 barny_menu_owns_surface(barny_state_t *state, struct wl_surface *surface);
+void
+barny_menu_pointer_enter(barny_state_t *state);
 void
 barny_menu_pointer_motion(barny_state_t *state, double sx, double sy);
 void
