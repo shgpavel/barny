@@ -1890,8 +1890,8 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 				double pedge  = 0.0;
 				double dispx  = 0.0;
 				double dispy  = 0.0;
-				double gx     = (double)sx + 0.5 - cx;
-				double gy     = ly;
+				double gx     = (double)sx - cx;
+				double gy     = y;
 				double depth  = -d;
 				double facing = 0.0;
 				double cs     = 0.0;
