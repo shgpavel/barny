@@ -20,6 +20,13 @@ barny_now_ms(void);
 uint64_t
 barny_now_us(void);
 
+/* Advance x'' + 2*zeta*sqrt(k)*x' + k*(x-target) = 0 exactly over dt.
+   Unlike frame-by-frame Euler integration, the result is independent of how
+   the elapsed time is divided between rendered frames. */
+void
+barny_spring_step(double *position, double *velocity, double target,
+                  double stiffness, double damping_ratio, double dt);
+
 void
 barny_format_bytes(char *buf, size_t buflen, unsigned long long bytes,
                    int decimals, bool unit_space);

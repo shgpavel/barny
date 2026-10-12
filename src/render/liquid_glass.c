@@ -35,11 +35,9 @@
 #define BULGE_CORE_W    1.4    /* px the crisp outline reaches past the rim */
 #define BULGE_CHROMA_MIN 0.25  /* px: below this the 3 taps land on one pixel */
 
-#define LENS_SPRING_K    420.0 /* position spring stiffness, s^-2 */
-#define LENS_SPRING_ZETA 0.82  /* underdamped: slight droplet overshoot */
+#define LENS_SPRING_K    500.0 /* position spring stiffness, s^-2 */
+#define LENS_SPRING_ZETA 0.80  /* responsive with a restrained overshoot */
 #define LENS_POP_K       900.0 /* enter/leave pop spring, critically damped */
-#define LENS_DT_MAX      0.05  /* integration step cap, s */
-#define LENS_STEP_MAX    0.003 /* fixed spring substep, s */
 #define LENS_SETTLE_X    0.4   /* px */
 #define LENS_SETTLE_V    8.0   /* px/s */
 #define LENS_STRETCH_GAIN 3.2e-4 /* velocity -> horizontal stretch */
@@ -1369,13 +1367,8 @@ barny_lens_step(barny_output_t *output)
 	uint64_t       now;
 	double         dt;
 	double         tx;
-	double         damp;
-	double         pop_damp;
 	double         bmin;
 	double         bmax;
-	double         h;
-	int            steps;
-	int            i;
 
 	if (!state->config.dynamic_glass || output != state->dyn_output
 	    || !state->lens_animating)
@@ -1384,11 +1377,6 @@ barny_lens_step(barny_output_t *output)
 	now                 = barny_now_us();
 	dt                  = (double)(now - state->lens_prev_us) / 1000000.0;
 	state->lens_prev_us = now;
-	if (dt < 0.0)
-		dt = 0.0;
-	if (dt > LENS_DT_MAX)
-		dt = LENS_DT_MAX;
-
 	bmin = output->pad_left + BUBBLE_W / 2.0;
 	bmax = output->pad_left + output->width - BUBBLE_W / 2.0;
 	if (bmax < bmin)
@@ -1401,27 +1389,12 @@ barny_lens_step(barny_output_t *output)
 	if (tx > bmax)
 		tx = bmax;
 
-	damp     = 2.0 * LENS_SPRING_ZETA * sqrt(LENS_SPRING_K);
-	pop_damp = 2.0 * sqrt(LENS_POP_K);
-
-	/* Match the popup/menu integrators: short fixed substeps keep the droplet
-	   on the same curve after a compositor hitch instead of flinging it past
-	   the pointer in one large Euler step. */
-	steps = (int)(dt / LENS_STEP_MAX) + 1;
-	h     = dt / steps;
-	for (i = 0; i < steps; i++) {
-		state->lens_vx += (LENS_SPRING_K * (tx - state->lens_x)
-		                   - damp * state->lens_vx)
-		                  * h;
-		state->lens_x  += state->lens_vx * h;
-
-		state->lens_sv += (LENS_POP_K
-		                           * (state->lens_target_scale
-		                              - state->lens_scale)
-		                   - pop_damp * state->lens_sv)
-		                  * h;
-		state->lens_scale += state->lens_sv * h;
-	}
+	/* The analytic spring remains on the same motion curve when a compositor
+	   frame is delayed; there is no large Euler step to overshoot the pointer. */
+	barny_spring_step(&state->lens_x, &state->lens_vx, tx,
+	                  LENS_SPRING_K, LENS_SPRING_ZETA, dt);
+	barny_spring_step(&state->lens_scale, &state->lens_sv,
+	                  state->lens_target_scale, LENS_POP_K, 1.0, dt);
 	if (state->lens_scale < 0.0)
 		state->lens_scale = 0.0;
 	if (state->lens_scale > 1.0)

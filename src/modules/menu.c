@@ -31,11 +31,9 @@
 /* The hover bead: a droplet of glass that chases the pointer down the rows the
    way the bar's cursor lens chases it along the modules -- it leads with a
    spring, stretches along its own velocity, and pops in and out. */
-#define MENU_BEAD_K            520.0 /* travel spring stiffness, s^-2 */
-#define MENU_BEAD_ZETA         0.72  /* underdamped: it arrives with a wobble */
+#define MENU_BEAD_K            560.0 /* travel spring stiffness, s^-2 */
+#define MENU_BEAD_ZETA         0.78  /* quick arrival without repeated wobble */
 #define MENU_BEAD_POP_K        900.0 /* pop in/out, critically damped */
-#define MENU_BEAD_DT_MAX       0.05
-#define MENU_BEAD_STEP_MAX     0.003
 #define MENU_BEAD_SETTLE_X     0.3 /* px */
 #define MENU_BEAD_SETTLE_V     6.0 /* px/s */
 #define MENU_BEAD_STRETCH_GAIN 7.0e-4 /* velocity -> stretch along travel */
@@ -628,13 +626,8 @@ menu_bead_step(barny_menu_t *m)
 	double   thw   = m->bead_hw;
 	double   thh   = m->bead_hh;
 	double   ts    = 0.0;
-	double   damp  = 2.0 * MENU_BEAD_ZETA * sqrt(MENU_BEAD_K);
-	double   pdamp = 2.0 * sqrt(MENU_BEAD_POP_K);
 	uint64_t now   = barny_now_us();
 	double   dt    = (double)(now - m->bead_us) / 1000000.0;
-	double   h;
-	int      steps;
-	int      i;
 
 	m->bead_us = now;
 	if (m->kind == MENU_KIND_TRAY && m->hover >= 0
@@ -680,30 +673,12 @@ menu_bead_step(barny_menu_t *m)
 		return false;
 	}
 
-	if (dt < 0.0)
-		dt = 0.0;
-	if (dt > MENU_BEAD_DT_MAX)
-		dt = MENU_BEAD_DT_MAX;
-
-	steps = (int)(dt / MENU_BEAD_STEP_MAX) + 1;
-	h     = dt / steps;
-
-	for (i = 0; i < steps; i++) {
-		m->bead_vx += (MENU_BEAD_K * (tx - m->bead_x)
-		               - damp * m->bead_vx)
-		              * h;
-		m->bead_x  += m->bead_vx * h;
-
-		m->bead_vy += (MENU_BEAD_K * (ty - m->bead_y)
-		               - damp * m->bead_vy)
-		              * h;
-		m->bead_y  += m->bead_vy * h;
-
-		m->bead_sv += (MENU_BEAD_POP_K * (ts - m->bead_scale)
-		               - pdamp * m->bead_sv)
-		              * h;
-		m->bead_scale += m->bead_sv * h;
-	}
+	barny_spring_step(&m->bead_x, &m->bead_vx, tx, MENU_BEAD_K,
+	                  MENU_BEAD_ZETA, dt);
+	barny_spring_step(&m->bead_y, &m->bead_vy, ty, MENU_BEAD_K,
+	                  MENU_BEAD_ZETA, dt);
+	barny_spring_step(&m->bead_scale, &m->bead_sv, ts,
+	                  MENU_BEAD_POP_K, 1.0, dt);
 
 	if (m->bead_scale < 0.0)
 		m->bead_scale = 0.0;

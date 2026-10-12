@@ -1,4 +1,5 @@
 test_sources = files(
+    'test_animation.c',
     'test_config.c',
     'test_liquid_glass.c',
     'test_main.c',

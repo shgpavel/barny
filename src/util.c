@@ -1,6 +1,7 @@
 #include "util.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -140,6 +141,72 @@ barny_now_us(void)
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 
 	return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+}
+
+void
+barny_spring_step(double *position, double *velocity, double target,
+                  double stiffness, double damping_ratio, double dt)
+{
+	double omega;
+	double displacement;
+	double next_displacement;
+	double next_velocity;
+	double decay;
+
+	if (!position || !velocity || dt <= 0.0)
+		return;
+	if (stiffness <= 0.0) {
+		*position = target;
+		*velocity = 0.0;
+		return;
+	}
+	if (damping_ratio < 0.0)
+		damping_ratio = 0.0;
+
+	omega        = sqrt(stiffness);
+	displacement = *position - target;
+
+	if (damping_ratio < 1.0 - 1e-5) {
+		double damped_omega
+		        = omega * sqrt(1.0 - damping_ratio * damping_ratio);
+		double phase       = damped_omega * dt;
+		double cosine      = cos(phase);
+		double sine        = sin(phase);
+		double coefficient = (*velocity
+		                      + damping_ratio * omega * displacement)
+		                     / damped_omega;
+
+		decay = exp(-damping_ratio * omega * dt);
+		next_displacement
+		        = decay * (displacement * cosine + coefficient * sine);
+		next_velocity
+		        = decay
+		          * (-damping_ratio * omega
+		                     * (displacement * cosine + coefficient * sine)
+		             - displacement * damped_omega * sine
+		             + coefficient * damped_omega * cosine);
+	} else if (damping_ratio <= 1.0 + 1e-5) {
+		double coefficient = *velocity + omega * displacement;
+
+		decay             = exp(-omega * dt);
+		next_displacement = (displacement + coefficient * dt) * decay;
+		next_velocity
+		        = (*velocity - omega * coefficient * dt) * decay;
+	} else {
+		double root = sqrt(damping_ratio * damping_ratio - 1.0);
+		double r1   = -omega * (damping_ratio - root);
+		double r2   = -omega * (damping_ratio + root);
+		double c1   = (*velocity - r2 * displacement) / (r1 - r2);
+		double c2   = displacement - c1;
+		double e1   = exp(r1 * dt);
+		double e2   = exp(r2 * dt);
+
+		next_displacement = c1 * e1 + c2 * e2;
+		next_velocity     = c1 * r1 * e1 + c2 * r2 * e2;
+	}
+
+	*position = target + next_displacement;
+	*velocity = next_velocity;
 }
 
 void

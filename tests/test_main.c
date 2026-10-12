@@ -25,6 +25,8 @@ extern void
 test_file_extension(void);
 extern void
 test_lens_partial_redraw(void);
+extern void
+test_spring_step(void);
 
 extern void
 test_module_register(void);
@@ -76,6 +78,7 @@ RUN_SUITE(test_config_load);
 RUN_SUITE(test_config_edge_cases);
 
 printf("\n--- Liquid Glass Effect Tests ---\n");
+RUN_SUITE(test_spring_step);
 RUN_SUITE(test_perlin_math);
 RUN_SUITE(test_perlin_noise);
 RUN_SUITE(test_perlin_fbm);

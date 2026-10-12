@@ -17,12 +17,10 @@
 
 /* Liquid morph: the popup is born as a droplet squeezing out of the bar edge
    and springs open into the data window; closing runs the morph backwards. */
-#define POPUP_MORPH_K_OPEN     120.0 /* ~0.5 s open, s^-2 */
-#define POPUP_MORPH_ZETA_OPEN  0.88  /* soft landing, slight overshoot */
-#define POPUP_MORPH_K_CLOSE    300.0 /* quicker than open, still readable */
+#define POPUP_MORPH_K_OPEN     150.0 /* responsive without flashing content */
+#define POPUP_MORPH_ZETA_OPEN  0.86  /* soft landing, restrained overshoot */
+#define POPUP_MORPH_K_CLOSE    340.0 /* quicker than open, still readable */
 #define POPUP_MORPH_ZETA_CLOSE 1.0
-#define POPUP_DT_MAX           0.05
-#define POPUP_STEP_MAX         0.003 /* spring substep, s */
 
 #define POPUP_BLOB_W     96.0 /* droplet size at birth */
 #define POPUP_BLOB_H     40.0
@@ -926,10 +924,8 @@ barny_glass_panel_compose(cairo_t *cr, barny_state_t *state,
 	cairo_restore(cr);
 }
 
-/* One spring drives every panel's open and close morph. It is integrated in
-   fixed substeps rather than one step per frame: these springs are stiff enough
-   that a single 16 ms step already distorts the curve, and a hitched frame at
-   the 50 ms clamp would fling the droplet clean past its target. */
+/* One spring drives every panel's open and close morph. The analytic step keeps
+   its curve stable across refresh rates and compositor hitches. */
 bool
 barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
                        bool closing)
@@ -940,25 +936,10 @@ barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
 	double   k      = closing ? POPUP_MORPH_K_CLOSE : POPUP_MORPH_K_OPEN;
 	double   z      = closing ? POPUP_MORPH_ZETA_CLOSE
 	                          : POPUP_MORPH_ZETA_OPEN;
-	double   c      = 2.0 * z * sqrt(k);
-	int      steps;
-	int      i;
-	double   h;
 	bool     settled;
 
 	*last_us = now;
-	if (dt < 0.0)
-		dt = 0.0;
-	if (dt > POPUP_DT_MAX)
-		dt = POPUP_DT_MAX;
-
-	steps = (int)(dt / POPUP_STEP_MAX) + 1;
-	h     = dt / steps;
-
-	for (i = 0; i < steps; i++) {
-		*vel   += (k * (target - *morph) - c * *vel) * h;
-		*morph += *vel * h;
-	}
+	barny_spring_step(morph, vel, target, k, z, dt);
 
 	/* Retire the spring's exponential tail: below this the panel is still
 	   creeping, but by under a pixel, so the last ~100 ms of it were frames

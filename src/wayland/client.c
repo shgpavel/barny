@@ -97,6 +97,14 @@ static const struct wl_output_listener output_listener = {
 };
 
 static void
+lens_wake(barny_state_t *state)
+{
+	if (!state->lens_animating)
+		state->lens_prev_us = barny_now_us();
+	state->lens_animating = true;
+}
+
+static void
 pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
               struct wl_surface *surface, wl_fixed_t sx, wl_fixed_t sy)
 {
@@ -132,7 +140,7 @@ pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
 			state->lens_prev_us = barny_now_us();
 		}
 		state->lens_target_scale = 1.0;
-		state->lens_animating    = true;
+		lens_wake(state);
 	}
 }
 
@@ -155,7 +163,7 @@ pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
 	state->pointer_surface = NULL;
 
 	state->lens_target_scale = 0.0;
-	state->lens_animating    = true;
+	lens_wake(state);
 
 	state->dyn_dirty       = true;
 }
@@ -207,7 +215,7 @@ pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time,
 	if (state->pointer_output) {
 		state->dyn_output      = state->pointer_output;
 		state->dyn_dirty       = true;
-		state->lens_animating  = true;
+		lens_wake(state);
 	}
 
 	mx      = (int)state->pointer_x;
@@ -241,6 +249,19 @@ pointer_button(void *data, struct wl_pointer *pointer, uint32_t serial,
 	(void)pointer;
 	(void)serial;
 	(void)time;
+
+	/* Compress the cursor droplet while a button is held. The same critically
+	   damped scale spring used for enter/leave makes release feel immediate
+	   without introducing a second animation path. */
+	if (state->config.dynamic_glass && state->pointer_output
+	    && state->pointer_surface == state->pointer_output->surface) {
+		state->dyn_output = state->pointer_output;
+		state->lens_target_scale
+		        = button_state == WL_POINTER_BUTTON_STATE_PRESSED ? 0.90
+		                                                         : 1.0;
+		lens_wake(state);
+		state->dyn_dirty = true;
+	}
 
 	if (barny_menu_is_open(state)) {
 		if (barny_menu_owns_surface(state, state->pointer_surface)) {
