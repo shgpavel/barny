@@ -156,7 +156,7 @@ barny_config_defaults(barny_config_t *config)
 	config->glass_gleam                   = 0.24;
 	config->glass_bulge                   = 15.0;
 	config->glass_prism                   = 0.6;
-	config->glass_prism_flow              = 12.0;
+	config->glass_prism_flow              = 5.0;
 	config->glass_prism_fps               = 15;
 	config->popup_animations              = true;
 

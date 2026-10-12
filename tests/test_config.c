@@ -574,12 +574,12 @@ test_config_load(void)
 		cleanup_temp_config(path);
 	}
 
-	TEST("glass_prism_flow and glass_prism_fps default to 12 s, 15 fps")
+	TEST("glass_prism_flow and glass_prism_fps default to 5 s, 15 fps")
 	{
 		barny_config_t config;
 
 		barny_config_defaults(&config);
-		ASSERT_EQ_DBL(12.0, config.glass_prism_flow, 0.0);
+		ASSERT_EQ_DBL(5.0, config.glass_prism_flow, 0.0);
 		ASSERT_EQ_INT(15, config.glass_prism_fps);
 	}
 
