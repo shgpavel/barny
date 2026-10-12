@@ -80,6 +80,19 @@ barny_test_ipc = executable(
 
 test('barny_test_ipc', barny_test_ipc)
 
+# --- Golden render hashes: bar droplet, popup morph, menu bead ---
+barny_test_golden = executable(
+    'barny_test_golden',
+    files('test_render_golden.c', 'test_stubs.c'),
+    test_support_sources,
+    wl_protocol_sources,
+    dependencies: all_deps,
+    include_directories: test_inc_dirs,
+    build_by_default: false,
+)
+
+test('barny_test_golden', barny_test_golden)
+
 # --- Module performance benchmarks (separate suite, not run by default) ---
 barny_test_perf = executable(
     'barny_test_perf',
