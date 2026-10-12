@@ -265,75 +265,84 @@ panel_patch(int w, int h)
 	return s_patch;
 }
 
-/* Draw the panel as a liquid-glass blob at morph position m: a zero-size seed
-   at the bar edge (m=0) inflates into an attached droplet, stretches through a
-   surface-tension neck, then opens into the data window (m=1). Shape comes
-   from a round-rect SDF smooth-unioned with the bar half-plane; shading
-   (refraction, veil, lit rim, specular) matches the bar lens and fades out
-   as the window opens, leaving only the frame edge lighting. */
-void
-barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
-                        cairo_surface_t *bg, cairo_surface_t *content, double m)
+typedef struct {
+	double p;
+	double inv;
+	double hw;
+	double hh;
+	double ccx;
+	double ccy;
+	double rr;
+	double smk;
+} panel_shape_t;
+
+static void
+panel_shape(const barny_glass_panel_t *panel, double m, panel_shape_t *s)
 {
-	bool             top    = panel->position_top;
-	int              w      = panel->w;
-	int              h      = panel->h;
-	double           p      = m < 0.0 ? 0.0 : (m > 1.0 ? 1.0 : m);
-	double           over   = m > 1.0 ? fmin(m - 1.0, 0.02) : 0.0;
+	bool   top    = panel->position_top;
+	int    w      = panel->w;
+	int    h      = panel->h;
+	double p      = m < 0.0 ? 0.0 : (m > 1.0 ? 1.0 : m);
+	double over   = m > 1.0 ? fmin(m - 1.0, 0.02) : 0.0;
 	/* Birth leads, then travel and panel growth overlap it. Keeping these
 	   phases separate makes the glass visibly emerge from the bar instead of
 	   replacing one prebuilt silhouette with another. */
-	double           birth  = popup_phase_out(p, 0.0, 0.22);
-	double           travel = popup_phase_out(p, 0.08, 0.94) + over;
-	double           grow_h = popup_phase_out(p, 0.14, 0.90) + over;
-	double           grow_w = popup_phase(p, 0.20, 1.0) + over;
-	double           finish = popup_phase(p, 0.0, 1.0) + over;
-	double           inv    = 1.0 - finish > 0.0 ? 1.0 - finish : 0.0;
-	double           bw0    = fmin(w * 0.5, POPUP_BLOB_W);
-	double           bh0    = fmin(panel->body_h * 0.8, POPUP_BLOB_H);
-	double           hw0    = bw0 / 2.0;
-	double           hh0    = bh0 / 2.0;
-	double           r0     = fmin(hw0, hh0);
-	double           edge_y = top ? 0.0 : (double)h;
-	double           seed_x = fmin(fmax((double)panel->anchor_x, 0.0), (double)w);
-	double           cy0    = top ? -bh0 * 0.15 : (double)h + bh0 * 0.15;
-	double           cx0    = fmin(fmax((double)panel->anchor_x, hw0), w - hw0);
-	double           hw     = hw0 * birth
-	                        + (panel->body_w / 2.0 - hw0) * grow_w;
-	double           hh     = hh0 * birth
-	                        + (panel->body_h / 2.0 - hh0) * grow_h;
-	double           ccx    = seed_x + (cx0 - seed_x) * birth
-	                        + (panel->body_w / 2.0 - cx0) * travel;
-	double           ccy    = edge_y + (cy0 - edge_y) * birth
-	                        + (panel->body_y + panel->body_h / 2.0 - cy0)
-	                                  * travel;
-	double           rr     = r0 * birth + (POPUP_RADIUS - r0) * grow_w;
-	double           smk    = POPUP_NECK_SMIN * birth
-	                         * (1.0 - 0.6 * travel);
-	double           disp   = POPUP_REFRACT * inv;
-	double           chroma = POPUP_CHROMA * inv;
-	double           edge_h = BARNY_FRAME_EDGE_TOP_STOP * 2.0 * hh;
-	double           ca;
-	cairo_surface_t *patch;
-	uint8_t         *gdata;
-	uint8_t         *ddata;
-	int              gstride;
-	int              dstride;
-	int              gsw;
-	int              gsh;
-	int              x;
-	int              y;
+	double birth  = popup_phase_out(p, 0.0, 0.22);
+	double travel = popup_phase_out(p, 0.08, 0.94) + over;
+	double grow_h = popup_phase_out(p, 0.14, 0.90) + over;
+	double grow_w = popup_phase(p, 0.20, 1.0) + over;
+	double finish = popup_phase(p, 0.0, 1.0) + over;
+	double bw0    = fmin(w * 0.5, POPUP_BLOB_W);
+	double bh0    = fmin(panel->body_h * 0.8, POPUP_BLOB_H);
+	double hw0    = bw0 / 2.0;
+	double hh0    = bh0 / 2.0;
+	double r0     = fmin(hw0, hh0);
+	double edge_y = top ? 0.0 : (double)h;
+	double seed_x = fmin(fmax((double)panel->anchor_x, 0.0), (double)w);
+	double cy0    = top ? -bh0 * 0.15 : (double)h + bh0 * 0.15;
+	double cx0    = fmin(fmax((double)panel->anchor_x, hw0), w - hw0);
 
-	if (!bg)
-		return;
-	if (rr > hw)
-		rr = hw;
-	if (rr > hh)
-		rr = hh;
+	s->p   = p;
+	s->inv = 1.0 - finish > 0.0 ? 1.0 - finish : 0.0;
+	s->hw  = hw0 * birth + (panel->body_w / 2.0 - hw0) * grow_w;
+	s->hh  = hh0 * birth + (panel->body_h / 2.0 - hh0) * grow_h;
+	s->ccx = seed_x + (cx0 - seed_x) * birth
+	         + (panel->body_w / 2.0 - cx0) * travel;
+	s->ccy = edge_y + (cy0 - edge_y) * birth
+	         + (panel->body_y + panel->body_h / 2.0 - cy0) * travel;
+	s->rr  = r0 * birth + (POPUP_RADIUS - r0) * grow_w;
+	s->smk = POPUP_NECK_SMIN * birth * (1.0 - 0.6 * travel);
+	if (s->rr > s->hw)
+		s->rr = s->hw;
+	if (s->rr > s->hh)
+		s->rr = s->hh;
+}
 
-	patch = panel_patch(w, h);
-	if (!patch)
-		return;
+static void
+panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
+                 const barny_glass_panel_t *panel, const panel_shape_t *s)
+{
+	bool     top    = panel->position_top;
+	int      w      = panel->w;
+	int      h      = panel->h;
+	double   inv    = s->inv;
+	double   hw     = s->hw;
+	double   hh     = s->hh;
+	double   ccx    = s->ccx;
+	double   ccy    = s->ccy;
+	double   rr     = s->rr;
+	double   smk    = s->smk;
+	double   disp   = POPUP_REFRACT * inv;
+	double   chroma = POPUP_CHROMA * inv;
+	double   edge_h = BARNY_FRAME_EDGE_TOP_STOP * 2.0 * hh;
+	uint8_t *gdata;
+	uint8_t *ddata;
+	int      gstride;
+	int      dstride;
+	int      gsw;
+	int      gsh;
+	int      x;
+	int      y;
 
 	cairo_surface_flush(bg);
 	gdata   = cairo_image_surface_get_data(bg);
@@ -540,26 +549,60 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 	}
 
 	cairo_surface_mark_dirty(patch);
+}
+
+static void
+panel_morph_content(cairo_t *cr, const barny_glass_panel_t *panel,
+                    const panel_shape_t *s, cairo_surface_t *content)
+{
+	double ca;
+
+	/* the data window condenses inside the blob near the end of the morph */
+	ca = popup_phase(s->p, POPUP_CONTENT_IN, 1.0);
+	if (ca > 0.003 && content) {
+		cairo_save(cr);
+		barny_rounded_rect_path(cr, s->ccx - s->hw, s->ccy - s->hh,
+		                        2.0 * s->hw, 2.0 * s->hh, s->rr);
+		cairo_clip(cr);
+		cairo_translate(cr, s->ccx, s->ccy);
+		cairo_scale(cr, 2.0 * s->hw / panel->body_w,
+		            2.0 * s->hh / panel->body_h);
+		cairo_translate(cr, -panel->body_w / 2.0, -panel->body_h / 2.0);
+		cairo_set_source_surface(cr, content, 0, 0);
+		cairo_paint_with_alpha(cr, ca);
+		cairo_restore(cr);
+	}
+}
+
+/* Draw the panel as a liquid-glass blob at morph position m: a zero-size seed
+   at the bar edge (m=0) inflates into an attached droplet, stretches through a
+   surface-tension neck, then opens into the data window (m=1). Shape comes
+   from a round-rect SDF smooth-unioned with the bar half-plane; shading
+   (refraction, veil, lit rim, specular) matches the bar lens and fades out
+   as the window opens, leaving only the frame edge lighting. */
+void
+barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
+                        cairo_surface_t *bg, cairo_surface_t *content, double m)
+{
+	panel_shape_t    s;
+	cairo_surface_t *patch;
+
+	if (!bg)
+		return;
+
+	patch = panel_patch(panel->w, panel->h);
+	if (!patch)
+		return;
+
+	panel_shape(panel, m, &s);
+	panel_morph_fill(patch, bg, panel, &s);
 	cairo_set_source_surface(cr, patch, 0, 0);
 	cairo_paint(cr);
 	/* let go of the shared scratch: the next panel may need it at a
 	   different size */
 	cairo_set_source_rgba(cr, 0, 0, 0, 0);
 
-	/* the data window condenses inside the blob near the end of the morph */
-	ca = popup_phase(p, POPUP_CONTENT_IN, 1.0);
-	if (ca > 0.003 && content) {
-		cairo_save(cr);
-		barny_rounded_rect_path(cr, ccx - hw, ccy - hh, 2.0 * hw,
-		                        2.0 * hh, rr);
-		cairo_clip(cr);
-		cairo_translate(cr, ccx, ccy);
-		cairo_scale(cr, 2.0 * hw / panel->body_w, 2.0 * hh / panel->body_h);
-		cairo_translate(cr, -panel->body_w / 2.0, -panel->body_h / 2.0);
-		cairo_set_source_surface(cr, content, 0, 0);
-		cairo_paint_with_alpha(cr, ca);
-		cairo_restore(cr);
-	}
+	panel_morph_content(cr, panel, &s, content);
 }
 
 /* The bead is a shallower droplet than the panel: it sits on glass that is
