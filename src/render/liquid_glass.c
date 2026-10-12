@@ -50,7 +50,11 @@
 #define LENS_FAR_MARGIN  12.0  /* droplet influence radius: beyond it, 1:1 copy */
 
 #define PRISM_STOPS  40
-#define PRISM_CYCLES 2.5
+#define PRISM_HUES   16
+#define PRISM_CYCLES ((double)PRISM_STOPS / PRISM_HUES)
+#define PRISM_SAT    0.9
+#define PRISM_VAL    1.0
+#define PRISM_LINE_W 1.6
 
 /* Key light for the droplet specular: from above, slightly left, matching
    the diagonal sheen of the glass frame. */
@@ -59,9 +63,6 @@
 #define SPEC_W       7.0   /* px band the specular hugs inside the rim */
 #define SPEC_GAIN    2.4   /* glass_gleam multiplier */
 #define SPEC_COUNTER 0.22  /* strength of the cool counter-arc */
-
-static void
-hsv2rgb(double hh, double s, double v, double *r, double *g, double *b);
 
 static void
 stack_blur_line(uint8_t *src, uint8_t *dst, int width, int radius, int *stack)
@@ -813,14 +814,31 @@ lens_tap_channel_alpha(const uint8_t *data, int stride, int width, int height,
 	}
 }
 
-static double prism_stop_r[PRISM_STOPS + 1];
-static double prism_stop_g[PRISM_STOPS + 1];
-static double prism_stop_b[PRISM_STOPS + 1];
+static void
+hsv2rgb(double hh, double s, double v, double *r, double *g, double *b)
+{
+	double i = floor(hh * 6.0);
+	double f = hh * 6.0 - i;
+	double p = v * (1.0 - s);
+	double q = v * (1.0 - f * s);
+	double t = v * (1.0 - (1.0 - f) * s);
+
+	switch (((int)i) % 6) {
+	case 0:  *r = v; *g = t; *b = p; break;
+	case 1:  *r = q; *g = v; *b = p; break;
+	case 2:  *r = p; *g = v; *b = t; break;
+	case 3:  *r = p; *g = q; *b = v; break;
+	case 4:  *r = t; *g = p; *b = v; break;
+	default: *r = v; *g = p; *b = q; break;
+	}
+}
+
+static double prism_stop[PRISM_HUES][3];
 static bool   prism_stops_ready;
 
-/* Replicate the baked stroke's rainbow so the analytic rim matches it exactly
-   at the patch borders. The ramp only depends on compile-time constants, so it
-   is built once rather than per frame. */
+/* The baked stroke and the analytic rim both read this ramp, so the rim
+   matches exactly at the patch borders. It only depends on compile-time
+   constants, so it is built once rather than per frame. */
 static void
 prism_stops_init(void)
 {
@@ -829,13 +847,41 @@ prism_stops_init(void)
 	if (prism_stops_ready)
 		return;
 
-	for (i = 0; i <= PRISM_STOPS; i++) {
-		double hue = fmod((double)i / PRISM_STOPS * PRISM_CYCLES, 1.0);
-
-		hsv2rgb(hue, 0.9, 1.0, &prism_stop_r[i], &prism_stop_g[i],
-		        &prism_stop_b[i]);
-	}
+	for (i = 0; i < PRISM_HUES; i++)
+		hsv2rgb((double)i / PRISM_HUES, PRISM_SAT, PRISM_VAL,
+		        &prism_stop[i][0], &prism_stop[i][1], &prism_stop[i][2]);
 	prism_stops_ready = true;
+}
+
+static void
+prism_row(double *prm, int pw, int sox, double cx, double cw)
+{
+	int x;
+	int c;
+
+	prism_stops_init();
+
+	for (x = 0; x < pw; x++) {
+		double        pos = ((double)(x + sox) + 0.5 - cx) / cw;
+		const double *a;
+		const double *b;
+		double        f;
+		int           si;
+
+		if (pos < 0.0)
+			pos = 0.0;
+		if (pos > 1.0)
+			pos = 1.0;
+		f  = pos * PRISM_STOPS;
+		si = (int)f;
+		if (si >= PRISM_STOPS)
+			si = PRISM_STOPS - 1;
+		f -= si;
+		a  = prism_stop[si % PRISM_HUES];
+		b  = prism_stop[(si + 1) % PRISM_HUES];
+		for (c = 0; c < 3; c++)
+			prm[x * 3 + c] = a[c] + (b[c] - a[c]) * f;
+	}
 }
 
 /* The droplet patch and its distance-field scratch keep a fixed size for a
@@ -979,29 +1025,7 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 	inv_hh     = hh > 0.0 ? 1.0 / hh : 0.0;
 	inv_edge_h = edge_h > 0.0 ? 1.0 / edge_h : 0.0;
 
-	prism_stops_init();
-
-	for (x = 0; x < pw; x++) {
-		double pos = ((double)(x + sox) + 0.5 - cx) / cw;
-		double f;
-		int    si;
-
-		if (pos < 0.0)
-			pos = 0.0;
-		if (pos > 1.0)
-			pos = 1.0;
-		f  = pos * PRISM_STOPS;
-		si = (int)f;
-		if (si >= PRISM_STOPS)
-			si = PRISM_STOPS - 1;
-		f             -= si;
-		prm[x * 3 + 0] = prism_stop_r[si]
-		                 + (prism_stop_r[si + 1] - prism_stop_r[si]) * f;
-		prm[x * 3 + 1] = prism_stop_g[si]
-		                 + (prism_stop_g[si + 1] - prism_stop_g[si]) * f;
-		prm[x * 3 + 2] = prism_stop_b[si]
-		                 + (prism_stop_b[si + 1] - prism_stop_b[si]) * f;
-	}
+	prism_row(prm, pw, sox, cx, cw);
 
 	for (x = 0; x < gw; x++) {
 		double lx = x - 1 + 0.5;
@@ -1319,7 +1343,7 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 			   contour, matching the baked stroke on the straight
 			   stretches */
 			t   = -d;
-			cov = t < 1.6 - t ? t : 1.6 - t;
+			cov = t < PRISM_LINE_W - t ? t : PRISM_LINE_W - t;
 			cov += 0.5;
 			if (cov < 0.0)
 				cov = 0.0;
@@ -1659,52 +1683,30 @@ barny_draw_broad_frame(cairo_t *cr, double w, double h)
 }
 
 static void
-hsv2rgb(double hh, double s, double v, double *r, double *g, double *b)
-{
-	double i = floor(hh * 6.0);
-	double f = hh * 6.0 - i;
-	double p = v * (1.0 - s);
-	double q = v * (1.0 - f * s);
-	double t = v * (1.0 - (1.0 - f) * s);
-
-	switch (((int)i) % 6) {
-	case 0:  *r = v; *g = t; *b = p; break;
-	case 1:  *r = q; *g = v; *b = p; break;
-	case 2:  *r = p; *g = v; *b = t; break;
-	case 3:  *r = p; *g = q; *b = v; break;
-	case 4:  *r = t; *g = p; *b = v; break;
-	default: *r = v; *g = p; *b = q; break;
-	}
-}
-
-static void
 draw_spectral_rim(cairo_t *cr, double w, double h, double r, double strength)
 {
 	cairo_pattern_t *p;
 	int              i;
-	int              n      = 40;
-	double           cycles = 2.5;
 
 	if (strength <= 0.001)
 		return;
 
+	prism_stops_init();
 	p = cairo_pattern_create_linear(0, 0, w, 0);
-	for (i = 0; i <= n; i++) {
-		double pos = (double)i / n;
-		double hue = fmod(pos * cycles, 1.0);
-		double rr;
-		double gg;
-		double bb;
+	for (i = 0; i <= PRISM_STOPS; i++) {
+		const double *c = prism_stop[i % PRISM_HUES];
 
-		hsv2rgb(hue, 0.9, 1.0, &rr, &gg, &bb);
-		cairo_pattern_add_color_stop_rgba(p, pos, rr, gg, bb, strength);
+		cairo_pattern_add_color_stop_rgba(p, (double)i / PRISM_STOPS,
+		                                  c[0], c[1], c[2], strength);
 	}
 
 	cairo_save(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
-	barny_rounded_rect_path(cr, 0.8, 0.8, w - 1.6, h - 1.6, r - 0.4);
+	barny_rounded_rect_path(cr, PRISM_LINE_W / 2, PRISM_LINE_W / 2,
+	                        w - PRISM_LINE_W, h - PRISM_LINE_W,
+	                        r - PRISM_LINE_W / 4);
 	cairo_set_source(cr, p);
-	cairo_set_line_width(cr, 1.6);
+	cairo_set_line_width(cr, PRISM_LINE_W);
 	cairo_stroke(cr);
 	cairo_restore(cr);
 

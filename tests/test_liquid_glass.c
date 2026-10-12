@@ -733,6 +733,84 @@ test_lens_channel_tap(void)
 	TEST_SUITE_END();
 }
 
+#define PRISM_TEST_BAR_W 2544
+#define PRISM_TEST_PAD   8
+
+void
+test_prism_stops(void)
+{
+	double  old_r[PRISM_STOPS + 1];
+	double  old_g[PRISM_STOPS + 1];
+	double  old_b[PRISM_STOPS + 1];
+	double  cx         = PRISM_TEST_PAD;
+	double  cw         = PRISM_TEST_BAR_W;
+	int     pw         = PRISM_TEST_BAR_W + 2 * PRISM_TEST_PAD;
+	bool    stops_same = true;
+	bool    row_same   = true;
+	double *prm;
+	int     i;
+	int     x;
+
+	TEST_SUITE_BEGIN("Prism Rainbow");
+
+	for (i = 0; i <= PRISM_STOPS; i++) {
+		double hue = fmod((double)i / PRISM_STOPS * PRISM_CYCLES, 1.0);
+
+		hsv2rgb(hue, PRISM_SAT, PRISM_VAL, &old_r[i], &old_g[i],
+		        &old_b[i]);
+	}
+
+	prism_stops_init();
+	for (i = 0; i <= PRISM_STOPS; i++) {
+		const double *c = prism_stop[i % PRISM_HUES];
+
+		if (c[0] != old_r[i] || c[1] != old_g[i] || c[2] != old_b[i])
+			stops_same = false;
+	}
+
+	TEST("one hue cycle reproduces all 41 ramp stops bit for bit")
+	{
+		ASSERT_TRUE(stops_same);
+	}
+
+	prm = calloc((size_t)pw * 3, sizeof(*prm));
+
+	TEST("prism_row matches the 41-stop ramp on every column of a bar")
+	{
+		ASSERT_TRUE(prm != NULL);
+		prism_row(prm, pw, 0, cx, cw);
+		for (x = 0; x < pw; x++) {
+			double pos = ((double)x + 0.5 - cx) / cw;
+			double f;
+			double r;
+			double g;
+			double b;
+			int    si;
+
+			if (pos < 0.0)
+				pos = 0.0;
+			if (pos > 1.0)
+				pos = 1.0;
+			f  = pos * PRISM_STOPS;
+			si = (int)f;
+			if (si >= PRISM_STOPS)
+				si = PRISM_STOPS - 1;
+			f -= si;
+			r  = old_r[si] + (old_r[si + 1] - old_r[si]) * f;
+			g  = old_g[si] + (old_g[si + 1] - old_g[si]) * f;
+			b  = old_b[si] + (old_b[si + 1] - old_b[si]) * f;
+			if (prm[x * 3 + 0] != r || prm[x * 3 + 1] != g
+			    || prm[x * 3 + 2] != b)
+				row_same = false;
+		}
+		ASSERT_TRUE(row_same);
+	}
+
+	free(prm);
+
+	TEST_SUITE_END();
+}
+
 /* The frame loop redraws only the strip the droplet touches (the union of its
    rect this frame and last), trusting the rest of the persistent buffer. That
    is only sound if a strip-clipped render lands exactly the pixels a full
