@@ -46,9 +46,10 @@ test_module_layout_basics(void)
 
 		total = barny_module_catalog_names(names, BARNY_MAX_MODULES);
 
-		ASSERT_EQ_INT(10, total);
+		ASSERT_EQ_INT(12, total);
 		ASSERT_EQ_STR("clock", names[0]);
 		ASSERT_EQ_STR("workspace", names[1]);
+		ASSERT_EQ_STR("windowtitle", names[11]);
 		ASSERT_TRUE(barny_module_catalog_has("tray"));
 		ASSERT_TRUE(barny_module_catalog_has("gap:2"));
 		ASSERT_EQ_INT(2, barny_module_layout_gap_units("gap:2"));
@@ -64,12 +65,14 @@ test_module_layout_basics(void)
 		barny_module_layout_set_defaults(&layout);
 
 		ASSERT_EQ_INT(1, layout.left_count);
-		ASSERT_EQ_INT(0, layout.center_count);
-		ASSERT_EQ_INT(9, layout.right_count);
+		ASSERT_EQ_INT(1, layout.center_count);
+		ASSERT_EQ_INT(10, layout.right_count);
 
 		ASSERT_EQ_STR("workspace", layout.left[0]);
+		ASSERT_EQ_STR("windowtitle", layout.center[0]);
 		ASSERT_EQ_STR("clock", layout.right[0]);
 		ASSERT_EQ_STR("tray", layout.right[8]);
+		ASSERT_EQ_STR("battery", layout.right[9]);
 
 		barny_module_layout_destroy(&layout);
 	}

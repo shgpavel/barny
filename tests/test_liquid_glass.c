@@ -863,7 +863,7 @@ test_lens_partial_redraw(void)
 	double           xb = 360.0;
 	int              ax, ay, aw, ah;
 	int              bx, by, bw, bh;
-	int              clip[4];
+	int              clip[4] = { 0 };
 	int              x0;
 	int              y0;
 	int              x1;
@@ -873,22 +873,21 @@ test_lens_partial_redraw(void)
 
 	lens_setup(&state, &out);
 
-	state.lens_x = xa;
-	ASSERT_TRUE(barny_lens_rect(&out, &ax, &ay, &aw, &ah));
-	state.lens_x = xb;
-	ASSERT_TRUE(barny_lens_rect(&out, &bx, &by, &bw, &bh));
-
-	x0      = ax < bx ? ax : bx;
-	y0      = ay < by ? ay : by;
-	x1      = (ax + aw) > (bx + bw) ? ax + aw : bx + bw;
-	y1      = (ay + ah) > (by + bh) ? ay + ah : by + bh;
-	clip[0] = x0;
-	clip[1] = y0;
-	clip[2] = x1 - x0;
-	clip[3] = y1 - y0;
-
 	TEST("droplet strip is far narrower than the bar")
 	{
+		state.lens_x = xa;
+		ASSERT_TRUE(barny_lens_rect(&out, &ax, &ay, &aw, &ah));
+		state.lens_x = xb;
+		ASSERT_TRUE(barny_lens_rect(&out, &bx, &by, &bw, &bh));
+
+		x0      = ax < bx ? ax : bx;
+		y0      = ay < by ? ay : by;
+		x1      = (ax + aw) > (bx + bw) ? ax + aw : bx + bw;
+		y1      = (ay + ah) > (by + bh) ? ay + ah : by + bh;
+		clip[0] = x0;
+		clip[1] = y0;
+		clip[2] = x1 - x0;
+		clip[3] = y1 - y0;
 		ASSERT_TRUE(clip[2] < out.surf_width / 2);
 	}
 

@@ -341,7 +341,7 @@ test_workspace_click_uses_module_rect(void)
 	TEST("second workspace hit is offset-aware")
 	{
 		reset_ipc_state();
-		workspace_click(&mod, 272, base_x + 10 + 20 + 5 + 10, 0);
+		workspace_click(&mod, 272, base_x + 20 + 5 + 10, 0);
 		ASSERT_EQ_INT(1, test_ipc_send_called);
 		ASSERT_EQ_STR("workspace number 2", test_ipc_last_payload);
 	}
