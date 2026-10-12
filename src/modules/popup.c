@@ -300,6 +300,71 @@ panel_shape(const barny_glass_panel_t *panel, double m, panel_shape_t *s)
 		s->rr = s->hh;
 }
 
+static double                   *s_field;
+static int                       s_field_n;
+static const cairo_user_data_key_t s_opaque_key;
+static const int                 s_opaque_yes = 1;
+static const int                 s_opaque_no  = 0;
+
+static double *
+field_rows(int n)
+{
+	double *f;
+
+	if (s_field && s_field_n >= n)
+		return s_field;
+
+	f = realloc(s_field, (size_t)n * 3 * sizeof(*f));
+	if (!f)
+		return NULL;
+	memset(f, 0, (size_t)n * 3 * sizeof(*f));
+	s_field   = f;
+	s_field_n = n;
+
+	return f;
+}
+
+static bool
+src_opaque(cairo_surface_t *src)
+{
+	const int *tag;
+	uint8_t   *data;
+	int        width;
+	int        height;
+	int        stride;
+	int        x;
+	int        y;
+	bool       opaque = true;
+
+	tag = cairo_surface_get_user_data(src, &s_opaque_key);
+	if (tag)
+		return *tag;
+
+	data   = cairo_image_surface_get_data(src);
+	width  = cairo_image_surface_get_width(src);
+	height = cairo_image_surface_get_height(src);
+	stride = cairo_image_surface_get_stride(src);
+	if (!data || cairo_image_surface_get_format(src) != CAIRO_FORMAT_ARGB32)
+		opaque = false;
+	for (y = 0; opaque && y < height; y++) {
+		const uint8_t *row = data + (ptrdiff_t)y * stride;
+
+		for (x = 0; x < width; x++) {
+			if (row[x * 4 + 3] != 255) {
+				opaque = false;
+				break;
+			}
+		}
+	}
+
+	cairo_surface_set_user_data(src, &s_opaque_key,
+	                            (void *)(opaque ? &s_opaque_yes
+	                                            : &s_opaque_no),
+	                            NULL);
+
+	return opaque;
+}
+
 static void
 panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
                  const barny_glass_panel_t *panel, const panel_shape_t *s)
@@ -317,12 +382,25 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 	double   disp   = POPUP_REFRACT * inv;
 	double   chroma = POPUP_CHROMA * inv;
 	double   edge_h = BARNY_FRAME_EDGE_TOP_STOP * 2.0 * hh;
+	double   ext    = 1.5 + 1.25 * (smk > 0.0 ? smk : 0.0);
+	double  *field;
+	double  *fprev;
+	double  *fcur;
+	double  *fnext;
+	double  *ftmp;
 	uint8_t *gdata;
 	uint8_t *ddata;
+	bool     opaque;
 	int      gstride;
 	int      dstride;
 	int      gsw;
 	int      gsh;
+	int      bx0;
+	int      bx1;
+	int      by0;
+	int      by1;
+	int      n;
+	int      c;
 	int      x;
 	int      y;
 
@@ -333,13 +411,57 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 	gsh     = cairo_image_surface_get_height(bg);
 	ddata   = cairo_image_surface_get_data(patch);
 	dstride = cairo_image_surface_get_stride(patch);
+	opaque  = src_opaque(bg);
+
+	bx0 = (int)fmax(0.0, fmin((double)w, floor(ccx - hw - ext)));
+	bx1 = (int)fmax(0.0, fmin((double)w, ceil(ccx + hw + ext)));
+	by0 = (int)fmax(0.0, fmin((double)h, floor(ccy - hh - ext)));
+	by1 = (int)fmax(0.0, fmin((double)h, ceil(ccy + hh + ext)));
+	n   = bx1 - bx0 + 2;
+	field = bx1 > bx0 && by1 > by0 ? field_rows(n) : NULL;
+	if (!field) {
+		bx0 = 0;
+		bx1 = 0;
+		by0 = 0;
+		by1 = 0;
+	}
 
 	for (y = 0; y < h; y++) {
+		if (y < by0 || y >= by1) {
+			memset(ddata + (ptrdiff_t)y * dstride, 0, (size_t)w * 4);
+			continue;
+		}
+		memset(ddata + (ptrdiff_t)y * dstride, 0, (size_t)bx0 * 4);
+		memset(ddata + (ptrdiff_t)y * dstride + bx1 * 4, 0,
+		       (size_t)(w - bx1) * 4);
+	}
+	if (!field) {
+		cairo_surface_mark_dirty(patch);
+		return;
+	}
+
+#define POPUP_SDF(px, py)                                                     \
+	barny_smin(top ? (py) : (double)h - (py),                             \
+	           barny_sd_round_rect((px) - ccx, (py) - ccy, hw, hh, rr),  \
+	           smk)
+#define POPUP_ROW(f, yy)                                                      \
+	for (c = 0; c < n; c++)                                               \
+		(f)[c] = POPUP_SDF((bx0 - 1 + c) + 0.5, (yy) + 0.5)
+
+	fprev = field;
+	fcur  = field + n;
+	fnext = field + 2 * n;
+	POPUP_ROW(fprev, by0 - 1);
+	POPUP_ROW(fcur, by0);
+
+	for (y = by0; y < by1; y++) {
 		uint8_t *drow = ddata + y * dstride;
 		double   ly   = y + 0.5;
 
-		for (x = 0; x < w; x++) {
-			double  lx = x + 0.5;
+		POPUP_ROW(fnext, y + 1);
+
+		for (x = bx0; x < bx1; x++) {
+			int     ci = x - bx0 + 1;
 			double  d;
 			double  dl;
 			double  dr;
@@ -374,18 +496,13 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 			uint8_t p2[4];
 			uint8_t p3[4];
 
-#define POPUP_SDF(px, py)                                                     \
-	barny_smin(top ? (py) : (double)h - (py),                             \
-	           barny_sd_round_rect((px) - ccx, (py) - ccy, hw, hh, rr),  \
-	           smk)
-
 			/* The smooth union flattens the field where the neck
 			   meets the bar, so the raw distance there covers far
 			   more than a pixel: shading it by d alone smeared that
 			   edge. Normalising by the local gradient puts a true
 			   one-pixel ramp on the whole silhouette. |grad| <= 1
 			   for this field, so d >= 0.5 is still safely outside. */
-			d = POPUP_SDF(lx, ly);
+			d = fcur[ci];
 			if (d >= 0.5) {
 				drow[x * 4 + 0] = 0;
 				drow[x * 4 + 1] = 0;
@@ -394,10 +511,10 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 				continue;
 			}
 
-			dl = POPUP_SDF(lx - 1.0, ly);
-			dr = POPUP_SDF(lx + 1.0, ly);
-			du = POPUP_SDF(lx, ly - 1.0);
-			dv = POPUP_SDF(lx, ly + 1.0);
+			dl = fcur[ci - 1];
+			dr = fcur[ci + 1];
+			du = fprev[ci];
+			dv = fnext[ci];
 			if (!glass_sdf_normal_aa(d, dl, dr, du, dv, &nnx, &nny,
 			                         &aa)) {
 				drow[x * 4 + 0] = 0;
@@ -422,7 +539,24 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 				pedge  = (1.0 - pp) * (1.0 - pp);
 			}
 
-			if (chroma > 0.01) {
+			if (chroma > 0.01 && opaque) {
+				double cs = chroma * pedge;
+
+				fb = barny_sample_bilinear_ch(gdata, gstride, gsw,
+				                              gsh,
+				                              x + dispx + nnx * cs,
+				                              y + dispy + nny * cs,
+				                              0);
+				fg = barny_sample_bilinear_ch(gdata, gstride, gsw,
+				                              gsh, x + dispx,
+				                              y + dispy, 1);
+				fr = barny_sample_bilinear_ch(gdata, gstride, gsw,
+				                              gsh,
+				                              x + dispx - nnx * cs,
+				                              y + dispy - nny * cs,
+				                              2);
+				fa = 1.0;
+			} else if (chroma > 0.01) {
 				double cs = chroma * pedge;
 
 				barny_sample_bilinear(gdata, gstride, gsw, gsh,
@@ -438,6 +572,14 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 				fg = p2[3] > 0 ? p2[1] * 255.0 / p2[3] : 0.0;
 				fr = p1[3] > 0 ? p1[2] * 255.0 / p1[3] : 0.0;
 				fa = p2[3] / 255.0;
+			} else if (opaque) {
+				barny_sample_bilinear(gdata, gstride, gsw, gsh,
+				                      x + dispx, y + dispy,
+				                      p2);
+				fb = p2[0];
+				fg = p2[1];
+				fr = p2[2];
+				fa = 1.0;
 			} else {
 				barny_sample_bilinear(gdata, gstride, gsw, gsh,
 				                      x + dispx, y + dispy,
@@ -495,9 +637,15 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 			glass_tint(&fr, &fg, &fb, aw, rim, ty, spec, cntr);
 			ap = fa * aa;
 			glass_put(drow + x * 4, fr, fg, fb, ap);
-#undef POPUP_SDF
 		}
+
+		ftmp  = fprev;
+		fprev = fcur;
+		fcur  = fnext;
+		fnext = ftmp;
 	}
+#undef POPUP_ROW
+#undef POPUP_SDF
 
 	cairo_surface_mark_dirty(patch);
 }

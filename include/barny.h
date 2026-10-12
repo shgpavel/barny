@@ -527,6 +527,42 @@ barny_sample_bilinear(uint8_t *data, int stride, int width, int height,
 		out[i] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
 	}
 }
+
+static inline uint8_t
+barny_sample_bilinear_ch(uint8_t *data, int stride, int width, int height,
+                         double x, double y, int ch)
+{
+	int      x0;
+	int      y0;
+	double   fx;
+	double   fy;
+	uint8_t *p00;
+	uint8_t *p01;
+	double   v0;
+	double   v1;
+	double   v;
+
+	if (x < 0)
+		x = 0;
+	if (y < 0)
+		y = 0;
+	if (x >= width - 1)
+		x = width - 1.001;
+	if (y >= height - 1)
+		y = height - 1.001;
+
+	x0  = (int)x;
+	y0  = (int)y;
+	fx  = x - x0;
+	fy  = y - y0;
+	p00 = data + y0 * stride + x0 * 4 + ch;
+	p01 = p00 + stride;
+	v0  = p00[0] + (p00[4] - p00[0]) * fx;
+	v1  = p01[0] + (p01[4] - p01[0]) * fx;
+	v   = v0 + (v1 - v0) * fy;
+
+	return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+}
 void
 barny_blur_surface(cairo_surface_t *surface, int radius);
 void
