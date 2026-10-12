@@ -8,6 +8,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "glass_shade.h"
 #include "popup.h"
 #include "util.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -32,9 +33,6 @@
 #define POPUP_RIM_W      5.0
 #define POPUP_RIM_STR    0.28
 #define POPUP_RIM_CORE   0.50
-#define POPUP_RIM_CHROMA 0.28
-#define POPUP_SPEC_LX    (-0.30)
-#define POPUP_SPEC_LY    (-0.954)
 #define POPUP_SPEC_W     7.0
 #define POPUP_SPEC_GAIN  0.55
 #define POPUP_CONTENT_IN 0.68 /* panel forms before the data condenses in */
@@ -196,18 +194,6 @@ popup_build_content(barny_popup_t *p)
 	cairo_destroy(cc);
 }
 
-/* facing^10 by squaring: the specular runs on every rim pixel of every frame,
-   and libm's pow dominated the morph's inner loop. */
-static double
-popup_spec_pow(double x)
-{
-	double x2 = x * x;
-	double x4 = x2 * x2;
-	double x8 = x4 * x4;
-
-	return x8 * x2;
-}
-
 /* One scratch patch serves every panel: only one is ever being rasterised at a
    time, and every pixel of it is written each pass, so it never needs clearing.
    A fresh surface per frame was the morph's only allocation. */
@@ -224,7 +210,7 @@ popup_phase(double p, double start, double end)
 		t = 0.0;
 	if (t > 1.0)
 		t = 1.0;
-	return t * t * (3.0 - 2.0 * t);
+	return glass_smoothstep01(t);
 }
 
 static double
@@ -361,7 +347,6 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 			double  dv;
 			double  nnx   = 0.0;
 			double  nny   = 0.0;
-			double  nlen;
 			double  aa;
 			double  depth;
 			double  pedge = 0.0;
@@ -409,27 +394,18 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 				continue;
 			}
 
-			dl   = POPUP_SDF(lx - 1.0, ly);
-			dr   = POPUP_SDF(lx + 1.0, ly);
-			du   = POPUP_SDF(lx, ly - 1.0);
-			dv   = POPUP_SDF(lx, ly + 1.0);
-			nlen = sqrt((dr - dl) * (dr - dl) + (dv - du) * (dv - du));
-			if (nlen > 1e-6) {
-				nnx = (dr - dl) / nlen;
-				nny = (dv - du) / nlen;
-				aa  = 0.5 - d / (nlen * 0.5);
-			} else {
-				aa = d < 0.0 ? 1.0 : 0.0;
-			}
-			if (aa <= 0.0) {
+			dl = POPUP_SDF(lx - 1.0, ly);
+			dr = POPUP_SDF(lx + 1.0, ly);
+			du = POPUP_SDF(lx, ly - 1.0);
+			dv = POPUP_SDF(lx, ly + 1.0);
+			if (!glass_sdf_normal_aa(d, dl, dr, du, dv, &nnx, &nny,
+			                         &aa)) {
 				drow[x * 4 + 0] = 0;
 				drow[x * 4 + 1] = 0;
 				drow[x * 4 + 2] = 0;
 				drow[x * 4 + 3] = 0;
 				continue;
 			}
-			if (aa > 1.0)
-				aa = 1.0;
 			depth = -d;
 
 			if (d < 0.0 && disp > 0.01) {
@@ -439,8 +415,7 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 
 				if (pp > 1.0)
 					pp = 1.0;
-				srcoff = zone * (sqrt(2.0 * pp - pp * pp) - pp)
-				         * disp
+				srcoff = glass_dome(pp, zone) * disp
 				         + 3.0 * (1.0 - pp) * inv;
 				dispx  = -nnx * srcoff;
 				dispy  = -nny * srcoff;
@@ -486,8 +461,8 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 			veil *= POPUP_VEIL * inv;
 			aw    = veil + atop - veil * atop;
 
-			facing = nnx * POPUP_SPEC_LX + nny * POPUP_SPEC_LY;
-			lit    = 0.45 + 0.55 * (facing > 0.15 ? facing : 0.15);
+			facing = nnx * GLASS_SPEC_LX + nny * GLASS_SPEC_LY;
+			lit    = glass_lit(facing);
 			ri     = 1.0 - depth / POPUP_RIM_W;
 			if (ri < 0.0 || d > 0.0)
 				ri = 0.0;
@@ -502,14 +477,13 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 			cntr = 0.0;
 			if (d < 0.0 && depth < POPUP_SPEC_W && inv > 0.001) {
 				band = 1.0 - depth / POPUP_SPEC_W;
-				band = band * band * (3.0 - 2.0 * band);
+				band = glass_smoothstep01(band);
 				if (facing > 0.0)
 					spec = POPUP_SPEC_GAIN * inv * band
-					       * popup_spec_pow(facing);
+					       * glass_pow10(facing);
 				else
 					cntr = 0.22 * POPUP_SPEC_GAIN * inv
-					       * band
-					       * popup_spec_pow(-facing);
+					       * band * glass_pow10(-facing);
 			}
 
 			ty = hh > 0.0 ? (ly - ccy) / hh : 0.0;
@@ -518,28 +492,9 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 			if (ty > 1.0)
 				ty = 1.0;
 
-			fr  = fr * (1.0 - aw) + 255.0 * aw;
-			fg  = fg * (1.0 - aw) + 255.0 * aw;
-			fb  = fb * (1.0 - aw) + 255.0 * aw;
-			fr += (rim * (1.0 - POPUP_RIM_CHROMA * ty) + spec
-			       + cntr * 0.85)
-			      * 255.0;
-			fg += (rim + spec + cntr * 0.92) * 255.0;
-			fb += (rim * (1.0 + POPUP_RIM_CHROMA * ty) + spec
-			       + cntr)
-			      * 255.0;
-			if (fr > 255.0)
-				fr = 255.0;
-			if (fg > 255.0)
-				fg = 255.0;
-			if (fb > 255.0)
-				fb = 255.0;
-
-			ap              = fa * aa;
-			drow[x * 4 + 0] = (uint8_t)(fb * ap);
-			drow[x * 4 + 1] = (uint8_t)(fg * ap);
-			drow[x * 4 + 2] = (uint8_t)(fr * ap);
-			drow[x * 4 + 3] = (uint8_t)(255.0 * ap);
+			glass_tint(&fr, &fg, &fb, aw, rim, ty, spec, cntr);
+			ap = fa * aa;
+			glass_put(drow + x * 4, fr, fg, fb, ap);
 #undef POPUP_SDF
 		}
 	}
@@ -718,7 +673,6 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			double  dv;
 			double  nnx = 0.0;
 			double  nny = 0.0;
-			double  nlen;
 			double  aa;
 			double  depth;
 			double  zone;
@@ -757,27 +711,18 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 				continue;
 			}
 
-			dl   = BUBBLE_SDF(lx - 1.0, ly);
-			dr   = BUBBLE_SDF(lx + 1.0, ly);
-			du   = BUBBLE_SDF(lx, ly - 1.0);
-			dv   = BUBBLE_SDF(lx, ly + 1.0);
-			nlen = sqrt((dr - dl) * (dr - dl) + (dv - du) * (dv - du));
-			if (nlen > 1e-6) {
-				nnx = (dr - dl) / nlen;
-				nny = (dv - du) / nlen;
-				aa  = 0.5 - d / (nlen * 0.5);
-			} else {
-				aa = d < 0.0 ? 1.0 : 0.0;
-			}
-			if (aa <= 0.0) {
+			dl = BUBBLE_SDF(lx - 1.0, ly);
+			dr = BUBBLE_SDF(lx + 1.0, ly);
+			du = BUBBLE_SDF(lx, ly - 1.0);
+			dv = BUBBLE_SDF(lx, ly + 1.0);
+			if (!glass_sdf_normal_aa(d, dl, dr, du, dv, &nnx, &nny,
+			                         &aa)) {
 				drow[x * 4 + 0] = 0;
 				drow[x * 4 + 1] = 0;
 				drow[x * 4 + 2] = 0;
 				drow[x * 4 + 3] = 0;
 				continue;
 			}
-			if (aa > 1.0)
-				aa = 1.0;
 
 			/* dome of glass: the surface it sits on is pulled in
 			   toward the bead's edge, hardest right at the rim,
@@ -787,8 +732,7 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			pp     = zone > 0.0 ? depth / zone : 1.0;
 			if (pp > 1.0)
 				pp = 1.0;
-			srcoff = zone * (sqrt(2.0 * pp - pp * pp) - pp)
-			         * BUBBLE_REFRACT;
+			srcoff = glass_dome(pp, zone) * BUBBLE_REFRACT;
 			dispx  = -nnx * srcoff;
 			dispy  = -nny * srcoff;
 			pedge  = (1.0 - pp) * (1.0 - pp);
@@ -811,8 +755,8 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 				veil = 1.0;
 			veil *= BUBBLE_VEIL;
 
-			facing = nnx * POPUP_SPEC_LX + nny * POPUP_SPEC_LY;
-			lit    = 0.45 + 0.55 * (facing > 0.15 ? facing : 0.15);
+			facing = nnx * GLASS_SPEC_LX + nny * GLASS_SPEC_LY;
+			lit    = glass_lit(facing);
 			ri     = 1.0 - depth / POPUP_RIM_W;
 			if (ri < 0.0)
 				ri = 0.0;
@@ -824,9 +768,9 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 
 			if (depth < POPUP_SPEC_W && facing > 0.0) {
 				band = 1.0 - depth / POPUP_SPEC_W;
-				band = band * band * (3.0 - 2.0 * band);
+				band = glass_smoothstep01(band);
 				spec = POPUP_SPEC_GAIN * band
-				       * popup_spec_pow(facing);
+				       * glass_pow10(facing);
 			}
 
 			ty = hh > 0.0 ? (ly - bub->cy) / hh : 0.0;
@@ -835,24 +779,10 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			if (ty > 1.0)
 				ty = 1.0;
 
-			fr  = fr * (1.0 - veil) + 255.0 * veil;
-			fg  = fg * (1.0 - veil) + 255.0 * veil;
-			fb  = fb * (1.0 - veil) + 255.0 * veil;
-			fr += (rim * (1.0 - POPUP_RIM_CHROMA * ty) + spec) * 255.0;
-			fg += (rim + spec) * 255.0;
-			fb += (rim * (1.0 + POPUP_RIM_CHROMA * ty) + spec) * 255.0;
-			if (fr > 255.0)
-				fr = 255.0;
-			if (fg > 255.0)
-				fg = 255.0;
-			if (fb > 255.0)
-				fb = 255.0;
-
-			ap              = aa * a;
-			drow[x * 4 + 0] = (uint8_t)(fb * ap);
-			drow[x * 4 + 1] = (uint8_t)(fg * ap);
-			drow[x * 4 + 2] = (uint8_t)(fr * ap);
-			drow[x * 4 + 3] = (uint8_t)(255.0 * ap);
+			glass_tint(&fr, &fg, &fb, veil, rim, ty, spec,
+			           GLASS_NO_COUNTER);
+			ap = aa * a;
+			glass_put(drow + x * 4, fr, fg, fb, ap);
 #undef BUBBLE_SDF
 		}
 	}

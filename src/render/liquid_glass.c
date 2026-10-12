@@ -9,6 +9,7 @@
 #include <setjmp.h>
 
 #include "barny.h"
+#include "glass_shade.h"
 #include "util.h"
 
 #ifndef M_PI
@@ -31,7 +32,6 @@
 #define BULGE_RIM_W     5.0    /* inner glow width of the bubble rim */
 #define BULGE_RIM_STR   0.30   /* soft inner glow of the bubble rim */
 #define BULGE_RIM_CORE  0.55   /* crisp bright line at the bubble outline */
-#define BULGE_RIM_CHROMA 0.28  /* vertical colour dispersion of the rim */
 #define BULGE_CORE_W    1.4    /* px the crisp outline reaches past the rim */
 #define BULGE_CHROMA_MIN 0.25  /* px: below this the 3 taps land on one pixel */
 
@@ -56,10 +56,6 @@
 #define PRISM_VAL    1.0
 #define PRISM_LINE_W 1.6
 
-/* Key light for the droplet specular: from above, slightly left, matching
-   the diagonal sheen of the glass frame. */
-#define SPEC_LX      (-0.30)
-#define SPEC_LY      (-0.954)
 #define SPEC_W       7.0   /* px band the specular hugs inside the rim */
 #define SPEC_GAIN    2.4   /* glass_gleam multiplier */
 #define SPEC_COUNTER 0.22  /* strength of the cool counter-arc */
@@ -711,18 +707,6 @@ barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
 	return surface;
 }
 
-/* x^10, the specular exponent, without a libm call: pow() ran on every lit
-   pixel of the droplet rim for an exponent fixed at compile time. */
-static inline double
-spec_pow(double x)
-{
-	double x2 = x * x;
-	double x4 = x2 * x2;
-	double x8 = x4 * x4;
-
-	return x8 * x2;
-}
-
 /* Bilinear tap specialised for the droplet's inner loop, which is the hottest
    code in the bar: the public sampler works in double, widens 16 bytes per tap,
    and quantises back through uint8 -- together more expensive than the lens
@@ -1121,7 +1105,7 @@ droplet_shade(double dd, double facing, double atop, double ty,
 
 	/* crisp bright rim tracing the droplet, lit from the key light instead
 	   of a uniform ring */
-	lit  = 0.45 + 0.55 * (facing > 0.15 ? facing : 0.15);
+	lit  = glass_lit(facing);
 	ri   = 1.0 + dd / BULGE_RIM_W;
 	if (ri < 0.0 || dd > 0.0)
 		ri = 0.0;
@@ -1138,27 +1122,15 @@ droplet_shade(double dd, double facing, double atop, double ty,
 	spec = 0.0;
 	cntr = 0.0;
 	if (dd < 0.0 && -dd < SPEC_W && spec_g > 0.001) {
-		band = 1.0 + dd / SPEC_W;
-		band = band * band * (3.0 - 2.0 * band);
+		band = glass_smoothstep01(1.0 + dd / SPEC_W);
 		if (facing > 0.0)
-			spec = spec_g * band * spec_pow(facing);
+			spec = spec_g * band * glass_pow10(facing);
 		else
-			cntr = SPEC_COUNTER * spec_g * band * spec_pow(-facing);
+			cntr = SPEC_COUNTER * spec_g * band
+			       * glass_pow10(-facing);
 	}
 
-	*fr  = *fr * (1.0 - aw) + 255.0 * aw;
-	*fg  = *fg * (1.0 - aw) + 255.0 * aw;
-	*fb  = *fb * (1.0 - aw) + 255.0 * aw;
-	*fr += (rim * (1.0 - BULGE_RIM_CHROMA * ty) + spec + cntr * 0.85)
-	       * 255.0;
-	*fg += (rim + spec + cntr * 0.92) * 255.0;
-	*fb += (rim * (1.0 + BULGE_RIM_CHROMA * ty) + spec + cntr) * 255.0;
-	if (*fr > 255.0)
-		*fr = 255.0;
-	if (*fg > 255.0)
-		*fg = 255.0;
-	if (*fb > 255.0)
-		*fb = 255.0;
+	glass_tint(fr, fg, fb, aw, rim, ty, spec, cntr);
 }
 
 static inline double
@@ -1375,10 +1347,7 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 
 						if (p > 1.0)
 							p = 1.0;
-						srcoff = zone
-						         * (sqrt(2.0 * p
-						                 - p * p)
-						            - p)
+						srcoff = glass_dome(p, zone)
 						         * disp
 						         + BULGE_BIAS
 						                   * (1.0 - p);
@@ -1387,7 +1356,8 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 						pedge  = (1.0 - p) * (1.0 - p);
 					}
 
-					facing = nnx * SPEC_LX + nny * SPEC_LY;
+					facing = nnx * GLASS_SPEC_LX
+					         + nny * GLASS_SPEC_LY;
 					cs     = chroma * pedge;
 				}
 
@@ -1585,7 +1555,7 @@ lens_geom(barny_output_t *output, lens_geom_t *g)
 		margin = 0.0;
 	corner_ramp   = margin >= LENS_PINCH_FADE ? 1.0
 	                                          : margin / LENS_PINCH_FADE;
-	corner_ramp   = corner_ramp * corner_ramp * (3.0 - 2.0 * corner_ramp);
+	corner_ramp   = glass_smoothstep01(corner_ramp);
 	g->pinch_amp  = LENS_PINCH_MAX * (bulge / 15.0) * s * corner_ramp;
 	if (g->pinch_amp > ch * 0.2)
 		g->pinch_amp = ch * 0.2;
