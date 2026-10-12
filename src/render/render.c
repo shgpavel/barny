@@ -178,13 +178,17 @@ pick_victim(barny_state_t *state,
 #define MODULE_BLEED 8
 
 static bool
-module_visible(const barny_output_t *output, int x, int w)
+module_visible(const barny_output_t *output, int x, int y, int w, int h)
 {
+	const barny_rect_t *c = &output->clip;
+
 	if (!output->render_clipped)
 		return true;
 
-	return x + w + MODULE_BLEED > output->clip_x0
-	       && x - MODULE_BLEED < output->clip_x1;
+	return x + w + MODULE_BLEED > c->x
+	       && x - MODULE_BLEED < c->x + c->w
+	       && y + h + MODULE_BLEED > c->y
+	       && y - MODULE_BLEED < c->y + c->h;
 }
 
 static void
@@ -233,7 +237,7 @@ render_section(barny_output_t *output, cairo_t *cr, const int *idx, int n,
 		output->mod_x[j] = x;
 		output->mod_w[j] = w;
 
-		if (mod->render && module_visible(output, x, w)) {
+		if (mod->render && module_visible(output, x, y, w, h)) {
 			cairo_save(cr);
 			mod->render(mod, cr, x, y, w, h);
 			cairo_restore(cr);
@@ -246,50 +250,11 @@ render_section(barny_output_t *output, cairo_t *cr, const int *idx, int n,
 /* Union of the strip the droplet covers now and the one it covered last frame:
    everything the bar surface needs re-derived, and nothing else. Clamped to the
    surface. Empty (w == 0) when there is no droplet on either frame. */
-static void
-lens_damage(const barny_output_t *output, bool have_lens, int lx, int ly,
-            int lw, int lh, int *dx, int *dy, int *dw, int *dh)
+static barny_rect_t
+lens_damage(const barny_output_t *output, barny_rect_t lens)
 {
-	int x0 = INT_MAX;
-	int y0 = INT_MAX;
-	int x1 = INT_MIN;
-	int y1 = INT_MIN;
-
-	if (have_lens) {
-		x0 = lx;
-		y0 = ly;
-		x1 = lx + lw;
-		y1 = ly + lh;
-	}
-	if (output->lens_dmg_w > 0) {
-		if (output->lens_dmg_x < x0)
-			x0 = output->lens_dmg_x;
-		if (output->lens_dmg_y < y0)
-			y0 = output->lens_dmg_y;
-		if (output->lens_dmg_x + output->lens_dmg_w > x1)
-			x1 = output->lens_dmg_x + output->lens_dmg_w;
-		if (output->lens_dmg_y + output->lens_dmg_h > y1)
-			y1 = output->lens_dmg_y + output->lens_dmg_h;
-	}
-
-	if (x1 <= x0 || y1 <= y0) {
-		*dx = *dy = *dw = *dh = 0;
-		return;
-	}
-
-	if (x0 < 0)
-		x0 = 0;
-	if (y0 < 0)
-		y0 = 0;
-	if (x1 > output->surf_width)
-		x1 = output->surf_width;
-	if (y1 > output->surf_height)
-		y1 = output->surf_height;
-
-	*dx = x0;
-	*dy = y0;
-	*dw = x1 > x0 ? x1 - x0 : 0;
-	*dh = y1 > y0 ? y1 - y0 : 0;
+	return barny_rect_clamp(barny_rect_union(lens, output->lens_dmg),
+	                        output->surf_width, output->surf_height);
 }
 
 /* A droplet-only frame may repaint just the droplet's strip: the rest of the
@@ -307,20 +272,100 @@ lens_partial_ok(barny_output_t *output)
 	       && !barny_modules_any_dirty(state);
 }
 
+static void
+render_bar(barny_output_t *output, cairo_t *cr, const barny_rect_t *clip)
+{
+	if (clip) {
+		/* Clip first: the clear, the bar-cache blit and the droplet all
+		   land inside the strip, and the modules outside it skip their
+		   text shaping entirely. */
+		cairo_save(cr);
+		cairo_rectangle(cr, clip->x, clip->y, clip->w, clip->h);
+		cairo_clip(cr);
+
+		output->render_clipped = true;
+		output->clip           = *clip;
+	}
+
+	barny_render_liquid_glass(output, cr);
+	barny_render_modules(output, cr);
+
+	if (clip) {
+		output->render_clipped = false;
+		cairo_restore(cr);
+	}
+}
+
+static void
+module_widths_save(const barny_state_t *state, int *widths)
+{
+	int i;
+
+	for (i = 0; i < state->module_count; i++) {
+		widths[i] = state->modules[i] ? state->modules[i]->width : 0;
+	}
+}
+
+static bool
+module_widths_changed(const barny_state_t *state, const int *widths)
+{
+	int i;
+	int w;
+
+	for (i = 0; i < state->module_count; i++) {
+		w = state->modules[i] ? state->modules[i]->width : 0;
+		if (w != widths[i])
+			return true;
+	}
+
+	return false;
+}
+
+static void
+modules_clear_dirty(barny_state_t *state)
+{
+	int i;
+
+	for (i = 0; i < state->module_count; i++) {
+		if (state->modules[i]) {
+			state->modules[i]->dirty = false;
+		}
+	}
+}
+
+static void
+frame_commit(barny_output_t *output, const barny_rect_t *dmg, int n)
+{
+	int s = output->scale;
+	int i;
+
+	barny_output_request_frame(output);
+
+	cairo_surface_flush(output->cairo_surface);
+	wl_surface_attach(output->surface, output->buffer, 0, 0);
+	if (n == 0) {
+		wl_surface_damage_buffer(output->surface, 0, 0,
+		                         output->surf_width * s,
+		                         output->surf_height * s);
+	}
+	for (i = 0; i < n; i++) {
+		wl_surface_damage_buffer(output->surface, dmg[i].x * s,
+		                         dmg[i].y * s, dmg[i].w * s,
+		                         dmg[i].h * s);
+	}
+	wl_surface_commit(output->surface);
+}
+
 void
 barny_render_frame(barny_output_t *output)
 {
 	cairo_t       *cr;
 	barny_state_t *state;
 	int            saved_widths[BARNY_MAX_MODULES];
-	bool           width_changed = false;
+	barny_rect_t   lens;
+	barny_rect_t   dmg;
 	bool           lens_anim;
-	bool           have_lens;
 	bool           partial;
-	int            lx = 0, ly = 0, lw = 0, lh = 0;
-	int            dx = 0, dy = 0, dw = 0, dh = 0;
-	int            i;
-	int            new_w;
 
 	if (!output->configured || !output->cr) {
 		return;
@@ -338,83 +383,32 @@ barny_render_frame(barny_output_t *output)
 	cr                    = output->cr;
 	state                 = output->state;
 
-	for (i = 0; i < state->module_count; i++) {
-		saved_widths[i] = state->modules[i] ? state->modules[i]->width : 0;
-	}
+	module_widths_save(state, saved_widths);
 
-	have_lens = barny_lens_rect(output, &lx, &ly, &lw, &lh);
-	lens_damage(output, have_lens, lx, ly, lw, lh, &dx, &dy, &dw, &dh);
-	partial = lens_partial_ok(output) && dw > 0 && dh > 0;
+	if (!barny_lens_rect(output, &lens.x, &lens.y, &lens.w, &lens.h))
+		lens = (barny_rect_t){ 0 };
+	dmg     = lens_damage(output, lens);
+	partial = lens_partial_ok(output) && !barny_rect_empty(dmg);
 
-	if (partial) {
-		/* Clip first: the clear, the bar-cache blit and the droplet all
-		   land inside the strip, and the modules outside it skip their
-		   text shaping entirely. */
-		cairo_save(cr);
-		cairo_rectangle(cr, dx, dy, dw, dh);
-		cairo_clip(cr);
-
-		output->render_clipped = true;
-		output->clip_x0        = dx;
-		output->clip_x1        = dx + dw;
-
-		barny_render_liquid_glass(output, cr);
-		barny_render_modules(output, cr);
-
-		output->render_clipped = false;
-		cairo_restore(cr);
-	} else {
-		barny_render_liquid_glass(output, cr);
-		barny_render_modules(output, cr);
-	}
-
-	for (i = 0; i < state->module_count; i++) {
-		new_w = state->modules[i] ? state->modules[i]->width : 0;
-		if (new_w != saved_widths[i]) {
-			width_changed = true;
-			break;
-		}
-	}
+	render_bar(output, cr, partial ? &dmg : NULL);
 
 	/* A module resized while drawing, so the layout it was drawn with is
 	   stale: redo the bar in full, strip or not. */
-	if (width_changed) {
+	if (module_widths_changed(state, saved_widths)) {
 		partial = false;
-		barny_render_liquid_glass(output, cr);
-		barny_render_modules(output, cr);
+		render_bar(output, cr, NULL);
 	}
 
-	for (i = 0; i < state->module_count; i++) {
-		if (state->modules[i]) {
-			state->modules[i]->dirty = false;
-		}
-	}
+	modules_clear_dirty(state);
 
 	if (lens_anim) {
 		output->redraw_queued = true;
 	}
 
-	output->lens_dmg_x     = have_lens ? lx : 0;
-	output->lens_dmg_y     = have_lens ? ly : 0;
-	output->lens_dmg_w     = have_lens ? lw : 0;
-	output->lens_dmg_h     = have_lens ? lh : 0;
+	output->lens_dmg       = lens;
 	output->lens_dmg_valid = true;
 
-	barny_output_request_frame(output);
-
-	cairo_surface_flush(output->cairo_surface);
-	wl_surface_attach(output->surface, output->buffer, 0, 0);
-	if (partial) {
-		wl_surface_damage_buffer(output->surface, dx * output->scale,
-		                         dy * output->scale,
-		                         dw * output->scale,
-		                         dh * output->scale);
-	} else {
-		wl_surface_damage_buffer(output->surface, 0, 0,
-		                         output->surf_width * output->scale,
-		                         output->surf_height * output->scale);
-	}
-	wl_surface_commit(output->surface);
+	frame_commit(output, &dmg, partial ? 1 : 0);
 }
 
 void

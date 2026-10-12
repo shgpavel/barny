@@ -22,6 +22,8 @@ test_apply_displacement(void);
 extern void
 test_file_extension(void);
 extern void
+test_damage_rects(void);
+extern void
 test_lens_partial_redraw(void);
 extern void
 test_lens_channel_tap(void);
@@ -95,6 +97,7 @@ RUN_SUITE(test_file_extension);
 RUN_SUITE(test_lens_channel_tap);
 RUN_SUITE(test_prism_stops);
 RUN_SUITE(test_lens_opaque_fast_path);
+RUN_SUITE(test_damage_rects);
 RUN_SUITE(test_lens_partial_redraw);
 RUN_SUITE(test_lens_map_lifetime);
 

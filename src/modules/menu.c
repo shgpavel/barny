@@ -109,10 +109,7 @@ struct barny_menu {
 	int                           patch_y;
 	int                           patch_w;
 	int                           patch_h;
-	int                           damage_x;
-	int                           damage_y;
-	int                           damage_w;
-	int                           damage_h;
+	barny_rect_t                  damage;
 
 	cairo_surface_t              *glass_src;
 	cairo_surface_t              *content_cache;
@@ -736,7 +733,8 @@ menu_present(barny_menu_t *m)
 {
 	barny_glass_panel_t panel;
 	cairo_t            *cr = m->cr;
-	int                 x0, y0, x1, y1;
+	barny_rect_t        patch;
+	barny_rect_t        dmg;
 
 	if (!cr || !m->buffer)
 		return;
@@ -745,23 +743,14 @@ menu_present(barny_menu_t *m)
 
 	/* a submenu resizes the panel, so wipe and repost the union of the old
 	   rect and the new one or the wider layout leaves a ghost behind */
-	x0 = m->patch_x;
-	y0 = m->patch_y;
-	x1 = m->patch_x + m->patch_w;
-	y1 = m->patch_y + m->patch_h;
-	if (m->damage_w > 0 && m->damage_h > 0) {
-		if (m->damage_x < x0)
-			x0 = m->damage_x;
-		if (m->damage_y < y0)
-			y0 = m->damage_y;
-		if (m->damage_x + m->damage_w > x1)
-			x1 = m->damage_x + m->damage_w;
-		if (m->damage_y + m->damage_h > y1)
-			y1 = m->damage_y + m->damage_h;
-	}
+	patch.x = m->patch_x;
+	patch.y = m->patch_y;
+	patch.w = m->patch_w;
+	patch.h = m->patch_h;
+	dmg     = barny_rect_union(patch, m->damage);
 
 	cairo_save(cr);
-	cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
+	cairo_rectangle(cr, dmg.x, dmg.y, dmg.w, dmg.h);
 	cairo_clip(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
 	cairo_paint(cr);
@@ -786,12 +775,9 @@ menu_present(barny_menu_t *m)
 
 	cairo_surface_flush(m->cairo_surface);
 	wl_surface_attach(m->surface, m->buffer, 0, 0);
-	wl_surface_damage_buffer(m->surface, x0, y0, x1 - x0, y1 - y0);
+	wl_surface_damage_buffer(m->surface, dmg.x, dmg.y, dmg.w, dmg.h);
 
-	m->damage_x = m->patch_x;
-	m->damage_y = m->patch_y;
-	m->damage_w = m->patch_w;
-	m->damage_h = m->patch_h;
+	m->damage = patch;
 }
 
 /* One frame of whatever is in motion: the panel's own morph, the bead chasing

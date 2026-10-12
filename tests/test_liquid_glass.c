@@ -573,14 +573,14 @@ lens_target(const barny_output_t *out)
 
 static void
 lens_draw(barny_output_t *out, cairo_surface_t *surf, double lens_x,
-          const int *clip)
+          const barny_rect_t *clip)
 {
 	cairo_t *cr = cairo_create(surf);
 
 	out->state->lens_x = lens_x;
 
 	if (clip) {
-		cairo_rectangle(cr, clip[0], clip[1], clip[2], clip[3]);
+		cairo_rectangle(cr, clip->x, clip->y, clip->w, clip->h);
 		cairo_clip(cr);
 	}
 	barny_render_liquid_glass(out, cr);
@@ -803,6 +803,46 @@ test_prism_stops(void)
 	TEST_SUITE_END();
 }
 
+void
+test_damage_rects(void)
+{
+	barny_rect_t none = { 0 };
+	barny_rect_t a    = { 10, 4, 20, 30 };
+	barny_rect_t b    = { 50, -6, 8, 12 };
+	barny_rect_t r;
+
+	TEST_SUITE_BEGIN("Damage Rects");
+
+	TEST("an empty rect adds nothing to a union")
+	{
+		r = barny_rect_union(a, none);
+		ASSERT_TRUE(r.x == 10 && r.y == 4 && r.w == 20 && r.h == 30);
+		r = barny_rect_union(none, a);
+		ASSERT_TRUE(r.x == 10 && r.y == 4 && r.w == 20 && r.h == 30);
+		ASSERT_TRUE(barny_rect_empty(barny_rect_union(none, none)));
+	}
+
+	TEST("a union is the bounding box of both rects")
+	{
+		r = barny_rect_union(a, b);
+		ASSERT_TRUE(r.x == 10 && r.y == -6 && r.w == 48 && r.h == 40);
+	}
+
+	TEST("a clamp trims the rect to the surface")
+	{
+		r = barny_rect_clamp(barny_rect_union(a, b), 40, 20);
+		ASSERT_TRUE(r.x == 10 && r.y == 0 && r.w == 30 && r.h == 20);
+	}
+
+	TEST("a rect off the surface clamps to empty")
+	{
+		ASSERT_TRUE(barny_rect_empty(barny_rect_clamp(b, 40, 20)));
+		ASSERT_TRUE(barny_rect_empty(barny_rect_clamp(none, 40, 20)));
+	}
+
+	TEST_SUITE_END();
+}
+
 /* The frame loop redraws only the strip the droplet touches (the union of its
    rect this frame and last), trusting the rest of the persistent buffer. That
    is only sound if a strip-clipped render lands exactly the pixels a full
@@ -814,15 +854,11 @@ test_lens_partial_redraw(void)
 	barny_output_t  out;
 	cairo_surface_t *full;
 	cairo_surface_t *part;
-	double           xa = 300.0;
-	double           xb = 360.0;
-	int              ax, ay, aw, ah;
-	int              bx, by, bw, bh;
-	int              clip[4] = { 0 };
-	int              x0;
-	int              y0;
-	int              x1;
-	int              y1;
+	double           xa   = 300.0;
+	double           xb   = 360.0;
+	barny_rect_t     a    = { 0 };
+	barny_rect_t     b    = { 0 };
+	barny_rect_t     clip = { 0 };
 
 	TEST_SUITE_BEGIN("Lens Partial Redraw");
 
@@ -831,19 +867,12 @@ test_lens_partial_redraw(void)
 	TEST("droplet strip is far narrower than the bar")
 	{
 		state.lens_x = xa;
-		ASSERT_TRUE(barny_lens_rect(&out, &ax, &ay, &aw, &ah));
+		ASSERT_TRUE(barny_lens_rect(&out, &a.x, &a.y, &a.w, &a.h));
 		state.lens_x = xb;
-		ASSERT_TRUE(barny_lens_rect(&out, &bx, &by, &bw, &bh));
+		ASSERT_TRUE(barny_lens_rect(&out, &b.x, &b.y, &b.w, &b.h));
 
-		x0      = ax < bx ? ax : bx;
-		y0      = ay < by ? ay : by;
-		x1      = (ax + aw) > (bx + bw) ? ax + aw : bx + bw;
-		y1      = (ay + ah) > (by + bh) ? ay + ah : by + bh;
-		clip[0] = x0;
-		clip[1] = y0;
-		clip[2] = x1 - x0;
-		clip[3] = y1 - y0;
-		ASSERT_TRUE(clip[2] < out.surf_width / 2);
+		clip = barny_rect_union(a, b);
+		ASSERT_TRUE(clip.w > 0 && clip.w < out.surf_width / 2);
 	}
 
 	full = lens_target(&out);
@@ -855,7 +884,7 @@ test_lens_partial_redraw(void)
 	/* what the frame loop does: a full bar at A, then only the strip
 	   redrawn with the droplet now at B */
 	lens_draw(&out, part, xa, NULL);
-	lens_draw(&out, part, xb, clip);
+	lens_draw(&out, part, xb, &clip);
 
 	TEST("strip redraw matches a full redraw byte for byte")
 	{

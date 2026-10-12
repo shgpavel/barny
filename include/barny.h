@@ -29,6 +29,66 @@ typedef struct barny_output barny_output_t;
 typedef struct barny_module barny_module_t;
 typedef struct barny_menu   barny_menu_t;
 
+typedef struct {
+	int x;
+	int y;
+	int w;
+	int h;
+} barny_rect_t;
+
+static inline bool
+barny_rect_empty(barny_rect_t r)
+{
+	return r.w <= 0 || r.h <= 0;
+}
+
+static inline barny_rect_t
+barny_rect_union(barny_rect_t a, barny_rect_t b)
+{
+	barny_rect_t r;
+	int          x1;
+	int          y1;
+
+	if (barny_rect_empty(b))
+		return a;
+	if (barny_rect_empty(a))
+		return b;
+
+	r.x = a.x < b.x ? a.x : b.x;
+	r.y = a.y < b.y ? a.y : b.y;
+	x1  = a.x + a.w > b.x + b.w ? a.x + a.w : b.x + b.w;
+	y1  = a.y + a.h > b.y + b.h ? a.y + a.h : b.y + b.h;
+	r.w = x1 - r.x;
+	r.h = y1 - r.y;
+
+	return r;
+}
+
+static inline barny_rect_t
+barny_rect_clamp(barny_rect_t r, int w, int h)
+{
+	int x0 = r.x;
+	int y0 = r.y;
+	int x1 = r.x + r.w;
+	int y1 = r.y + r.h;
+
+	if (x0 < 0)
+		x0 = 0;
+	if (y0 < 0)
+		y0 = 0;
+	if (x1 > w)
+		x1 = w;
+	if (y1 > h)
+		y1 = h;
+
+	r.x = x0;
+	r.y = y0;
+	r.w = x1 > x0 ? x1 - x0 : 0;
+	r.h = y1 > y0 ? y1 - y0 : 0;
+
+	return r;
+}
+
 typedef enum {
 	BARNY_POS_LEFT,
 	BARNY_POS_CENTER,
@@ -247,17 +307,13 @@ struct barny_output {
 
 	/* rect the droplet dirtied last frame; the next frame restores just
 	   that strip from bg_cache instead of repainting the whole bar */
-	int                           lens_dmg_x;
-	int                           lens_dmg_y;
-	int                           lens_dmg_w;
-	int                           lens_dmg_h;
+	barny_rect_t                  lens_dmg;
 	bool                          lens_dmg_valid;
 
-	/* while set, modules that fall outside [clip_x0, clip_x1) skip their
-	   render entirely (a lens frame must not re-shape text it cannot show) */
+	/* while set, modules that fall outside clip skip their render
+	   entirely (a lens frame must not re-shape text it cannot show) */
 	bool                          render_clipped;
-	int                           clip_x0;
-	int                           clip_x1;
+	barny_rect_t                  clip;
 
 	barny_state_t                *state;
 	struct barny_output          *next;
