@@ -538,6 +538,42 @@ test_config_load(void)
 		cleanup_temp_config(path);
 	}
 
+	TEST("parses glass_prism")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism = 0.4\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_DBL(0.4, config.glass_prism, 0.001);
+		cleanup_temp_config(path);
+	}
+
+	TEST("glass_prism above 1 clamps to 1")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism = 2.5\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_DBL(1.0, config.glass_prism, 0.0);
+		cleanup_temp_config(path);
+	}
+
+	TEST("negative glass_prism clamps to 0")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism = -0.5\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_DBL(0.0, config.glass_prism, 0.0);
+		cleanup_temp_config(path);
+	}
+
 	TEST("parses noise_octaves")
 	{
 		barny_config_t config;

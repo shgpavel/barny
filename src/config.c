@@ -455,7 +455,12 @@ parse_line(barny_config_t *config, const char *key, const char *value)
 	} else if (strcmp(key, "glass_bulge") == 0) {
 		config->glass_bulge = atof(value);
 	} else if (strcmp(key, "glass_prism") == 0) {
-		config->glass_prism = atof(value);
+		double v = atof(value);
+		if (v < 0.0)
+			v = 0.0;
+		if (v > 1.0)
+			v = 1.0;
+		config->glass_prism = v;
 	} else if (strcmp(key, "popup_animations") == 0) {
 		config->popup_animations = parse_bool(value);
 
