@@ -932,9 +932,9 @@ barny_output_free_lens_cache(barny_output_t *output)
    ARGB patch. Coverage comes from the deformed distance field: the bar slab is
    pinched toward the droplet (surface tension) and smooth-unioned with the
    pill, so the bar silhouette really recedes around the lens. The interior
-   refracts the clean bar strip (glass_clean); the frame highlight, bottom
-   shadow band and spectral rim are re-derived along the deformed contour; the
-   drop shadow (shadow_cache) shows through wherever the silhouette vacates.
+   refracts the clean bar strip (glass_clean); the frame highlight and spectral
+   rim are re-derived along the deformed contour; the drop shadow
+   (shadow_cache) shows through wherever the silhouette vacates.
    In authoritative mode the patch replaces the cached bar pixels wholesale
    (painted with SOURCE); otherwise it is a plain overlay for the
    squircle-corner zones the analytic field cannot reproduce.

@@ -22,7 +22,6 @@
    barny_draw_glass_frame (glass.c). */
 #define BARNY_FRAME_EDGE_TOP_A    0.08
 #define BARNY_FRAME_EDGE_TOP_STOP 0.14
-#define BARNY_FRAME_EDGE_BOT_A    0.0
 
 typedef struct barny_config barny_config_t;
 typedef struct barny_state  barny_state_t;

@@ -103,7 +103,6 @@ void
 barny_draw_glass_frame(cairo_t *cr, double w, double h, double r)
 {
 	cairo_pattern_t *p;
-	double           shadow_h = h * 0.28 > 10 ? 10 : h * 0.28;
 
 	cairo_save(cr);
 	barny_rounded_rect_path(cr, 0, 0, w, h, r);
@@ -121,14 +120,6 @@ barny_draw_glass_frame(cairo_t *cr, double w, double h, double r)
 	p = cairo_pattern_create_linear(0, 0, w * 0.55, h);
 	cairo_pattern_add_color_stop_rgba(p, 0.0, 1, 1, 1, 0.10);
 	cairo_pattern_add_color_stop_rgba(p, 0.4, 1, 1, 1, 0.0);
-	cairo_set_source(cr, p);
-	cairo_paint(cr);
-	cairo_pattern_destroy(p);
-
-	p = cairo_pattern_create_linear(0, h - shadow_h, 0, h);
-	cairo_pattern_add_color_stop_rgba(p, 0.0, 0, 0, 0, 0.0);
-	cairo_pattern_add_color_stop_rgba(p, 1.0, 0, 0, 0,
-	                                  BARNY_FRAME_EDGE_BOT_A);
 	cairo_set_source(cr, p);
 	cairo_paint(cr);
 	cairo_pattern_destroy(p);

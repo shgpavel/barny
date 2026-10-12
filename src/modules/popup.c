@@ -314,7 +314,6 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 	double           disp   = POPUP_REFRACT * inv;
 	double           chroma = POPUP_CHROMA * inv;
 	double           edge_h = BARNY_FRAME_EDGE_TOP_STOP * 2.0 * hh;
-	double           shad_h = fmin(10.0, 0.28 * 2.0 * hh);
 	double           ca;
 	cairo_surface_t *patch;
 	uint8_t         *gdata;
@@ -369,9 +368,7 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 			double  fb;
 			double  fa;
 			double  wtop  = 0.0;
-			double  wbot  = 0.0;
 			double  atop  = 0.0;
-			double  abot  = 0.0;
 			double  aw;
 			double  veil;
 			double  ri;
@@ -473,13 +470,9 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 			}
 
 			wtop = nny < 0.0 ? -nny : 0.0;
-			wbot = nny > 0.0 ? nny : 0.0;
 			if (depth < edge_h && edge_h > 0.0)
 				atop = BARNY_FRAME_EDGE_TOP_A
 				       * (1.0 - depth / edge_h) * wtop;
-			if (depth < shad_h && shad_h > 0.0)
-				abot = BARNY_FRAME_EDGE_BOT_A
-				       * (1.0 - depth / shad_h) * wbot;
 
 			veil = depth / POPUP_VEIL_FADE;
 			if (veil < 0.0)
@@ -524,9 +517,6 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
 			fr  = fr * (1.0 - aw) + 255.0 * aw;
 			fg  = fg * (1.0 - aw) + 255.0 * aw;
 			fb  = fb * (1.0 - aw) + 255.0 * aw;
-			fr *= 1.0 - abot;
-			fg *= 1.0 - abot;
-			fb *= 1.0 - abot;
 			fr += (rim * (1.0 - POPUP_RIM_CHROMA * ty) + spec
 			       + cntr * 0.85)
 			      * 255.0;
