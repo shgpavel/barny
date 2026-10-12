@@ -57,7 +57,7 @@ test_module_layout_basics(void)
 		ASSERT_FALSE(barny_module_catalog_has("not_real"));
 	}
 
-	TEST("default layout matches legacy arrangement")
+	TEST("default layout: workspace, title, clock to battery")
 	{
 		barny_module_layout_t layout;
 

@@ -39,6 +39,12 @@ extern void
 test_spring_step(void);
 extern void
 test_shm_create(void);
+extern void
+test_lens_advance(void);
+extern void
+test_glass_panel_advance(void);
+extern void
+test_menu_bead_advance(void);
 
 extern void
 test_module_register(void);
@@ -92,6 +98,9 @@ RUN_SUITE(test_shm_create);
 
 printf("\n--- Liquid Glass Effect Tests ---\n");
 RUN_SUITE(test_spring_step);
+RUN_SUITE(test_lens_advance);
+RUN_SUITE(test_glass_panel_advance);
+RUN_SUITE(test_menu_bead_advance);
 RUN_SUITE(test_perlin_math);
 RUN_SUITE(test_perlin_noise);
 RUN_SUITE(test_perlin_fbm);

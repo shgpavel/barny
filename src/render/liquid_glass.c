@@ -20,7 +20,7 @@
 #define BAR_LENS_DISP  17.0
 #define BAR_LENS_CHROMA 8.0
 
-#define BUBBLE_W       172.0
+#define LENS_W         172.0
 
 #define BULGE_NECK      16     /* horizontal patch margin for neck fillets */
 #define BULGE_SMIN      9.0    /* metaball neck fillet scale (surface tension) */
@@ -2233,29 +2233,20 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 	return dst;
 }
 
-/* Advance the lens springs by one frame. The pill position chases the
+/* Advance the lens springs by dt seconds. The pill position chases the
    pointer with an underdamped spring (droplet inertia); the pop scale
    grows/dissolves the droplet on bar enter/leave. Returns true while the
    springs are still in motion, so the caller keeps the frame loop alive. */
 bool
-barny_lens_step(barny_output_t *output)
+barny_lens_advance(barny_output_t *output, double dt)
 {
 	barny_state_t *state = output->state;
-	uint64_t       now;
-	double         dt;
 	double         tx;
 	double         bmin;
 	double         bmax;
 
-	if (!state->config.dynamic_glass || output != state->dyn_output
-	    || !state->lens_animating)
-		return false;
-
-	now                 = barny_now_us();
-	dt                  = (double)(now - state->lens_prev_us) / 1000000.0;
-	state->lens_prev_us = now;
-	bmin = output->pad_left + BUBBLE_W / 2.0;
-	bmax = output->pad_left + output->width - BUBBLE_W / 2.0;
+	bmin = output->pad_left + LENS_W / 2.0;
+	bmax = output->pad_left + output->width - LENS_W / 2.0;
 	if (bmax < bmin)
 		bmax = bmin;
 
@@ -2289,6 +2280,24 @@ barny_lens_step(barny_output_t *output)
 	}
 
 	return state->lens_animating;
+}
+
+bool
+barny_lens_step(barny_output_t *output)
+{
+	barny_state_t *state = output->state;
+	uint64_t       now;
+	double         dt;
+
+	if (!state->config.dynamic_glass || output != state->dyn_output
+	    || !state->lens_animating)
+		return false;
+
+	now                 = barny_now_us();
+	dt                  = (double)(now - state->lens_prev_us) / 1000000.0;
+	state->lens_prev_us = now;
+
+	return barny_lens_advance(output, dt);
 }
 
 /* Everything the droplet's placement implies for this frame. Both the renderer
@@ -2329,7 +2338,7 @@ lens_geom(barny_output_t *output, lens_geom_t *g)
 
 	over       = state->config.position_top ? output->pad_top
 	                                        : output->pad_bottom;
-	bw         = BUBBLE_W;
+	bw         = LENS_W;
 	bh         = ch + 2 * over;
 	stretch    = 1.0
 	             + fmin(LENS_STRETCH_GAIN * fabs(state->lens_vx),

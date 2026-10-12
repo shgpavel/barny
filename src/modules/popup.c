@@ -1120,18 +1120,13 @@ barny_glass_panel_rest_content(cairo_t *cr, const barny_state_t *state,
 /* One spring drives every panel's open and close morph. The analytic step keeps
    its curve stable across refresh rates and compositor hitches. */
 bool
-barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
-                       bool closing)
+barny_glass_panel_advance(double *morph, double *vel, bool closing, double dt)
 {
-	uint64_t now    = barny_now_us();
-	double   dt     = (double)(now - *last_us) / 1000000.0;
-	double   target = closing ? 0.0 : 1.0;
-	double   k      = closing ? POPUP_MORPH_K_CLOSE : POPUP_MORPH_K_OPEN;
-	double   z      = closing ? POPUP_MORPH_ZETA_CLOSE
-	                          : POPUP_MORPH_ZETA_OPEN;
-	bool     settled;
+	double target = closing ? 0.0 : 1.0;
+	double k      = closing ? POPUP_MORPH_K_CLOSE : POPUP_MORPH_K_OPEN;
+	double z      = closing ? POPUP_MORPH_ZETA_CLOSE : POPUP_MORPH_ZETA_OPEN;
+	bool   settled;
 
-	*last_us = now;
 	barny_spring_step(morph, vel, target, k, z, dt);
 
 	/* Retire the spring's exponential tail: below this the panel is still
@@ -1144,6 +1139,17 @@ barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
 	}
 
 	return settled;
+}
+
+bool
+barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
+                       bool closing)
+{
+	uint64_t now = barny_now_us();
+	double   dt  = (double)(now - *last_us) / 1000000.0;
+
+	*last_us = now;
+	return barny_glass_panel_advance(morph, vel, closing, dt);
 }
 
 static cairo_surface_t *

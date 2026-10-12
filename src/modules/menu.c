@@ -580,17 +580,14 @@ menu_body_y(const barny_menu_t *m)
 /* Advance the bead. It chases the hovered row or tray cell with an underdamped
    spring and pops open when an item first takes it; true while in motion. */
 static bool
-menu_bead_step(barny_menu_t *m)
+menu_bead_advance(barny_menu_t *m, double dt)
 {
-	double   tx    = m->bead_x;
-	double   ty    = m->bead_y;
-	double   thw   = m->bead_hw;
-	double   thh   = m->bead_hh;
-	double   ts    = 0.0;
-	uint64_t now   = barny_now_us();
-	double   dt    = (double)(now - m->bead_us) / 1000000.0;
+	double tx  = m->bead_x;
+	double ty  = m->bead_y;
+	double thw = m->bead_hw;
+	double thh = m->bead_hh;
+	double ts  = 0.0;
 
-	m->bead_us = now;
 	if (m->kind == MENU_KIND_TRAY && m->hover >= 0
 	    && m->hover < m->tray_count) {
 		int col = m->hover % m->tray_columns;
@@ -661,6 +658,16 @@ menu_bead_step(barny_menu_t *m)
 	}
 
 	return true;
+}
+
+static bool
+menu_bead_step(barny_menu_t *m)
+{
+	uint64_t now = barny_now_us();
+	double   dt  = (double)(now - m->bead_us) / 1000000.0;
+
+	m->bead_us = now;
+	return menu_bead_advance(m, dt);
 }
 
 static bool

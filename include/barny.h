@@ -398,6 +398,8 @@ barny_render_frame(barny_output_t *output);
 void
 barny_render_liquid_glass(barny_output_t *output, cairo_t *cr);
 bool
+barny_lens_advance(barny_output_t *output, double dt);
+bool
 barny_lens_step(barny_output_t *output);
 /* rect the droplet covers this frame; false when it is not drawn */
 bool

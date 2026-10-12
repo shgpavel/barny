@@ -3,6 +3,7 @@ test_sources = files(
     'test_config.c',
     'test_liquid_glass.c',
     'test_main.c',
+    'test_menu_bead.c',
     'test_modules.c',
     'test_module_layout.c',
     'test_new_modules.c',

@@ -47,6 +47,8 @@ barny_glass_panel_glass_y(const barny_config_t *cfg, int bar_h, int panel_h);
 
 /* advance the open/close spring; true once the morph has settled */
 bool
+barny_glass_panel_advance(double *morph, double *vel, bool closing, double dt);
+bool
 barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
                        bool closing);
 
