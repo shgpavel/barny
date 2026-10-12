@@ -1519,6 +1519,20 @@ typedef struct {
 	int      h;
 } lens_src_t;
 
+typedef struct {
+	float  key[5];
+	bool   valid;
+	double nnx;
+	double nny;
+	double dispx;
+	double dispy;
+	double cs;
+	double veil;
+	double rim;
+	double spec;
+	double cntr;
+} lens_shape_t;
+
 static bool
 lens_src(cairo_surface_t *surface, lens_src_t *src)
 {
@@ -1660,11 +1674,9 @@ lens_top_light(const float *df, int gi, int gw, double depth, double edge_h,
 }
 
 static inline void
-droplet_shade(double dd, double facing, double atop, double ty,
-              double strength, double spec_g, double *fr, double *fg,
-              double *fb)
+droplet_terms(double dd, double facing, double strength, double spec_g,
+              lens_shape_t *m)
 {
-	double aw;
 	double veil;
 	double ri;
 	double core;
@@ -1681,7 +1693,6 @@ droplet_shade(double dd, double facing, double atop, double ty,
 	if (veil > 1.0)
 		veil = 1.0;
 	veil *= BULGE_VEIL * strength;
-	aw    = veil + atop - veil * atop;
 
 	/* crisp bright rim tracing the droplet, lit from the key light instead
 	   of a uniform ring */
@@ -1710,7 +1721,90 @@ droplet_shade(double dd, double facing, double atop, double ty,
 			       * glass_pow10(-facing);
 	}
 
-	glass_tint(fr, fg, fb, aw, rim, ty, spec, cntr);
+	m->veil = veil;
+	m->rim  = rim;
+	m->spec = spec;
+	m->cntr = cntr;
+}
+
+static inline void
+lens_shape(const float *ddf, int gi, int gw, double hh, double inv_hh,
+           double disp, double chroma, double strength, double spec_g,
+           lens_shape_t *m)
+{
+	double dd     = ddf[gi];
+	double nnx    = 0.0;
+	double nny    = 0.0;
+	double pedge  = 0.0;
+	double dispx  = 0.0;
+	double dispy  = 0.0;
+	double facing = 0.0;
+	double cs     = 0.0;
+
+	if (m->valid && ddf[gi] == m->key[0] && ddf[gi - 1] == m->key[1]
+	    && ddf[gi + 1] == m->key[2] && ddf[gi - gw] == m->key[3]
+	    && ddf[gi + gw] == m->key[4])
+		return;
+
+	/* Plano-convex lens: sample the strip pulled inward along the
+	   droplet normal. The interior magnifies; the rim compresses the
+	   background into a bright refractive ring. Offset -> 0 at the
+	   outline, so the bubble blends seamlessly into the bar.
+
+	   Past BULGE_CORE_W outside the pill the normal has no consumer
+	   left -- refraction and dispersion are zero there, and both rim
+	   terms have faded -- so the gradient and its sqrt are skipped for
+	   the whole bar stretch of the patch. */
+	if (dd < BULGE_CORE_W) {
+		double nx   = ddf[gi + 1] - ddf[gi - 1];
+		double ny   = ddf[gi + gw] - ddf[gi - gw];
+		double nlen = sqrt(nx * nx + ny * ny);
+
+		if (nlen > 1e-6) {
+			nnx = nx / nlen;
+			nny = ny / nlen;
+		}
+
+		if (dd < 0.0) {
+			double ddep = -dd;
+			double zone = hh;
+			double p    = zone > 0.0 ? ddep * inv_hh : 1.0;
+			double srcoff;
+
+			if (p > 1.0)
+				p = 1.0;
+			srcoff = glass_dome(p, zone) * disp
+			         + BULGE_BIAS * (1.0 - p);
+			dispx  = -nnx * srcoff;
+			dispy  = -nny * srcoff;
+			pedge  = (1.0 - p) * (1.0 - p);
+		}
+
+		facing = nnx * GLASS_SPEC_LX + nny * GLASS_SPEC_LY;
+		cs     = chroma * pedge;
+	}
+
+	m->key[0] = ddf[gi];
+	m->key[1] = ddf[gi - 1];
+	m->key[2] = ddf[gi + 1];
+	m->key[3] = ddf[gi - gw];
+	m->key[4] = ddf[gi + gw];
+	m->valid  = true;
+	m->nnx    = nnx;
+	m->nny    = nny;
+	m->dispx  = dispx;
+	m->dispy  = dispy;
+	m->cs     = cs;
+	droplet_terms(dd, facing, strength, spec_g, m);
+}
+
+static inline void
+droplet_shade(const lens_shape_t *m, double atop, double ty, double *fr,
+              double *fg, double *fb)
+{
+	double aw = m->veil + atop - m->veil * atop;
+
+	glass_tint(fr, fg, fb, aw, m->rim, ty, m->spec, m->cntr);
 }
 
 static inline double
@@ -1780,6 +1874,7 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 	lens_src_t       hsrc;
 	lens_src_t       bsrc;
 	lens_src_t       dsrc;
+	lens_shape_t     shape;
 	float           *df;
 	float           *ddf;
 	double          *pinch;
@@ -1810,8 +1905,9 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 	    || !lens_src(output->bg_cache, &bsrc))
 		return NULL;
 
-	inv_hh     = hh > 0.0 ? 1.0 / hh : 0.0;
-	inv_edge_h = edge_h > 0.0 ? 1.0 / edge_h : 0.0;
+	inv_hh      = hh > 0.0 ? 1.0 / hh : 0.0;
+	inv_edge_h  = edge_h > 0.0 ? 1.0 / edge_h : 0.0;
+	shape.valid = false;
 
 	prmb  = prm;
 	if (output->rim) {
@@ -1885,16 +1981,9 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 			cpr = cpg = cpb = 0.0;
 			ap  = 0.0;
 			if (aa > 0.0) {
-				double nnx    = 0.0;
-				double nny    = 0.0;
-				double pedge  = 0.0;
-				double dispx  = 0.0;
-				double dispy  = 0.0;
-				double gx     = (double)sx - cx;
-				double gy     = y;
-				double depth  = -d;
-				double facing = 0.0;
-				double cs     = 0.0;
+				double gx    = (double)sx - cx;
+				double gy    = y;
+				double depth = -d;
 				double fr;
 				double fg;
 				double fb;
@@ -1902,57 +1991,13 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 				double atop;
 				double ty;
 
-				/* Plano-convex lens: sample the strip pulled
-				   inward along the droplet normal. The interior
-				   magnifies; the rim compresses the background
-				   into a bright refractive ring. Offset -> 0 at
-				   the outline, so the bubble blends seamlessly
-				   into the bar.
-
-				   Past BULGE_CORE_W outside the pill the normal
-				   has no consumer left -- refraction and
-				   dispersion are zero there, and both rim terms
-				   have faded -- so the gradient and its sqrt are
-				   skipped for the whole bar stretch of the
-				   patch. */
-				if (dd < BULGE_CORE_W) {
-					double nx   = ddf[gi + 1] - ddf[gi - 1];
-					double ny   = ddf[gi + gw] - ddf[gi - gw];
-					double nlen = sqrt(nx * nx + ny * ny);
-
-					if (nlen > 1e-6) {
-						nnx = nx / nlen;
-						nny = ny / nlen;
-					}
-
-					if (dd < 0.0) {
-						double ddep = -dd;
-						double zone = hh;
-						double p    = zone > 0.0
-						                      ? ddep * inv_hh
-						                      : 1.0;
-						double srcoff;
-
-						if (p > 1.0)
-							p = 1.0;
-						srcoff = glass_dome(p, zone)
-						         * disp
-						         + BULGE_BIAS
-						                   * (1.0 - p);
-						dispx  = -nnx * srcoff;
-						dispy  = -nny * srcoff;
-						pedge  = (1.0 - p) * (1.0 - p);
-					}
-
-					facing = nnx * GLASS_SPEC_LX
-					         + nny * GLASS_SPEC_LY;
-					cs     = chroma * pedge;
-				}
+				lens_shape(ddf, gi, gw, hh, inv_hh, disp, chroma,
+				           strength, spec_g, &shape);
 
 				lens_refract(gsrc.data, gsrc.stride, gsrc.w,
-				             gsrc.h, opaque, gx + dispx,
-				             gy + dispy, nnx, nny, cs, &fr, &fg,
-				             &fb, &fa);
+				             gsrc.h, opaque, gx + shape.dispx,
+				             gy + shape.dispy, shape.nnx, shape.nny,
+				             shape.cs, &fr, &fg, &fb, &fa);
 
 				atop = lens_top_light(df, gi, gw, depth, edge_h,
 				                      inv_edge_h);
@@ -1963,8 +2008,7 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 				if (ty > 1.0)
 					ty = 1.0;
 
-				droplet_shade(dd, facing, atop, ty, strength,
-				              spec_g, &fr, &fg, &fb);
+				droplet_shade(&shape, atop, ty, &fr, &fg, &fb);
 
 				ap  = fa * aa;
 				cpr = fr * ap;
