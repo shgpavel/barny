@@ -37,6 +37,8 @@ extern void
 test_lens_map_lifetime(void);
 extern void
 test_spring_step(void);
+extern void
+test_shm_create(void);
 
 extern void
 test_module_register(void);
@@ -86,6 +88,7 @@ printf("\n--- Configuration Tests ---\n");
 RUN_SUITE(test_config_defaults);
 RUN_SUITE(test_config_load);
 RUN_SUITE(test_config_edge_cases);
+RUN_SUITE(test_shm_create);
 
 printf("\n--- Liquid Glass Effect Tests ---\n");
 RUN_SUITE(test_spring_step);

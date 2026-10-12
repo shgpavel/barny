@@ -6,6 +6,7 @@ test_sources = files(
     'test_modules.c',
     'test_module_layout.c',
     'test_new_modules.c',
+    'test_shm.c',
     'test_stubs.c',
 )
 

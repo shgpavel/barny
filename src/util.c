@@ -1,11 +1,15 @@
+#define _GNU_SOURCE
 #include "util.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <sys/mman.h>
 
 char *
 barny_trim(char *s)
@@ -226,4 +230,29 @@ barny_format_bytes(char *buf, size_t buflen, unsigned long long bytes,
 		mb = bytes / (1024.0 * 1024.0);
 		snprintf(buf, buflen, "%.*f%sM", prec, mb, sp);
 	}
+}
+
+int
+barny_shm_create(size_t size)
+{
+	int fd;
+	int rc;
+
+	if ((off_t)size < 0)
+		return -1;
+
+	fd = memfd_create("barny", MFD_CLOEXEC);
+	if (fd < 0)
+		return -1;
+
+	do {
+		rc = ftruncate(fd, (off_t)size);
+	} while (rc < 0 && errno == EINTR);
+
+	if (rc < 0) {
+		close(fd);
+		return -1;
+	}
+
+	return fd;
 }

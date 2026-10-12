@@ -425,36 +425,6 @@ menu_panel(const barny_menu_t *m, barny_glass_panel_t *panel)
 	panel->position_top = cfg->position_top;
 }
 
-static int
-menu_create_shm(int size)
-{
-	static unsigned counter = 0;
-	char            name[64];
-	struct timespec ts;
-	int             fd;
-
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
-		ts.tv_sec  = 0;
-		ts.tv_nsec = 0;
-	}
-
-	snprintf(name, sizeof(name), "/barny-menu-%d-%u-%lu", (int)getpid(),
-	         (unsigned)counter++, (unsigned long)ts.tv_nsec);
-
-	fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
-	if (fd < 0)
-		return -1;
-
-	if (ftruncate(fd, size) < 0) {
-		shm_unlink(name);
-		close(fd);
-		return -1;
-	}
-
-	shm_unlink(name);
-	return fd;
-}
-
 static void
 menu_draw_label(barny_menu_t *m, cairo_t *cr, PangoLayout *layout,
                 const char *text, int x, int y, int row_h, double alpha)
@@ -953,7 +923,7 @@ menu_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 	stride = pw * 4;
 	size   = stride * ph;
 
-	fd     = menu_create_shm(size);
+	fd     = barny_shm_create((size_t)size);
 	if (fd < 0)
 		return;
 

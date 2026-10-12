@@ -3,10 +3,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <fcntl.h>
 #include <errno.h>
 
 #include "barny.h"
+#include "util.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 #define BAR_SHADOW_INNER 28
@@ -90,24 +90,6 @@ frame_done(void *data, struct wl_callback *callback, uint32_t callback_time)
 static const struct wl_callback_listener frame_listener = {
 	.done = frame_done,
 };
-
-static int
-create_shm_file(size_t size)
-{
-	char name[] = "/barny-XXXXXX";
-	int  fd     = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
-	if (fd < 0) {
-		return -1;
-	}
-	shm_unlink(name);
-
-	if (ftruncate(fd, size) < 0) {
-		close(fd);
-		return -1;
-	}
-
-	return fd;
-}
 
 int
 barny_output_create_surface(barny_output_t *output)
@@ -212,6 +194,7 @@ output_free_buffer(barny_output_t *output)
 		munmap(output->shm_data, output->shm_size);
 		output->shm_data = NULL;
 	}
+	output->shm_size = 0;
 }
 
 void
@@ -246,7 +229,7 @@ barny_output_create_buffer(barny_output_t *output)
 	output_free_buffer(output);
 	barny_output_free_glass_caches(output, true);
 
-	fd = create_shm_file(size);
+	fd = barny_shm_create((size_t)size);
 	if (fd < 0) {
 		fprintf(stderr, "barny: failed to create shm file\n");
 		return -1;

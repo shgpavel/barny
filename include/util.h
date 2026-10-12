@@ -31,4 +31,7 @@ void
 barny_format_bytes(char *buf, size_t buflen, unsigned long long bytes,
                    int decimals, bool unit_space);
 
+int
+barny_shm_create(size_t size);
+
 #endif
