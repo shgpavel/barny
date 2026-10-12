@@ -426,21 +426,21 @@ panel_morph_fill(cairo_surface_t *patch, cairo_surface_t *bg,
 				double cs = chroma * pedge;
 
 				barny_sample_bilinear(gdata, gstride, gsw, gsh,
-				                      lx + dispx - nnx * cs,
-				                      ly + dispy - nny * cs, p1);
+				                      x + dispx - nnx * cs,
+				                      y + dispy - nny * cs, p1);
 				barny_sample_bilinear(gdata, gstride, gsw, gsh,
-				                      lx + dispx, ly + dispy,
+				                      x + dispx, y + dispy,
 				                      p2);
 				barny_sample_bilinear(gdata, gstride, gsw, gsh,
-				                      lx + dispx + nnx * cs,
-				                      ly + dispy + nny * cs, p3);
+				                      x + dispx + nnx * cs,
+				                      y + dispy + nny * cs, p3);
 				fb = p3[3] > 0 ? p3[0] * 255.0 / p3[3] : 0.0;
 				fg = p2[3] > 0 ? p2[1] * 255.0 / p2[3] : 0.0;
 				fr = p1[3] > 0 ? p1[2] * 255.0 / p1[3] : 0.0;
 				fa = p2[3] / 255.0;
 			} else {
 				barny_sample_bilinear(gdata, gstride, gsw, gsh,
-				                      lx + dispx, ly + dispy,
+				                      x + dispx, y + dispy,
 				                      p2);
 				fb = p2[3] > 0 ? p2[0] * 255.0 / p2[3] : 0.0;
 				fg = p2[3] > 0 ? p2[1] * 255.0 / p2[3] : 0.0;
@@ -741,13 +741,13 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			cs     = BUBBLE_CHROMA * pedge;
 
 			barny_sample_bilinear(sdata, sstride, sw, sh,
-			                      lx + dispx - nnx * cs,
-			                      ly + dispy - nny * cs, s1);
-			barny_sample_bilinear(sdata, sstride, sw, sh, lx + dispx,
-			                      ly + dispy, s2);
+			                      x0 + x + dispx - nnx * cs,
+			                      y0 + y + dispy - nny * cs, s1);
 			barny_sample_bilinear(sdata, sstride, sw, sh,
-			                      lx + dispx + nnx * cs,
-			                      ly + dispy + nny * cs, s3);
+			                      x0 + x + dispx, y0 + y + dispy, s2);
+			barny_sample_bilinear(sdata, sstride, sw, sh,
+			                      x0 + x + dispx + nnx * cs,
+			                      y0 + y + dispy + nny * cs, s3);
 			fb = s3[3] > 0 ? s3[0] * 255.0 / s3[3] : 0.0;
 			fg = s2[3] > 0 ? s2[1] * 255.0 / s2[3] : 0.0;
 			fr = s1[3] > 0 ? s1[2] * 255.0 / s1[3] : 0.0;
