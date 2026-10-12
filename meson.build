@@ -27,6 +27,15 @@ if cc.get_id() == 'clang' and cc.has_argument('-Wno-c2y-extensions')
     add_project_arguments('-Wno-c2y-extensions', language: 'c')
 endif
 
+# The golden render hashes pin every pixel. Fusing a*b+c into one FMA
+# rounds once instead of twice, so any target with FMA would drift them.
+add_project_arguments('-ffp-contract=off', language: 'c')
+
+if get_option('cpu_level') == 'x86-64-v3'
+    add_project_arguments('-march=x86-64-v3', language: 'c')
+    add_project_link_arguments('-march=x86-64-v3', language: 'c')
+endif
+
 if cc.get_id() != preferred_compiler
     error(
         'Compiler mismatch: -Dcompiler=' + preferred_compiler + ' but Meson detected "' + cc.get_id() +
