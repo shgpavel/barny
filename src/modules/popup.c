@@ -36,7 +36,6 @@
 #define POPUP_SPEC_LX    (-0.30)
 #define POPUP_SPEC_LY    (-0.954)
 #define POPUP_SPEC_W     7.0
-#define POPUP_SPEC_P     10 /* see popup_spec_pow */
 #define POPUP_SPEC_GAIN  0.55
 #define POPUP_CONTENT_IN 0.68 /* panel forms before the data condenses in */
 
@@ -201,8 +200,8 @@ popup_build_content(barny_popup_t *p)
 	cairo_destroy(cc);
 }
 
-/* facing^POPUP_SPEC_P by squaring: the specular runs on every rim pixel of
-   every frame, and libm's pow dominated the morph's inner loop. */
+/* facing^10 by squaring: the specular runs on every rim pixel of every frame,
+   and libm's pow dominated the morph's inner loop. */
 static double
 popup_spec_pow(double x)
 {

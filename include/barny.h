@@ -451,8 +451,6 @@ barny_sample_bilinear(uint8_t *data, int stride, int width, int height,
 void
 barny_blur_surface(cairo_surface_t *surface, int radius);
 void
-barny_apply_brightness(cairo_surface_t *surface, double factor);
-void
 barny_apply_vibrancy(cairo_surface_t *surface, double saturation,
                      double brightness);
 cairo_surface_t *

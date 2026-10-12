@@ -286,6 +286,8 @@ main(int argc, char *argv[])
 					        state.displacement_map,
 					        state.config.displacement_scale,
 					        state.config.chromatic_aberration);
+					cairo_surface_destroy(state.displacement_map);
+					state.displacement_map = NULL;
 					printf("barny: liquid glass effect applied (mode=%s, scale=%.1f, chromatic=%.1f)\n",
 					       state.config.refraction_mode
 					                       == BARNY_REFRACT_LENS ?
@@ -295,6 +297,9 @@ main(int argc, char *argv[])
 					       state.config.chromatic_aberration);
 				}
 			}
+
+			cairo_surface_destroy(state.wallpaper);
+			state.wallpaper = NULL;
 		}
 	}
 
@@ -327,17 +332,11 @@ main(int argc, char *argv[])
 	barny_sway_ipc_cleanup(&state);
 	barny_wayland_cleanup(&state);
 
-	if (state.wallpaper) {
-		cairo_surface_destroy(state.wallpaper);
-	}
 	if (state.blurred_wallpaper) {
 		cairo_surface_destroy(state.blurred_wallpaper);
 	}
 	if (state.displaced_wallpaper) {
 		cairo_surface_destroy(state.displaced_wallpaper);
-	}
-	if (state.displacement_map) {
-		cairo_surface_destroy(state.displacement_map);
 	}
 	if (state.epoll_fd >= 0) {
 		close(state.epoll_fd);

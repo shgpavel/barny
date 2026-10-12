@@ -18,8 +18,6 @@ test_displacement_map(void);
 extern void
 test_blur_surface(void);
 extern void
-test_brightness(void);
-extern void
 test_apply_displacement(void);
 extern void
 test_file_extension(void);
@@ -88,7 +86,6 @@ RUN_SUITE(test_perlin_noise);
 RUN_SUITE(test_perlin_fbm);
 RUN_SUITE(test_displacement_map);
 RUN_SUITE(test_blur_surface);
-RUN_SUITE(test_brightness);
 RUN_SUITE(test_apply_displacement);
 RUN_SUITE(test_file_extension);
 RUN_SUITE(test_lens_channel_tap);

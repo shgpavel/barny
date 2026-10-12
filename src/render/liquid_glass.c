@@ -57,7 +57,6 @@
 #define SPEC_LX      (-0.30)
 #define SPEC_LY      (-0.954)
 #define SPEC_W       7.0   /* px band the specular hugs inside the rim */
-#define SPEC_P       10.0  /* highlight tightness */
 #define SPEC_GAIN    2.4   /* glass_gleam multiplier */
 #define SPEC_COUNTER 0.22  /* strength of the cool counter-arc */
 
@@ -242,47 +241,6 @@ barny_blur_surface(cairo_surface_t *surface, int radius)
 	free(col_out);
 	free(temp);
 	free(stack);
-
-	cairo_surface_mark_dirty(surface);
-}
-
-void
-barny_apply_brightness(cairo_surface_t *surface, double factor)
-{
-	int      width;
-	int      height;
-	int      stride;
-	uint8_t *data;
-	uint8_t *row;
-	int      x;
-	int      y;
-	int      b;
-	int      g;
-	int      r;
-
-	cairo_surface_flush(surface);
-
-	width  = cairo_image_surface_get_width(surface);
-	height = cairo_image_surface_get_height(surface);
-	stride = cairo_image_surface_get_stride(surface);
-	data   = cairo_image_surface_get_data(surface);
-
-	for (y = 0; y < height; y++) {
-		row = data + y * stride;
-		for (x = 0; x < width; x++) {
-			b              = row[x * 4 + 0];
-			g              = row[x * 4 + 1];
-			r              = row[x * 4 + 2];
-
-			b              = (int)(b * factor);
-			g              = (int)(g * factor);
-			r              = (int)(r * factor);
-
-			row[x * 4 + 0] = b > 255 ? 255 : b;
-			row[x * 4 + 1] = g > 255 ? 255 : g;
-			row[x * 4 + 2] = r > 255 ? 255 : r;
-		}
-	}
 
 	cairo_surface_mark_dirty(surface);
 }
@@ -752,9 +710,8 @@ barny_create_edge_lens_map(int w, int h, int radius, double edge_w,
 	return surface;
 }
 
-/* x^10, the SPEC_P specular exponent, without a libm call: pow() ran on every
-   lit pixel of the droplet rim for an exponent fixed at compile time. Keep the
-   multiply chain in sync with SPEC_P. */
+/* x^10, the specular exponent, without a libm call: pow() ran on every lit
+   pixel of the droplet rim for an exponent fixed at compile time. */
 static inline double
 spec_pow(double x)
 {
@@ -1990,12 +1947,13 @@ has_extension(const char *path, const char *ext)
 {
 	size_t      path_len = strlen(path);
 	size_t      ext_len  = strlen(ext);
-	const char *path_ext = path + path_len - ext_len;
+	const char *path_ext;
 	size_t      i;
 
 	if (path_len < ext_len)
 		return 0;
 
+	path_ext = path + path_len - ext_len;
 	for (i = 0; i < ext_len; i++) {
 		if (tolower((unsigned char)path_ext[i])
 		    != tolower((unsigned char)ext[i])) {
