@@ -22,7 +22,7 @@
    barny_draw_glass_frame (glass.c). */
 #define BARNY_FRAME_EDGE_TOP_A    0.08
 #define BARNY_FRAME_EDGE_TOP_STOP 0.14
-#define BARNY_FRAME_EDGE_BOT_A    0.16
+#define BARNY_FRAME_EDGE_BOT_A    0.0
 
 typedef struct barny_config barny_config_t;
 typedef struct barny_state  barny_state_t;
@@ -235,6 +235,7 @@ struct barny_output {
 	cairo_surface_t              *lens_map;
 	cairo_surface_t              *shadow_cache;
 	cairo_surface_t              *glass_clean;
+	bool                          glass_clean_opaque;
 
 	/* droplet scratch, reused across frames: the patch geometry is fixed
 	   for a given bar, so allocating a surface and the distance-field

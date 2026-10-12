@@ -127,7 +127,8 @@ barny_draw_glass_frame(cairo_t *cr, double w, double h, double r)
 
 	p = cairo_pattern_create_linear(0, h - shadow_h, 0, h);
 	cairo_pattern_add_color_stop_rgba(p, 0.0, 0, 0, 0, 0.0);
-	cairo_pattern_add_color_stop_rgba(p, 1.0, 0, 0, 0, 0.16);
+	cairo_pattern_add_color_stop_rgba(p, 1.0, 0, 0, 0,
+	                                  BARNY_FRAME_EDGE_BOT_A);
 	cairo_set_source(cr, p);
 	cairo_paint(cr);
 	cairo_pattern_destroy(p);

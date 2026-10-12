@@ -7,6 +7,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../src/render/liquid_glass.c"
+
 #define BAR_W 1920
 #define BAR_H 47
 
@@ -184,14 +186,98 @@ bench_text_measure(int iters)
 	pango_font_description_free(fd);
 }
 
+static void
+bench_lens_render(int iters)
+{
+	barny_state_t    state = { 0 };
+	barny_output_t   output = { 0 };
+	cairo_surface_t *wallpaper;
+	cairo_surface_t *surface;
+	cairo_t         *cr;
+	cairo_t         *wc;
+	double           t0;
+	double           t1;
+	int              i;
+	int              x;
+	int              y;
+	int              w;
+	int              h;
+
+	barny_config_defaults(&state.config);
+	state.config.dynamic_glass = true;
+	state.dyn_output           = &output;
+	state.lens_scale           = 1.0;
+	state.lens_x               = BAR_W / 2.0;
+
+	output.state       = &state;
+	output.width       = BAR_W;
+	output.height      = BAR_H;
+	output.pad_left    = 8;
+	output.pad_right   = 8;
+	output.pad_top     = 4;
+	output.pad_bottom  = 8;
+	output.surf_width  = output.pad_left + output.width + output.pad_right;
+	output.surf_height = output.pad_top + output.height + output.pad_bottom;
+
+	wallpaper = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BAR_W, BAR_H);
+	wc        = cairo_create(wallpaper);
+	cairo_set_source_rgb(wc, 0.12, 0.16, 0.24);
+	cairo_paint(wc);
+	cairo_destroy(wc);
+	state.blurred_wallpaper = wallpaper;
+
+	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                     output.surf_width,
+	                                     output.surf_height);
+	cr      = cairo_create(surface);
+
+	/* Build the static bar caches before timing animation frames. */
+	barny_render_liquid_glass(&output, cr);
+
+	t0 = now_ns();
+	for (i = 0; i < iters; i++) {
+		int phase = i % 120;
+
+		state.lens_x  = 200.0 + phase * 12.0 + (i % 7) * 0.137;
+		state.lens_vx = (phase - 60) * 20.0;
+		barny_lens_rect(&output, &x, &y, &w, &h);
+		cairo_save(cr);
+		cairo_rectangle(cr, x, y, w, h);
+		cairo_clip(cr);
+		barny_render_liquid_glass(&output, cr);
+		cairo_restore(cr);
+	}
+	t1 = now_ns();
+	report("animated lens frame", iters, t1 - t0);
+
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+	barny_output_free_lens_cache(&output);
+	if (output.bg_cache)
+		cairo_surface_destroy(output.bg_cache);
+	if (output.lens_map)
+		cairo_surface_destroy(output.lens_map);
+	if (output.shadow_cache)
+		cairo_surface_destroy(output.shadow_cache);
+	if (output.glass_clean)
+		cairo_surface_destroy(output.glass_clean);
+	cairo_surface_destroy(wallpaper);
+	barny_config_cleanup(&state.config);
+}
+
 int
-main(void)
+main(int argc, char **argv)
 {
 	printf("=== barny performance benchmarks ===\n");
 	printf("(informational, no pass/fail thresholds)\n\n");
+	if (argc > 1 && strcmp(argv[1], "--lens-only") == 0) {
+		bench_lens_render(5000);
+		return 0;
+	}
 
 	bench_config_parse(2000);
 	bench_text_measure(5000);
+	bench_lens_render(2000);
 
 	{
 		PangoFontDescription *fd;

@@ -26,6 +26,10 @@ test_file_extension(void);
 extern void
 test_lens_partial_redraw(void);
 extern void
+test_lens_channel_tap(void);
+extern void
+test_lens_opaque_fast_path(void);
+extern void
 test_spring_step(void);
 
 extern void
@@ -87,6 +91,8 @@ RUN_SUITE(test_blur_surface);
 RUN_SUITE(test_brightness);
 RUN_SUITE(test_apply_displacement);
 RUN_SUITE(test_file_extension);
+RUN_SUITE(test_lens_channel_tap);
+RUN_SUITE(test_lens_opaque_fast_path);
 RUN_SUITE(test_lens_partial_redraw);
 
 printf("\n--- Module System Tests ---\n");

@@ -729,6 +729,125 @@ lens_diff(cairo_surface_t *a, cairo_surface_t *b)
 	return n;
 }
 
+void
+test_lens_opaque_fast_path(void)
+{
+	barny_state_t    state;
+	barny_output_t   out;
+	cairo_surface_t *wallpaper;
+	cairo_surface_t *fast;
+	cairo_surface_t *generic;
+	cairo_t         *cr;
+
+	TEST_SUITE_BEGIN("Opaque Lens Fast Path");
+
+	lens_setup(&state, &out);
+	wallpaper = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                       LENS_BAR_W, LENS_BAR_H);
+	cr = cairo_create(wallpaper);
+	cairo_set_source_rgb(cr, 0.1, 0.2, 0.3);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	state.blurred_wallpaper = wallpaper;
+
+	fast    = lens_target(&out);
+	generic = lens_target(&out);
+	lens_draw(&out, fast, 300.0, NULL);
+
+	TEST("opaque wallpaper produces an opaque glass cache")
+	{
+		ASSERT_TRUE(out.glass_clean_opaque);
+	}
+
+	out.glass_clean_opaque = false;
+	lens_draw(&out, generic, 300.0, NULL);
+
+	TEST("opaque and generic sampling match byte for byte")
+	{
+		ASSERT_EQ_INT(0, lens_diff(fast, generic));
+	}
+
+	cairo_surface_destroy(fast);
+	cairo_surface_destroy(generic);
+	cairo_surface_destroy(wallpaper);
+	barny_output_free_lens_cache(&out);
+	if (out.bg_cache)
+		cairo_surface_destroy(out.bg_cache);
+	if (out.lens_map)
+		cairo_surface_destroy(out.lens_map);
+	if (out.shadow_cache)
+		cairo_surface_destroy(out.shadow_cache);
+	if (out.glass_clean)
+		cairo_surface_destroy(out.glass_clean);
+
+	TEST_SUITE_END();
+}
+
+void
+test_lens_channel_tap(void)
+{
+	uint8_t data[4 * 4 * 4];
+	double  coords[][2] = {
+		{ -2.0, -1.0 }, { 0.25, 0.75 }, { 1.5, 2.25 }, { 4.0, 4.0 }
+	};
+	bool    equal = true;
+	size_t  i;
+	int     channel;
+
+	TEST_SUITE_BEGIN("Lens Channel Sampling");
+
+	for (i = 0; i < sizeof(data); i++)
+		data[i] = (uint8_t)(i * 37U + 11U);
+
+	for (i = 0; i < sizeof(coords) / sizeof(coords[0]); i++) {
+		float full[4];
+
+		lens_tap(data, 4 * 4, 4, 4, coords[i][0], coords[i][1], full);
+		for (channel = 0; channel < 3; channel++) {
+			float color;
+			float alpha;
+			float opaque_color;
+
+			lens_tap_channel_alpha(data, 4 * 4, 4, 4,
+			                       coords[i][0], coords[i][1], channel,
+			                       &color, &alpha);
+			lens_tap_channel_alpha(data, 4 * 4, 4, 4,
+			                       coords[i][0], coords[i][1], channel,
+			                       &opaque_color, NULL);
+			if (color != full[channel] || alpha != full[3]
+			    || opaque_color != full[channel])
+				equal = false;
+		}
+	}
+
+	TEST("specialized taps match full RGBA interpolation")
+	{
+		ASSERT_TRUE(equal);
+	}
+
+	TEST("opaque glass caches are detected once")
+	{
+		cairo_surface_t *surface;
+		cairo_t         *cr;
+
+		surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 2, 2);
+		cr      = cairo_create(surface);
+		cairo_set_source_rgb(cr, 0.1, 0.2, 0.3);
+		cairo_paint(cr);
+		cairo_destroy(cr);
+		ASSERT_TRUE(surface_is_opaque(surface));
+
+		cr = cairo_create(surface);
+		cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+		cairo_paint(cr);
+		cairo_destroy(cr);
+		ASSERT_FALSE(surface_is_opaque(surface));
+		cairo_surface_destroy(surface);
+	}
+
+	TEST_SUITE_END();
+}
+
 /* The frame loop redraws only the strip the droplet touches (the union of its
    rect this frame and last), trusting the rest of the persistent buffer. That
    is only sound if a strip-clipped render lands exactly the pixels a full

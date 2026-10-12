@@ -812,6 +812,50 @@ lens_tap(const uint8_t *data, int stride, int width, int height, double x,
 	}
 }
 
+/* Chromatic dispersion takes one colour channel from each tap, plus alpha.
+   Avoid interpolating the six colour channels that cannot reach the output. */
+static inline void
+lens_tap_channel_alpha(const uint8_t *data, int stride, int width, int height,
+                       double x, double y, int channel, float *color,
+                       float *alpha)
+{
+	const uint8_t *r0;
+	const uint8_t *r1;
+	int            x0;
+	int            y0;
+	float          fx;
+	float          fy;
+	float          t;
+	float          u;
+
+	if (x < 0)
+		x = 0;
+	if (y < 0)
+		y = 0;
+	if (x >= width - 1)
+		x = width - 1.001;
+	if (y >= height - 1)
+		y = height - 1.001;
+
+	x0 = (int)x;
+	y0 = (int)y;
+	fx = (float)(x - x0);
+	fy = (float)(y - y0);
+
+	r0 = data + (size_t)y0 * stride + (size_t)x0 * 4;
+	r1 = r0 + stride;
+
+	t      = r0[channel] + (r0[4 + channel] - r0[channel]) * fx;
+	u      = r1[channel] + (r1[4 + channel] - r1[channel]) * fx;
+	*color = t + (u - t) * fy;
+
+	if (alpha) {
+		t      = r0[3] + (r0[7] - r0[3]) * fx;
+		u      = r1[3] + (r1[7] - r1[3]) * fx;
+		*alpha = t + (u - t) * fy;
+	}
+}
+
 static double prism_stop_r[PRISM_STOPS + 1];
 static double prism_stop_g[PRISM_STOPS + 1];
 static double prism_stop_b[PRISM_STOPS + 1];
@@ -908,11 +952,11 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 	double           prism   = state->config.glass_prism;
 	double           gleam   = state->config.glass_gleam;
 	double           spec_g  = gleam * SPEC_GAIN * strength;
+	bool             opaque  = output->glass_clean_opaque;
 	double           cx      = output->pad_left;
 	double           cw      = output->width;
 	double           chh     = bar_bot - bar_top;
 	double           edge_h  = BARNY_FRAME_EDGE_TOP_STOP * chh;
-	double           shad_h  = chh * 0.28 > 10.0 ? 10.0 : chh * 0.28;
 	double           pinch_r = pw / 2.0 - 6.0;
 	int              gw      = pw + 2;
 	int              gh      = ph + 2;
@@ -939,7 +983,6 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 	   several ~20-cycle divides for constants. */
 	double           inv_hh;
 	double           inv_edge_h;
-	double           inv_shad_h;
 	int              x;
 	int              y;
 
@@ -978,7 +1021,6 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 
 	inv_hh     = hh > 0.0 ? 1.0 / hh : 0.0;
 	inv_edge_h = edge_h > 0.0 ? 1.0 / edge_h : 0.0;
-	inv_shad_h = shad_h > 0.0 ? 1.0 / shad_h : 0.0;
 
 	prism_stops_init();
 
@@ -1106,14 +1148,9 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 				double  fg;
 				double  fb;
 				double  fa;
-				double  mnx;
-				double  mny;
-				double  mlen;
 				double  depth = -d;
 				double  wtop  = 0.0;
-				double  wbot  = 0.0;
 				double  atop  = 0.0;
-				double  abot  = 0.0;
 				double  aw;
 				double  veil;
 				double  ri;
@@ -1126,9 +1163,7 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 				double  band;
 				double  spec;
 				double  cntr;
-				float   p1[4];
 				float   p2[4];
-				float   p3[4];
 
 				/* Plano-convex lens: sample the strip pulled
 				   inward along the droplet normal. The interior
@@ -1184,57 +1219,67 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 				   dies with pedge, so outside the droplet the
 				   three taps were reading one pixel thrice. */
 				if (cs > BULGE_CHROMA_MIN) {
-					lens_tap(gdata, gstride, gsw, gsh,
-					         gx + dispx - nnx * cs,
-					         gy + dispy - nny * cs, p1);
-					lens_tap(gdata, gstride, gsw, gsh,
-					         gx + dispx, gy + dispy, p2);
-					lens_tap(gdata, gstride, gsw, gsh,
-					         gx + dispx + nnx * cs,
-					         gy + dispy + nny * cs, p3);
-					fb = p3[3] > 0 ? p3[0] * 255.0 / p3[3]
-					               : 0.0;
-					fg = p2[3] > 0 ? p2[1] * 255.0 / p2[3]
-					               : 0.0;
-					fr = p1[3] > 0 ? p1[2] * 255.0 / p1[3]
-					               : 0.0;
-					fa = p2[3] * (1.0 / 255.0);
-				} else {
-					double unp;
+					float c1, a1, c2, a2, c3, a3;
 
+					lens_tap_channel_alpha(
+					        gdata, gstride, gsw, gsh,
+					        gx + dispx - nnx * cs,
+					        gy + dispy - nny * cs, 2, &c1,
+					        opaque ? NULL : &a1);
+					lens_tap_channel_alpha(
+					        gdata, gstride, gsw, gsh,
+					        gx + dispx, gy + dispy, 1, &c2,
+					        opaque ? NULL : &a2);
+					lens_tap_channel_alpha(
+					        gdata, gstride, gsw, gsh,
+					        gx + dispx + nnx * cs,
+					        gy + dispy + nny * cs, 0, &c3,
+					        opaque ? NULL : &a3);
+					if (opaque) {
+						fb = c3;
+						fg = c2;
+						fr = c1;
+						fa = 1.0;
+					} else {
+						fb = a3 > 0 ? c3 * 255.0 / a3 : 0.0;
+						fg = a2 > 0 ? c2 * 255.0 / a2 : 0.0;
+						fr = a1 > 0 ? c1 * 255.0 / a1 : 0.0;
+						fa = a2 * (1.0 / 255.0);
+					}
+				} else {
 					lens_tap(gdata, gstride, gsw, gsh,
 					         gx + dispx, gy + dispy, p2);
-					unp = p2[3] > 0 ? 255.0 / p2[3] : 0.0;
-					fb  = p2[0] * unp;
-					fg  = p2[1] * unp;
-					fr  = p2[2] * unp;
-					fa  = p2[3] * (1.0 / 255.0);
+					if (opaque) {
+						fb = p2[0];
+						fg = p2[1];
+						fr = p2[2];
+						fa = 1.0;
+					} else {
+						double unp = p2[3] > 0
+						                     ? 255.0 / p2[3]
+						                     : 0.0;
+
+						fb = p2[0] * unp;
+						fg = p2[1] * unp;
+						fr = p2[2] * unp;
+						fa = p2[3] * (1.0 / 255.0);
+					}
 				}
 
-				/* Contour normal of the merged field drives the
-				   edge relighting: highlight where the contour
-				   faces up, shadow band where it faces down.
-				   Both ramps are done by the deeper of the two
-				   bands, so the interior skips this sqrt too. */
-				if (depth < edge_h || depth < shad_h) {
-					mnx  = df[gi + 1] - df[gi - 1];
-					mny  = df[gi + gw] - df[gi - gw];
-					mlen = sqrt(mnx * mnx + mny * mny);
-					if (mlen > 1e-4) {
-						mny /= mlen;
-						wtop = mny < 0.0 ? -mny : 0.0;
-						wbot = mny > 0.0 ? mny : 0.0;
+				/* Only the upper-facing contour contributes lighting.
+				   Reject the lower half before calculating its normal. */
+				if (depth < edge_h) {
+					double mny = df[gi + gw] - df[gi - gw];
+
+					if (mny < 0.0) {
+						double mnx = df[gi + 1] - df[gi - 1];
+						double mlen = sqrt(mnx * mnx + mny * mny);
+
+						if (mlen > 1e-4)
+							wtop = -mny / mlen;
 					}
-					if (depth < edge_h && edge_h > 0.0)
-						atop = BARNY_FRAME_EDGE_TOP_A
-						       * (1.0
-						          - depth * inv_edge_h)
-						       * wtop;
-					if (depth < shad_h && shad_h > 0.0)
-						abot = BARNY_FRAME_EDGE_BOT_A
-						       * (1.0
-						          - depth * inv_shad_h)
-						       * wbot;
+					atop = BARNY_FRAME_EDGE_TOP_A
+					       * (1.0 - depth * inv_edge_h) * wtop;
 				}
 
 				/* frosted brightness lift inside the bubble */
@@ -1288,9 +1333,6 @@ build_lens_patch(barny_output_t *output, int sox, int soy, int pw, int ph,
 				fr  = fr * (1.0 - aw) + 255.0 * aw;
 				fg  = fg * (1.0 - aw) + 255.0 * aw;
 				fb  = fb * (1.0 - aw) + 255.0 * aw;
-				fr *= 1.0 - abot;
-				fg *= 1.0 - abot;
-				fb *= 1.0 - abot;
 				fr += (rim * (1.0 - BULGE_RIM_CHROMA * ty)
 				       + spec + cntr * 0.85)
 				      * 255.0;
@@ -1600,6 +1642,39 @@ create_bar_shadow(int cx, int cy, int cw, int ch, int radius, int surf_w,
 	return shadow;
 }
 
+static bool
+surface_is_opaque(cairo_surface_t *surface)
+{
+	uint8_t *data;
+	int      width;
+	int      height;
+	int      stride;
+	int      x;
+	int      y;
+
+	if (!surface
+	    || cairo_surface_get_type(surface) != CAIRO_SURFACE_TYPE_IMAGE
+	    || cairo_image_surface_get_format(surface) != CAIRO_FORMAT_ARGB32)
+		return false;
+
+	cairo_surface_flush(surface);
+	data   = cairo_image_surface_get_data(surface);
+	width  = cairo_image_surface_get_width(surface);
+	height = cairo_image_surface_get_height(surface);
+	stride = cairo_image_surface_get_stride(surface);
+	if (!data)
+		return false;
+
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			if (data[y * stride + x * 4 + 3] != 255)
+				return false;
+		}
+	}
+
+	return true;
+}
+
 /* The broad part of the glass frame lighting: the full-height gradient with
    the contour-keyed edge component removed (see FRAME_TOP_EDGE_*) plus the
    diagonal sheen. Baked into glass_clean so the lens patch can re-derive the
@@ -1771,6 +1846,7 @@ build_glass_bg(barny_output_t *output)
 		cairo_surface_destroy(output->glass_clean);
 		output->glass_clean = NULL;
 	}
+	output->glass_clean_opaque = false;
 	strip_src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
 	sc        = cairo_create(strip_src);
 	cairo_set_source_surface(sc, lensed, 0, 0);
@@ -1785,6 +1861,7 @@ build_glass_bg(barny_output_t *output)
 	cairo_pattern_set_extend(cairo_get_source(sc), CAIRO_EXTEND_PAD);
 	cairo_paint(sc);
 	cairo_destroy(sc);
+	output->glass_clean_opaque = surface_is_opaque(output->glass_clean);
 	cairo_surface_destroy(strip_src);
 
 	cairo_surface_destroy(src);
