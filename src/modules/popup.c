@@ -77,6 +77,8 @@ struct barny_popup {
 	struct wl_callback           *frame_cb;
 	cairo_surface_t              *glass_src;     /* wallpaper + broad lighting */
 	cairo_surface_t              *content_cache; /* rendered data rows */
+	cairo_surface_t              *rest_glass;
+	barny_output_t               *rest_out;
 };
 
 static int
@@ -148,16 +150,6 @@ popup_panel(const barny_popup_t *p, barny_glass_panel_t *panel)
 }
 
 static void
-popup_compose(barny_popup_t *p)
-{
-	barny_glass_panel_t panel;
-
-	popup_panel(p, &panel);
-	barny_glass_panel_compose(p->cr, p->state, p->state->pointer_output,
-	                          &panel, p->content_cache);
-}
-
-static void
 popup_build_glass(barny_popup_t *p)
 {
 	barny_glass_panel_t panel;
@@ -165,6 +157,10 @@ popup_build_glass(barny_popup_t *p)
 	if (p->glass_src) {
 		cairo_surface_destroy(p->glass_src);
 		p->glass_src = NULL;
+	}
+	if (p->rest_glass) {
+		cairo_surface_destroy(p->rest_glass);
+		p->rest_glass = NULL;
 	}
 
 	popup_panel(p, &panel);
@@ -921,6 +917,20 @@ barny_glass_panel_bg(barny_state_t *state, barny_output_t *out,
 	return src;
 }
 
+static void
+panel_compose_content(cairo_t *cr, const barny_glass_panel_t *panel,
+                      cairo_surface_t *content)
+{
+	if (!content)
+		return;
+
+	cairo_save(cr);
+	cairo_translate(cr, 0, panel->body_y);
+	cairo_set_source_surface(cr, content, 0, 0);
+	cairo_paint(cr);
+	cairo_restore(cr);
+}
+
 void
 barny_glass_panel_compose(cairo_t *cr, barny_state_t *state,
                           barny_output_t *out, const barny_glass_panel_t *panel,
@@ -948,12 +958,56 @@ barny_glass_panel_compose(cairo_t *cr, barny_state_t *state,
 	cairo_restore(cr);
 
 	barny_draw_glass_frame(cr, panel->body_w, panel->body_h, POPUP_RADIUS);
-
-	if (content) {
-		cairo_set_source_surface(cr, content, 0, 0);
-		cairo_paint(cr);
-	}
 	cairo_restore(cr);
+
+	panel_compose_content(cr, panel, content);
+}
+
+cairo_surface_t *
+barny_glass_panel_rest(barny_state_t *state, barny_output_t *out,
+                       const barny_glass_panel_t *panel, cairo_surface_t *bg)
+{
+	bool             morph = state->config.popup_animations;
+	panel_shape_t    s;
+	cairo_surface_t *rest;
+	cairo_t         *rc;
+
+	if (morph && !bg)
+		return NULL;
+
+	rest = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, panel->w,
+	                                  panel->h);
+	if (cairo_surface_status(rest) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(rest);
+		return NULL;
+	}
+
+	if (morph) {
+		panel_shape(panel, 1.0, &s);
+		panel_morph_fill(rest, bg, panel, &s);
+	} else {
+		rc = cairo_create(rest);
+		barny_glass_panel_compose(rc, state, out, panel, NULL);
+		cairo_destroy(rc);
+	}
+
+	return rest;
+}
+
+void
+barny_glass_panel_rest_content(cairo_t *cr, const barny_state_t *state,
+                               const barny_glass_panel_t *panel,
+                               cairo_surface_t *content)
+{
+	panel_shape_t s;
+
+	if (!state->config.popup_animations) {
+		panel_compose_content(cr, panel, content);
+		return;
+	}
+
+	panel_shape(panel, 1.0, &s);
+	panel_morph_content(cr, panel, &s, content);
 }
 
 /* One spring drives every panel's open and close morph. The analytic step keeps
@@ -985,6 +1039,23 @@ barny_glass_panel_step(double *morph, double *vel, uint64_t *last_us,
 	return settled;
 }
 
+static cairo_surface_t *
+popup_rest(barny_popup_t *p, const barny_glass_panel_t *panel)
+{
+	barny_output_t *out = p->state->pointer_output;
+
+	if (p->rest_glass && p->rest_out == out)
+		return p->rest_glass;
+
+	if (p->rest_glass)
+		cairo_surface_destroy(p->rest_glass);
+	p->rest_out   = out;
+	p->rest_glass = barny_glass_panel_rest(p->state, out, panel,
+	                                       p->glass_src);
+
+	return p->rest_glass;
+}
+
 static void
 popup_present(barny_popup_t *p, double m)
 {
@@ -994,16 +1065,26 @@ popup_present(barny_popup_t *p, double m)
 	if (!cr || !p->buffer)
 		return;
 
-	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-	cairo_paint(cr);
-	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-
-	if (p->state->config.popup_animations) {
-		popup_panel(p, &panel);
-		barny_glass_panel_morph(cr, &panel, p->glass_src,
-		                        p->content_cache, m);
+	popup_panel(p, &panel);
+	if (m == 1.0 && popup_rest(p, &panel)) {
+		cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+		cairo_set_source_surface(cr, p->rest_glass, 0, 0);
+		cairo_paint(cr);
+		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+		cairo_set_source_rgba(cr, 0, 0, 0, 0);
+		barny_glass_panel_rest_content(cr, p->state, &panel,
+		                               p->content_cache);
 	} else {
-		popup_compose(p);
+		cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+		cairo_paint(cr);
+		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+		if (p->state->config.popup_animations)
+			barny_glass_panel_morph(cr, &panel, p->glass_src,
+			                        p->content_cache, m);
+		else
+			barny_glass_panel_compose(cr, p->state,
+			                          p->state->pointer_output,
+			                          &panel, p->content_cache);
 	}
 
 	cairo_surface_flush(p->cairo_surface);
@@ -1025,6 +1106,10 @@ popup_finalize_destroy(barny_popup_t *p)
 	if (p->content_cache) {
 		cairo_surface_destroy(p->content_cache);
 		p->content_cache = NULL;
+	}
+	if (p->rest_glass) {
+		cairo_surface_destroy(p->rest_glass);
+		p->rest_glass = NULL;
 	}
 
 	popup_teardown_buffer(p);

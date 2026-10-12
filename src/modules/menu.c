@@ -590,23 +590,14 @@ menu_build_rest(barny_menu_t *m)
 	if (!m->glass_src || m->patch_w <= 0 || m->patch_h <= 0)
 		return;
 
-	m->rest_src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-	                                         m->patch_w, m->patch_h);
-	if (cairo_surface_status(m->rest_src) != CAIRO_STATUS_SUCCESS) {
-		cairo_surface_destroy(m->rest_src);
-		m->rest_src = NULL;
-		return;
-	}
-
 	menu_panel(m, &panel);
+	m->rest_src = barny_glass_panel_rest(m->state, m->out, &panel,
+	                                     m->glass_src);
+	if (!m->rest_src)
+		return;
+
 	rc = cairo_create(m->rest_src);
-	if (m->state->config.popup_animations) {
-		barny_glass_panel_morph(rc, &panel, m->glass_src,
-		                        m->content_cache, 1.0);
-	} else {
-		barny_glass_panel_compose(rc, m->state, m->out, &panel,
-		                          m->content_cache);
-	}
+	barny_glass_panel_rest_content(rc, m->state, &panel, m->content_cache);
 	cairo_destroy(rc);
 }
 

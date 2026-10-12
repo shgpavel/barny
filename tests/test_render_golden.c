@@ -710,6 +710,77 @@ morph_check(const char *name, const barny_glass_panel_t *panel,
 }
 
 static void
+rest_present(cairo_surface_t *surf, bar_t *b, const barny_glass_panel_t *panel,
+             cairo_surface_t *rest, cairo_surface_t *body)
+{
+	cairo_t *cr = cairo_create(surf);
+
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+	cairo_set_source_surface(cr, rest, 0, 0);
+	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	cairo_set_source_rgba(cr, 0, 0, 0, 0);
+	barny_glass_panel_rest_content(cr, &b->state, panel, body);
+	cairo_destroy(cr);
+}
+
+static void
+rest_check(const char *name, bar_t *b, bool animated,
+           const barny_glass_panel_t *panel, cairo_surface_t *glass,
+           cairo_surface_t *body)
+{
+	cairo_surface_t *direct;
+	cairo_surface_t *stale;
+	cairo_surface_t *shown;
+	cairo_surface_t *rest;
+	cairo_surface_t *menu;
+	cairo_t         *cr;
+	char             label[64];
+	int              n;
+
+	b->state.config.popup_animations = animated;
+
+	direct = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, panel->w,
+	                                    panel->h);
+	cr     = cairo_create(direct);
+	if (animated)
+		barny_glass_panel_morph(cr, panel, glass, body, 1.0);
+	else
+		barny_glass_panel_compose(cr, &b->state, &b->out, panel, body);
+	cairo_destroy(cr);
+
+	rest = barny_glass_panel_rest(&b->state, &b->out, panel, glass);
+	snprintf(label, sizeof(label), "%s built", name);
+	expect(label, rest != NULL, "rest", 0);
+	if (!rest) {
+		cairo_surface_destroy(direct);
+		return;
+	}
+
+	stale = texture(panel->body_w, panel->body_h, 61, 0, 200);
+	shown = texture(panel->w, panel->h, 67, 120, 255);
+	rest_present(shown, b, panel, rest, stale);
+	rest_present(shown, b, panel, rest, body);
+	n = diff_bytes(direct, shown);
+	snprintf(label, sizeof(label), "%s redraw==uncached", name);
+	expect(label, n == 0, "bytes differ", n);
+
+	menu = barny_glass_panel_rest(&b->state, &b->out, panel, glass);
+	cr   = cairo_create(menu);
+	barny_glass_panel_rest_content(cr, &b->state, panel, body);
+	cairo_destroy(cr);
+	n = diff_bytes(direct, menu);
+	snprintf(label, sizeof(label), "%s menu==uncached", name);
+	expect(label, n == 0, "bytes differ", n);
+
+	cairo_surface_destroy(menu);
+	cairo_surface_destroy(shown);
+	cairo_surface_destroy(stale);
+	cairo_surface_destroy(rest);
+	cairo_surface_destroy(direct);
+}
+
+static void
 morph_cases(void)
 {
 	static const double ms[] = {
@@ -717,13 +788,17 @@ morph_cases(void)
 	};
 	barny_glass_panel_t panel;
 	cairo_surface_t    *bg;
+	cairo_surface_t    *body;
+	bar_t              *b;
 	char                name[64];
 	size_t              i;
 	int                 top;
 	int                 a;
 
+	body = content(PANEL_W, PANEL_H - NECK_H);
 	for (top = 0; top < 2; top++) {
 		panel_init(&panel, top);
+		b = bar_new(NULL, top, 0.8);
 		for (a = 0; a < 2; a++) {
 			bg = texture(panel.w, panel.h, 41, a ? 96 : 255, 255);
 			for (i = 0; i < sizeof(ms) / sizeof(ms[0]); i++) {
@@ -740,9 +815,14 @@ morph_cases(void)
 				         top ? "top" : "bot");
 				morph_check(name, &panel, bg, NULL, 1.01);
 			}
+			snprintf(name, sizeof(name), "morph.%s.%s.rest",
+			         top ? "top" : "bot", a ? "alpha" : "opaque");
+			rest_check(name, b, true, &panel, bg, body);
 			cairo_surface_destroy(bg);
 		}
+		bar_free(b);
 	}
+	cairo_surface_destroy(body);
 }
 
 static void
@@ -771,6 +851,8 @@ popup_case(cairo_surface_t *wall, bool top, const char *side)
 			         (int)(ms[i] * 100.0 + 0.5));
 			morph_check(name, &panel, glass, body, ms[i]);
 		}
+		snprintf(name, sizeof(name), "popup.%s.rest.morph", side);
+		rest_check(name, b, true, &panel, glass, body);
 		cairo_surface_destroy(glass);
 	}
 
@@ -781,6 +863,8 @@ popup_case(cairo_surface_t *wall, bool top, const char *side)
 	cairo_destroy(cr);
 	snprintf(name, sizeof(name), "popup.%s.compose", side);
 	check(name, surf);
+	snprintf(name, sizeof(name), "popup.%s.rest.compose", side);
+	rest_check(name, b, false, &panel, NULL, body);
 
 	cairo_surface_destroy(surf);
 	cairo_surface_destroy(body);

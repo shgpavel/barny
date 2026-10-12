@@ -69,6 +69,15 @@ barny_glass_panel_morph(cairo_t *cr, const barny_glass_panel_t *panel,
                         cairo_surface_t *bg, cairo_surface_t *content,
                         double m);
 
+cairo_surface_t *
+barny_glass_panel_rest(barny_state_t *state, barny_output_t *out,
+                       const barny_glass_panel_t *panel, cairo_surface_t *bg);
+
+void
+barny_glass_panel_rest_content(cairo_t *cr, const barny_state_t *state,
+                               const barny_glass_panel_t *panel,
+                               cairo_surface_t *content);
+
 /* A bead of liquid riding on a finished panel -- the menu's hover highlight is
    one. It lenses whatever is already composed beneath it, glass and label
    alike, the way the bar's cursor droplet lenses the bar, so a hovered row
