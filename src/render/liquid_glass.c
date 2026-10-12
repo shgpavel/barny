@@ -868,6 +868,562 @@ prism_row(double *prm, int pw, int sox, double cx, double cw)
 	}
 }
 
+#define RIM_LUT     4096
+#define RIM_SQ_STEPS 14
+#define RIM_MAX_V   (4 * (RIM_SQ_STEPS + 1) + 1)
+
+struct barny_rim {
+	int          cw;
+	int          n;
+	uint32_t    *off;
+	uint32_t    *base;
+	uint32_t    *ufx;
+	uint16_t    *px;
+	uint16_t    *a256;
+	uint8_t     *kind;
+	uint32_t    *utop_fx;
+	uint32_t    *ubot_fx;
+	uint16_t    *itop;
+	uint16_t    *ibot;
+	barny_rect_t rect[4];
+	uint32_t     ph;
+	uint64_t     tick;
+	bool         filled;
+};
+
+typedef struct {
+	double x0;
+	double y0;
+	double w;
+	double h;
+	double r;
+	double ls;
+	double lc;
+	double lv;
+	double l;
+	int    c;
+	int    nv;
+	double vx[RIM_MAX_V];
+	double vy[RIM_MAX_V];
+	double vs[RIM_MAX_V];
+} rim_path_t;
+
+static uint8_t rim_hue8[RIM_LUT][4];
+static double  rim_hued[RIM_LUT][3];
+static bool    rim_hue_ready;
+
+static void
+rim_hue_init(void)
+{
+	const double *a;
+	const double *b;
+	double        f;
+	int           i;
+	int           k;
+	int           c;
+
+	if (rim_hue_ready)
+		return;
+
+	prism_stops_init();
+	for (i = 0; i < RIM_LUT; i++) {
+		f = (i + 0.5) / RIM_LUT * PRISM_HUES;
+		k = (int)f;
+		if (k > PRISM_HUES - 1)
+			k = PRISM_HUES - 1;
+		f -= k;
+		a  = prism_stop[k];
+		b  = prism_stop[(k + 1) % PRISM_HUES];
+		for (c = 0; c < 3; c++)
+			rim_hued[i][c] = a[c] + (b[c] - a[c]) * f;
+		rim_hue8[i][0] = (uint8_t)(rim_hued[i][2] * 255.0 + 0.5);
+		rim_hue8[i][1] = (uint8_t)(rim_hued[i][1] * 255.0 + 0.5);
+		rim_hue8[i][2] = (uint8_t)(rim_hued[i][0] * 255.0 + 0.5);
+	}
+	rim_hue_ready = true;
+}
+
+static inline uint32_t
+rim_cyc_fx(double u)
+{
+	double f = u - floor(u);
+
+	return (uint32_t)(int64_t)(f * 4294967296.0);
+}
+
+bool
+barny_rim_flowing(const barny_config_t *config)
+{
+	return config->glass_prism > 0.001 && config->glass_prism_flow != 0.0;
+}
+
+static uint64_t
+rim_tick_us(const barny_config_t *config)
+{
+	int fps = config->glass_prism_fps;
+
+	if (fps < 1)
+		fps = 1;
+	if (fps > 60)
+		fps = 60;
+
+	return 1000000u / (uint64_t)fps;
+}
+
+uint64_t
+barny_rim_tick(const barny_config_t *config, uint64_t now_us)
+{
+	return now_us / rim_tick_us(config);
+}
+
+double
+barny_rim_phase(const barny_config_t *config, uint64_t tick)
+{
+	double   flow = config->glass_prism_flow;
+	uint64_t per  = (uint64_t)(fabs(flow) * 1e6);
+	double   ph;
+
+	if (per == 0)
+		return 0.0;
+
+	ph = (double)((tick * rim_tick_us(config)) % per) / (double)per;
+	if (flow < 0.0 && ph > 0.0)
+		ph = 1.0 - ph;
+
+	return ph;
+}
+
+int
+barny_rim_timeout_ms(const barny_config_t *config, uint64_t now_us)
+{
+	uint64_t tick_us = rim_tick_us(config);
+	uint64_t next;
+	uint64_t ms;
+
+	if (!barny_rim_flowing(config))
+		return 200;
+
+	next = (now_us / tick_us + 1) * tick_us;
+	ms   = (next - now_us + 999) / 1000;
+
+	return ms < 200 ? (int)ms : 200;
+}
+
+bool
+barny_rim_due(const barny_output_t *output, uint64_t now_us)
+{
+	const barny_config_t *config = &output->state->config;
+
+	if (!output->configured || !output->cr || !barny_rim_flowing(config))
+		return false;
+	if (output->frame_pending && output->redraw_queued)
+		return false;
+	if (output->bg_cache && !output->rim)
+		return false;
+
+	return output->rim_tick != barny_rim_tick(config, now_us);
+}
+
+int
+barny_rim_rects(const barny_output_t *output, barny_rect_t *rects)
+{
+	int i;
+
+	if (!output->rim)
+		return 0;
+
+	for (i = 0; i < 4; i++)
+		rects[i] = output->rim->rect[i];
+
+	return 4;
+}
+
+void
+barny_output_free_rim(barny_output_t *output)
+{
+	barny_rim_t *rim = output->rim;
+
+	if (!rim)
+		return;
+
+	free(rim->off);
+	free(rim->base);
+	free(rim->ufx);
+	free(rim->px);
+	free(rim->a256);
+	free(rim->kind);
+	free(rim->utop_fx);
+	free(rim->ubot_fx);
+	free(rim->itop);
+	free(rim->ibot);
+	free(rim);
+	output->rim = NULL;
+}
+
+static int
+rim_corner(rim_path_t *p, double ccx, double ccy, double a0, double a1)
+{
+	double t;
+	double ang;
+	double ca;
+	double sa;
+	int    i;
+
+	for (i = 0; i <= RIM_SQ_STEPS; i++) {
+		t             = (double)i / RIM_SQ_STEPS;
+		ang           = a0 + (a1 - a0) * t;
+		ca            = cos(ang);
+		sa            = sin(ang);
+		p->vx[p->nv]  = ccx + p->r * copysign(sqrt(fabs(ca)), ca);
+		p->vy[p->nv]  = ccy + p->r * copysign(sqrt(fabs(sa)), sa);
+		p->nv++;
+	}
+
+	return p->nv;
+}
+
+static void
+rim_path(rim_path_t *p, int cw, int ch, double radius)
+{
+	double r = radius - PRISM_LINE_W / 4;
+	int    i;
+
+	p->x0 = PRISM_LINE_W / 2;
+	p->y0 = PRISM_LINE_W / 2;
+	p->w  = cw - PRISM_LINE_W;
+	p->h  = ch - PRISM_LINE_W;
+	if (r < 0.5)
+		r = 0.0;
+	if (r > p->w / 2)
+		r = p->w / 2;
+	if (r > p->h / 2)
+		r = p->h / 2;
+	p->r  = r;
+	p->nv = 0;
+
+	p->vx[p->nv] = p->x0 + r;
+	p->vy[p->nv] = p->y0;
+	p->nv++;
+	rim_corner(p, p->x0 + p->w - r, p->y0 + r, -M_PI / 2, 0);
+	rim_corner(p, p->x0 + p->w - r, p->y0 + p->h - r, 0, M_PI / 2);
+	rim_corner(p, p->x0 + r, p->y0 + p->h - r, M_PI / 2, M_PI);
+	rim_corner(p, p->x0 + r, p->y0 + r, M_PI, 3 * M_PI / 2);
+
+	p->vs[0] = 0.0;
+	for (i = 1; i < p->nv; i++)
+		p->vs[i] = p->vs[i - 1] + hypot(p->vx[i] - p->vx[i - 1],
+		                                p->vy[i] - p->vy[i - 1]);
+
+	p->ls = p->w - 2 * r;
+	p->lv = p->h - 2 * r;
+	p->lc = p->vs[RIM_SQ_STEPS + 1] - p->vs[1];
+	p->l  = p->vs[p->nv - 1];
+	p->c  = (int)floor(p->l / (cw / PRISM_CYCLES) + 0.5);
+	if (p->c < 1)
+		p->c = 1;
+}
+
+static inline double
+rim_s_top(const rim_path_t *p, double x)
+{
+	return x - (p->x0 + p->r);
+}
+
+static inline double
+rim_s_bot(const rim_path_t *p, double x)
+{
+	return p->ls + 2 * p->lc + p->lv + ((p->x0 + p->w - p->r) - x);
+}
+
+static double
+rim_s_corner(const rim_path_t *p, double x, double y)
+{
+	double best = 1e30;
+	double s    = 0.0;
+	double ex;
+	double ey;
+	double l2;
+	double t;
+	double qx;
+	double qy;
+	double d2;
+	int    j;
+
+	for (j = 0; j + 1 < p->nv; j++) {
+		ex = p->vx[j + 1] - p->vx[j];
+		ey = p->vy[j + 1] - p->vy[j];
+		l2 = ex * ex + ey * ey;
+		t  = l2 > 0 ? ((x - p->vx[j]) * ex + (y - p->vy[j]) * ey) / l2
+		            : 0;
+		if (t < 0)
+			t = 0;
+		if (t > 1)
+			t = 1;
+		qx = p->vx[j] + t * ex;
+		qy = p->vy[j] + t * ey;
+		d2 = (x - qx) * (x - qx) + (y - qy) * (y - qy);
+		if (d2 < best) {
+			best = d2;
+			s    = p->vs[j] + t * (p->vs[j + 1] - p->vs[j]);
+		}
+	}
+
+	return s;
+}
+
+static cairo_surface_t *
+rim_mask(barny_output_t *output)
+{
+	cairo_surface_t *mask;
+	cairo_t         *mc;
+
+	mask = cairo_image_surface_create(CAIRO_FORMAT_A8, output->width,
+	                                  output->height);
+	mc   = cairo_create(mask);
+	barny_rounded_rect_path(mc, PRISM_LINE_W / 2, PRISM_LINE_W / 2,
+	                        output->width - PRISM_LINE_W,
+	                        output->height - PRISM_LINE_W,
+	                        output->state->config.border_radius
+	                                - PRISM_LINE_W / 4);
+	cairo_set_line_width(mc, PRISM_LINE_W);
+	cairo_stroke(mc);
+	cairo_destroy(mc);
+	cairo_surface_flush(mask);
+
+	return mask;
+}
+
+static bool
+rim_alloc(barny_rim_t *rim, int n, int cw)
+{
+	rim->n       = n;
+	rim->cw      = cw;
+	rim->off     = malloc(sizeof(uint32_t) * (size_t)n);
+	rim->base    = malloc(sizeof(uint32_t) * (size_t)n);
+	rim->ufx     = malloc(sizeof(uint32_t) * (size_t)n);
+	rim->px      = malloc(sizeof(uint16_t) * (size_t)n);
+	rim->a256    = malloc(sizeof(uint16_t) * (size_t)n);
+	rim->kind    = malloc((size_t)n);
+	rim->utop_fx = malloc(sizeof(uint32_t) * (size_t)cw);
+	rim->ubot_fx = malloc(sizeof(uint32_t) * (size_t)cw);
+	rim->itop    = malloc(sizeof(uint16_t) * (size_t)cw);
+	rim->ibot    = malloc(sizeof(uint16_t) * (size_t)cw);
+
+	return rim->off && rim->base && rim->ufx && rim->px && rim->a256
+	       && rim->kind && rim->utop_fx && rim->ubot_fx && rim->itop
+	       && rim->ibot;
+}
+
+static void
+rim_build(barny_output_t *output)
+{
+	double           prism = output->state->config.glass_prism;
+	int              cw    = output->width;
+	int              ch    = output->height;
+	int              cx    = output->pad_left;
+	int              cy    = output->pad_top;
+	int              grow  = output->scale > 1 ? 1 : 0;
+	barny_rect_t     bb[4];
+	rim_path_t       p;
+	cairo_surface_t *mask;
+	barny_rim_t     *rim;
+	uint8_t         *md;
+	uint8_t         *bd;
+	int              ms;
+	int              bs;
+	int              n = 0;
+	int              x;
+	int              y;
+	int              i;
+	int              k;
+	int              box;
+	double           s;
+
+	barny_output_free_rim(output);
+	if (!barny_rim_flowing(&output->state->config) || !output->bg_cache
+	    || cw < 2 || ch < 2 || cw > 65535)
+		return;
+
+	rim_hue_init();
+	rim_path(&p, cw, ch, output->state->config.border_radius);
+
+	mask = rim_mask(output);
+	md   = cairo_image_surface_get_data(mask);
+	ms   = cairo_image_surface_get_stride(mask);
+	if (!md) {
+		cairo_surface_destroy(mask);
+		return;
+	}
+	for (y = 0; y < ch; y++)
+		for (x = 0; x < cw; x++)
+			n += md[y * ms + x] != 0;
+
+	rim = calloc(1, sizeof(*rim));
+	if (!rim) {
+		cairo_surface_destroy(mask);
+		return;
+	}
+	output->rim = rim;
+	if (!rim_alloc(rim, n, cw)) {
+		barny_output_free_rim(output);
+		cairo_surface_destroy(mask);
+		return;
+	}
+
+	for (x = 0; x < cw; x++) {
+		rim->utop_fx[x] = rim_cyc_fx(rim_s_top(&p, x + 0.5) / p.l * p.c);
+		rim->ubot_fx[x] = rim_cyc_fx(rim_s_bot(&p, x + 0.5) / p.l * p.c);
+	}
+
+	cairo_surface_flush(output->bg_cache);
+	bd = cairo_image_surface_get_data(output->bg_cache);
+	bs = cairo_image_surface_get_stride(output->bg_cache);
+
+	for (i = 0; i < 4; i++)
+		bb[i] = (barny_rect_t){ INT32_MAX, INT32_MAX, INT32_MIN,
+			                INT32_MIN };
+
+	i = 0;
+	for (y = 0; y < ch; y++) {
+		for (x = 0; x < cw; x++) {
+			uint8_t a = md[y * ms + x];
+			double  fx = x + 0.5;
+			double  fy = y + 0.5;
+
+			if (!a)
+				continue;
+			rim->off[i] = (uint32_t)((cy + y) * bs + (cx + x) * 4);
+			memcpy(&rim->base[i], bd + rim->off[i], 4);
+			rim->px[i] = (uint16_t)x;
+			if (fx >= p.x0 + p.r && fx <= p.x0 + p.w - p.r) {
+				k   = fy < ch / 2.0 ? 0 : 1;
+				s   = k == 0 ? rim_s_top(&p, fx) : rim_s_bot(&p, fx);
+				box = k;
+			} else {
+				k   = 2;
+				s   = rim_s_corner(&p, fx, fy);
+				box = fx < cw / 2.0 ? 2 : 3;
+			}
+			rim->kind[i] = (uint8_t)k;
+			rim->ufx[i]  = rim_cyc_fx(s / p.l * p.c);
+			rim->a256[i] = (uint16_t)(a * prism * 256.0 / 255.0 + 0.5);
+			if (x < bb[box].x)
+				bb[box].x = x;
+			if (y < bb[box].y)
+				bb[box].y = y;
+			if (x > bb[box].w)
+				bb[box].w = x;
+			if (y > bb[box].h)
+				bb[box].h = y;
+			i++;
+		}
+	}
+	cairo_surface_destroy(mask);
+
+	for (i = 0; i < 4; i++) {
+		if (bb[i].x > bb[i].w) {
+			rim->rect[i] = (barny_rect_t){ 0 };
+			continue;
+		}
+		rim->rect[i].x = cx + bb[i].x - grow;
+		rim->rect[i].y = cy + bb[i].y - grow;
+		rim->rect[i].w = bb[i].w - bb[i].x + 1 + 2 * grow;
+		rim->rect[i].h = bb[i].h - bb[i].y + 1 + 2 * grow;
+		rim->rect[i]   = barny_rect_clamp(rim->rect[i],
+		                                  output->surf_width,
+		                                  output->surf_height);
+	}
+}
+
+static void
+rim_fill(barny_output_t *output, uint64_t tick)
+{
+	barny_rim_t   *rim = output->rim;
+	const uint8_t *b;
+	const uint8_t *c;
+	uint8_t       *bd;
+	uint8_t       *q;
+	uint32_t       ph;
+	uint32_t       a;
+	uint32_t       ob;
+	uint32_t       og;
+	uint32_t       or;
+	uint32_t       oa;
+	unsigned       idx;
+	int            x;
+	int            i;
+
+	if (!rim || (rim->filled && rim->tick == tick))
+		return;
+
+	ph = rim_cyc_fx(barny_rim_phase(&output->state->config, tick));
+	for (x = 0; x < rim->cw; x++) {
+		rim->itop[x] = (uint16_t)((rim->utop_fx[x] - ph) >> 20);
+		rim->ibot[x] = (uint16_t)((rim->ubot_fx[x] - ph) >> 20);
+	}
+
+	cairo_surface_flush(output->bg_cache);
+	bd = cairo_image_surface_get_data(output->bg_cache);
+	for (i = 0; i < rim->n; i++) {
+		b   = (const uint8_t *)&rim->base[i];
+		a   = rim->a256[i];
+		q   = bd + rim->off[i];
+		idx = rim->kind[i] == 0   ? rim->itop[rim->px[i]]
+		      : rim->kind[i] == 1 ? rim->ibot[rim->px[i]]
+		                          : (rim->ufx[i] - ph) >> 20;
+		c   = rim_hue8[idx];
+		oa  = b[3] + ((255u * a + 128u) >> 8);
+		ob  = b[0] + ((c[0] * a + 128u) >> 8);
+		og  = b[1] + ((c[1] * a + 128u) >> 8);
+		or  = b[2] + ((c[2] * a + 128u) >> 8);
+		if (oa > 255u)
+			oa = 255u;
+		if (ob > oa)
+			ob = oa;
+		if (og > oa)
+			og = oa;
+		if (or > oa)
+			or = oa;
+		q[0] = (uint8_t)ob;
+		q[1] = (uint8_t)og;
+		q[2] = (uint8_t)or;
+		q[3] = (uint8_t)oa;
+	}
+	for (i = 0; i < 4; i++)
+		cairo_surface_mark_dirty_rectangle(output->bg_cache,
+		                                   rim->rect[i].x, rim->rect[i].y,
+		                                   rim->rect[i].w, rim->rect[i].h);
+
+	rim->ph     = ph;
+	rim->tick   = tick;
+	rim->filled = true;
+}
+
+static void
+rim_prism_rows(const barny_rim_t *rim, double *top, double *bot, int pw,
+               int sox, int cx)
+{
+	const double *t;
+	const double *b;
+	int           bx;
+	int           x;
+	int           c;
+
+	for (x = 0; x < pw; x++) {
+		bx = x + sox - cx;
+		if (bx < 0)
+			bx = 0;
+		if (bx > rim->cw - 1)
+			bx = rim->cw - 1;
+		t = rim_hued[(uint32_t)(rim->utop_fx[bx] - rim->ph) >> 20];
+		b = rim_hued[(uint32_t)(rim->ubot_fx[bx] - rim->ph) >> 20];
+		for (c = 0; c < 3; c++) {
+			top[x * 3 + c] = t[c];
+			bot[x * 3 + c] = b[c];
+		}
+	}
+}
+
 /* The droplet patch and its distance-field scratch keep a fixed size for a
    given bar, so they live on the output and are reused every frame. */
 static bool
@@ -885,7 +1441,7 @@ lens_scratch(barny_output_t *output, int pw, int ph)
 	output->lens_patch = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw,
 	                                                ph);
 	output->lens_field = calloc((size_t)gw * gh * 2, sizeof(float));
-	output->lens_cols  = calloc((size_t)gw + (size_t)pw * 3,
+	output->lens_cols  = calloc((size_t)gw + (size_t)pw * 6,
 	                            sizeof(double));
 
 	if (cairo_surface_status(output->lens_patch) != CAIRO_STATUS_SUCCESS
@@ -936,6 +1492,7 @@ barny_output_free_glass_caches(barny_output_t *output, bool keep_lens_map)
 		output->lens_map = NULL;
 	}
 	barny_output_free_lens_cache(output);
+	barny_output_free_rim(output);
 }
 
 typedef struct {
@@ -1227,6 +1784,7 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 	float           *ddf;
 	double          *pinch;
 	double          *prm;
+	double          *prmb;
 	/* Denominators fixed for the whole patch. IEEE rules stop the compiler
 	   from folding x/k into x*(1/k) on its own, so each pixel was paying
 	   several ~20-cycle divides for constants. */
@@ -1255,7 +1813,13 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 	inv_hh     = hh > 0.0 ? 1.0 / hh : 0.0;
 	inv_edge_h = edge_h > 0.0 ? 1.0 / edge_h : 0.0;
 
-	prism_row(prm, pw, sox, cx, output->width);
+	prmb  = prm;
+	if (output->rim) {
+		prmb = prm + (size_t)pw * 3;
+		rim_prism_rows(output->rim, prm, prmb, pw, sox, (int)cx);
+	} else {
+		prism_row(prm, pw, sox, cx, output->width);
+	}
 	pinch_profile(pinch, g);
 	lens_fields(df, ddf, pinch, g, bar_top, bar_bot);
 
@@ -1268,6 +1832,7 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 		uint8_t *brow = sy >= 0 && sy < bsrc.h
 		                        ? bsrc.data + sy * bsrc.stride
 		                        : NULL;
+		const double *pr = y + 0.5 < cyp ? prm : prmb;
 
 		for (x = 0; x < pw; x++) {
 			int    gi  = (y + 1) * gw + (x + 1);
@@ -1419,9 +1984,9 @@ build_lens_patch(barny_output_t *output, const lens_geom_t *g)
 			if (!authoritative)
 				pa *= aa;
 			if (pa > 0.0) {
-				outr += prm[x * 3 + 0] * 255.0 * pa;
-				outg += prm[x * 3 + 1] * 255.0 * pa;
-				outb += prm[x * 3 + 2] * 255.0 * pa;
+				outr += pr[x * 3 + 0] * 255.0 * pa;
+				outg += pr[x * 3 + 1] * 255.0 * pa;
+				outb += pr[x * 3 + 2] * 255.0 * pa;
 				outa += 255.0 * pa;
 			}
 			if (outa > 255.0)
@@ -1919,7 +2484,9 @@ build_glass_bg(barny_output_t *output)
 
 	cairo_translate(cr, output->pad_left, output->pad_top);
 	paint_bar_glass(cr, lensed, cw, ch, radius);
-	draw_spectral_rim(cr, cw, ch, radius, state->config.glass_prism);
+	if (!barny_rim_flowing(&state->config))
+		draw_spectral_rim(cr, cw, ch, radius,
+		                  state->config.glass_prism);
 	cairo_destroy(cr);
 
 	build_glass_clean(output, lensed);
@@ -1938,7 +2505,9 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 
 	if (!output->bg_cache) {
 		output->bg_cache = build_glass_bg(output);
+		rim_build(output);
 	}
+	rim_fill(output, output->rim_tick);
 
 	if (output->bg_cache) {
 		cairo_set_source_surface(cr, output->bg_cache, 0, 0);

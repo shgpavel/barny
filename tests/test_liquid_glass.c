@@ -977,3 +977,254 @@ test_lens_map_lifetime(void)
 
 	TEST_SUITE_END();
 }
+
+static cairo_surface_t *
+rim_target(const barny_output_t *out, int scale)
+{
+	return cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                  out->surf_width * scale,
+	                                  out->surf_height * scale);
+}
+
+static void
+rim_draw(barny_output_t *out, cairo_surface_t *surf, double lens_x,
+         uint64_t tick, const barny_rect_t *clip, int n)
+{
+	cairo_t *cr = cairo_create(surf);
+	int      i;
+
+	out->scale         = cairo_image_surface_get_width(surf)
+	                     / out->surf_width;
+	out->rim_tick      = tick;
+	out->state->lens_x = lens_x;
+
+	if (out->scale > 1)
+		cairo_scale(cr, out->scale, out->scale);
+	if (n > 0) {
+		for (i = 0; i < n; i++)
+			cairo_rectangle(cr, clip[i].x, clip[i].y, clip[i].w,
+			                clip[i].h);
+		cairo_clip(cr);
+	}
+	barny_render_liquid_glass(out, cr);
+	cairo_destroy(cr);
+}
+
+static void
+rim_setup(barny_state_t *state, barny_output_t *out, int scale)
+{
+	lens_setup(state, out);
+	state->config.glass_prism_flow = 12.0;
+	state->config.glass_prism_fps  = 15;
+	state->lens_scale              = 0.0;
+	out->scale                     = scale;
+}
+
+static int
+rim_partial_diff(int scale, int shrink, bool droplet)
+{
+	static const uint64_t ticks[] = { 1, 7, 40, 133, 391 };
+	barny_state_t         state;
+	barny_output_t        out;
+	cairo_surface_t      *full;
+	cairo_surface_t      *part;
+	barny_rect_t          rects[5];
+	barny_rect_t          a = { 0 };
+	barny_rect_t          b = { 0 };
+	double                xa;
+	double                xb;
+	size_t                i;
+	int                   n;
+	int                   j;
+	int                   diff = 0;
+
+	rim_setup(&state, &out, scale);
+	if (droplet)
+		state.lens_scale = 1.0;
+	full = rim_target(&out, scale);
+	part = rim_target(&out, scale);
+	rim_draw(&out, part, 300.0, 0, NULL, 0);
+
+	for (i = 0; i < sizeof(ticks) / sizeof(ticks[0]); i++) {
+		xa = 300.0 + 23.0 * i;
+		xb = xa + 23.0;
+		n  = 0;
+		if (droplet) {
+			state.lens_x = xa;
+			barny_lens_rect(&out, &a.x, &a.y, &a.w, &a.h);
+			state.lens_x = xb;
+			barny_lens_rect(&out, &b.x, &b.y, &b.w, &b.h);
+			rects[n++] = barny_rect_union(a, b);
+		} else {
+			xb = 300.0;
+		}
+		n += barny_rim_rects(&out, rects + n);
+		for (j = droplet ? 1 : 0; j < n; j++) {
+			rects[j].x += shrink;
+			rects[j].y += shrink;
+			rects[j].w -= 2 * shrink;
+			rects[j].h -= 2 * shrink;
+		}
+		rim_draw(&out, part, xb, ticks[i], rects, n);
+		rim_draw(&out, full, xb, ticks[i], NULL, 0);
+		diff += lens_diff(full, part);
+	}
+
+	cairo_surface_destroy(full);
+	cairo_surface_destroy(part);
+	barny_output_free_glass_caches(&out, false);
+
+	return diff;
+}
+
+void
+test_rim_flow(void)
+{
+	barny_state_t    state;
+	barny_output_t   out;
+	barny_config_t   cfg;
+	cairo_surface_t *on;
+	cairo_surface_t *off;
+	barny_rect_t     rects[4];
+	barny_rect_t     lr;
+	uint8_t         *da;
+	uint8_t         *db;
+	int              stride;
+	int              cols[2];
+	int              bad;
+	int              c;
+	int              y;
+
+	TEST_SUITE_BEGIN("Rim Flow");
+
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.glass_prism      = 0.8;
+	cfg.glass_prism_flow = 12.0;
+	cfg.glass_prism_fps  = 15;
+
+	TEST("the tick is wall time over the tick length")
+	{
+		ASSERT_TRUE(barny_rim_tick(&cfg, 0) == 0);
+		ASSERT_TRUE(barny_rim_tick(&cfg, 66665) == 0);
+		ASSERT_TRUE(barny_rim_tick(&cfg, 66666 * 5 + 3) == 5);
+		cfg.glass_prism_fps = 30;
+		ASSERT_TRUE(barny_rim_tick(&cfg, 33333 * 7) == 7);
+		cfg.glass_prism_fps = 15;
+	}
+
+	TEST("the phase is the tick's time modulo the hue period")
+	{
+		ASSERT_EQ_DBL(0.0, barny_rim_phase(&cfg, 0), 0.0);
+		ASSERT_EQ_DBL(66666.0 * 90 / 12e6, barny_rim_phase(&cfg, 90),
+		              1e-12);
+		ASSERT_EQ_DBL(66666.0 * 181 / 12e6 - 1.0,
+		              barny_rim_phase(&cfg, 181), 1e-12);
+		cfg.glass_prism_flow = -12.0;
+		ASSERT_EQ_DBL(1.0 - 66666.0 * 90 / 12e6,
+		              barny_rim_phase(&cfg, 90), 1e-12);
+		cfg.glass_prism_flow = 12.0;
+	}
+
+	TEST("the timeout waits for the next tick, at most 200 ms")
+	{
+		ASSERT_EQ_INT(67, barny_rim_timeout_ms(&cfg, 0));
+		ASSERT_EQ_INT(1, barny_rim_timeout_ms(&cfg, 66000));
+		cfg.glass_prism_fps = 1;
+		ASSERT_EQ_INT(200, barny_rim_timeout_ms(&cfg, 0));
+		cfg.glass_prism_fps = 15;
+	}
+
+	TEST("a static or absent rim schedules no ticks")
+	{
+		cfg.glass_prism_flow = 0.0;
+		ASSERT_FALSE(barny_rim_flowing(&cfg));
+		ASSERT_EQ_INT(200, barny_rim_timeout_ms(&cfg, 0));
+		cfg.glass_prism_flow = 12.0;
+		cfg.glass_prism      = 0.0;
+		ASSERT_FALSE(barny_rim_flowing(&cfg));
+		ASSERT_EQ_INT(200, barny_rim_timeout_ms(&cfg, 0));
+	}
+
+	TEST("glass_prism 0 or flow 0 allocates no rim data")
+	{
+		rim_setup(&state, &out, 1);
+		state.config.glass_prism = 0.0;
+		on                       = rim_target(&out, 1);
+		rim_draw(&out, on, 300.0, 5, NULL, 0);
+		ASSERT_NULL(out.rim);
+		ASSERT_EQ_INT(0, barny_rim_rects(&out, rects));
+		barny_output_free_glass_caches(&out, false);
+		state.config.glass_prism      = 0.8;
+		state.config.glass_prism_flow = 0.0;
+		rim_draw(&out, on, 300.0, 5, NULL, 0);
+		ASSERT_NULL(out.rim);
+		barny_output_free_glass_caches(&out, false);
+		state.config.glass_prism_flow = 12.0;
+		rim_draw(&out, on, 300.0, 5, NULL, 0);
+		ASSERT_NOT_NULL(out.rim);
+		ASSERT_EQ_INT(4, barny_rim_rects(&out, rects));
+		barny_output_free_glass_caches(&out, false);
+		ASSERT_NULL(out.rim);
+		cairo_surface_destroy(on);
+	}
+
+	TEST("rim-only redraw matches a full redraw at scale 1")
+	{
+		ASSERT_EQ_INT(0, rim_partial_diff(1, 0, false));
+	}
+
+	TEST("rim-only redraw matches a full redraw at scale 2")
+	{
+		ASSERT_EQ_INT(0, rim_partial_diff(2, 0, false));
+	}
+
+	TEST("at scale 2 the rim rects need their 1 px grow")
+	{
+		ASSERT_TRUE(rim_partial_diff(2, 1, false) > 0);
+	}
+
+	TEST("strip plus rim redraw matches a full redraw while moving")
+	{
+		ASSERT_EQ_INT(0, rim_partial_diff(1, 0, true));
+		ASSERT_EQ_INT(0, rim_partial_diff(2, 0, true));
+	}
+
+	TEST("the droplet's far columns match the droplet-free frame")
+	{
+		rim_setup(&state, &out, 1);
+		on  = rim_target(&out, 1);
+		off = rim_target(&out, 1);
+		bad = 0;
+		for (c = 0; c < 3; c++) {
+			state.lens_scale = 0.0;
+			rim_draw(&out, off, 0.0, 17 + 50 * c, NULL, 0);
+			state.lens_scale = 1.0;
+			rim_draw(&out, on, 200.0 + 200.0 * c, 17 + 50 * c, NULL,
+			         0);
+			barny_lens_rect(&out, &lr.x, &lr.y, &lr.w, &lr.h);
+			lr = barny_rect_clamp(lr, out.surf_width,
+			                      out.surf_height);
+			cols[0] = lr.x;
+			cols[1] = lr.x + lr.w - 1;
+			cairo_surface_flush(on);
+			cairo_surface_flush(off);
+			da     = cairo_image_surface_get_data(on);
+			db     = cairo_image_surface_get_data(off);
+			stride = cairo_image_surface_get_stride(on);
+			for (y = lr.y; y < lr.y + lr.h; y++) {
+				bad += memcmp(da + y * stride + cols[0] * 4,
+				              db + y * stride + cols[0] * 4,
+				              4) != 0;
+				bad += memcmp(da + y * stride + cols[1] * 4,
+				              db + y * stride + cols[1] * 4,
+				              4) != 0;
+			}
+		}
+		ASSERT_EQ_INT(0, bad);
+		cairo_surface_destroy(on);
+		cairo_surface_destroy(off);
+		barny_output_free_glass_caches(&out, false);
+	}
+
+	TEST_SUITE_END();
+}

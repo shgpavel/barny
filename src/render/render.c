@@ -1,7 +1,9 @@
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "barny.h"
+#include "util.h"
 
 static bool
 is_gap_placeholder(const barny_module_t *mod)
@@ -184,6 +186,8 @@ module_visible(const barny_output_t *output, int x, int y, int w, int h)
 
 	if (!output->render_clipped)
 		return true;
+	if (barny_rect_empty(*c))
+		return false;
 
 	return x + w + MODULE_BLEED > c->x
 	       && x - MODULE_BLEED < c->x + c->w
@@ -272,28 +276,127 @@ lens_partial_ok(barny_output_t *output)
 	       && !barny_modules_any_dirty(state);
 }
 
-static void
-render_bar(barny_output_t *output, cairo_t *cr, const barny_rect_t *clip)
+static bool
+rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
+         uint8_t **buf, bool cmp)
 {
-	if (clip) {
-		/* Clip first: the clear, the bar-cache blit and the droplet all
-		   land inside the strip, and the modules outside it skip their
-		   text shaping entirely. */
-		cairo_save(cr);
-		cairo_rectangle(cr, clip->x, clip->y, clip->w, clip->h);
-		cairo_clip(cr);
+	cairo_surface_t *surf = output->cairo_surface;
+	uint8_t         *data;
+	uint8_t         *p;
+	size_t           len  = 0;
+	size_t           rlen;
+	bool             diff = false;
+	int              s    = output->scale;
+	int              bw;
+	int              bh;
+	int              st;
+	int              i;
+	int              y;
+	barny_rect_t     r;
 
-		output->render_clipped = true;
-		output->clip           = *clip;
+	cairo_surface_flush(surf);
+	data = cairo_image_surface_get_data(surf);
+	bw   = cairo_image_surface_get_width(surf);
+	bh   = cairo_image_surface_get_height(surf);
+	st   = cairo_image_surface_get_stride(surf);
+	if (!data)
+		return false;
+
+	for (i = 0; i < n; i++) {
+		r = barny_rect_clamp((barny_rect_t){ rects[i].x * s,
+		                                     rects[i].y * s,
+		                                     rects[i].w * s,
+		                                     rects[i].h * s },
+		                     bw, bh);
+		len += (size_t)r.w * 4 * (size_t)r.h;
 	}
+	if (!cmp) {
+		*buf = malloc(len ? len : 1);
+		if (!*buf)
+			return false;
+	}
+
+	p = *buf;
+	for (i = 0; i < n; i++) {
+		r    = barny_rect_clamp((barny_rect_t){ rects[i].x * s,
+		                                        rects[i].y * s,
+		                                        rects[i].w * s,
+		                                        rects[i].h * s },
+		                        bw, bh);
+		rlen = (size_t)r.w * 4;
+		for (y = r.y; y < r.y + r.h; y++) {
+			if (cmp)
+				diff |= memcmp(p, data + y * st + r.x * 4,
+				               rlen) != 0;
+			else
+				memcpy(p, data + y * st + r.x * 4, rlen);
+			p += rlen;
+		}
+	}
+
+	return diff;
+}
+
+static void
+render_full(barny_output_t *output, cairo_t *cr)
+{
+	barny_rect_t rims[4];
+	uint8_t     *snap = NULL;
+	int          n;
+
+	barny_render_liquid_glass(output, cr);
+
+	n = barny_rim_rects(output, rims);
+	if (n > 0)
+		rim_snap(output, rims, n, &snap, false);
+
+	barny_render_modules(output, cr);
+
+	if (snap) {
+		output->rim_mods_touch = rim_snap(output, rims, n, &snap, true);
+		free(snap);
+	}
+}
+
+static void
+render_bar(barny_output_t *output, cairo_t *cr, const barny_rect_t *clip,
+           int n, const barny_rect_t *mods)
+{
+	int i;
+
+	if (n == 0) {
+		render_full(output, cr);
+		return;
+	}
+
+	/* Clip first: the clear, the bar-cache blit and the droplet all
+	   land inside the clip rects, and the modules outside them skip
+	   their text shaping entirely. */
+	cairo_save(cr);
+	for (i = 0; i < n; i++)
+		cairo_rectangle(cr, clip[i].x, clip[i].y, clip[i].w, clip[i].h);
+	cairo_clip(cr);
+
+	output->render_clipped = true;
+	output->clip           = *mods;
 
 	barny_render_liquid_glass(output, cr);
 	barny_render_modules(output, cr);
 
-	if (clip) {
-		output->render_clipped = false;
-		cairo_restore(cr);
-	}
+	output->render_clipped = false;
+	cairo_restore(cr);
+}
+
+static bool
+rim_partial_ok(barny_output_t *output)
+{
+	barny_state_t *state = output->state;
+
+	return output->lens_dmg_valid
+	       && output->bg_cache
+	       && (output == state->dyn_output
+	           || barny_rect_empty(output->lens_dmg))
+	       && !barny_modules_any_dirty(state);
 }
 
 static void
@@ -363,9 +466,14 @@ barny_render_frame(barny_output_t *output)
 	barny_state_t *state;
 	int            saved_widths[BARNY_MAX_MODULES];
 	barny_rect_t   lens;
-	barny_rect_t   dmg;
-	bool           lens_anim;
+	barny_rect_t   dmg[5];
+	barny_rect_t   mods;
+	uint64_t       tick;
+	bool           rim_moved;
 	bool           partial;
+	bool           lens_anim;
+	int            n = 0;
+	int            i;
 
 	if (!output->configured || !output->cr) {
 		return;
@@ -385,18 +493,30 @@ barny_render_frame(barny_output_t *output)
 
 	module_widths_save(state, saved_widths);
 
+	tick             = barny_rim_tick(&state->config, barny_now_us());
+	rim_moved        = output->rim && output->rim_tick != tick;
+	output->rim_tick = tick;
+
 	if (!barny_lens_rect(output, &lens.x, &lens.y, &lens.w, &lens.h))
 		lens = (barny_rect_t){ 0 };
-	dmg     = lens_damage(output, lens);
-	partial = lens_partial_ok(output) && !barny_rect_empty(dmg);
+	mods = lens_damage(output, lens);
+	partial = barny_rect_empty(mods) ? rim_partial_ok(output)
+	                                 : lens_partial_ok(output);
+	if (partial && !barny_rect_empty(mods))
+		dmg[n++] = mods;
+	if (partial && rim_moved)
+		n += barny_rim_rects(output, dmg + n);
+	if (n > 0 && output->rim_mods_touch)
+		for (i = 0; i < n; i++)
+			mods = barny_rect_union(mods, dmg[i]);
 
-	render_bar(output, cr, partial ? &dmg : NULL);
+	render_bar(output, cr, dmg, n, &mods);
 
 	/* A module resized while drawing, so the layout it was drawn with is
 	   stale: redo the bar in full, strip or not. */
 	if (module_widths_changed(state, saved_widths)) {
-		partial = false;
-		render_bar(output, cr, NULL);
+		n = 0;
+		render_bar(output, cr, NULL, 0, NULL);
 	}
 
 	modules_clear_dirty(state);
@@ -408,7 +528,7 @@ barny_render_frame(barny_output_t *output)
 	output->lens_dmg       = lens;
 	output->lens_dmg_valid = true;
 
-	frame_commit(output, &dmg, partial ? 1 : 0);
+	frame_commit(output, dmg, n);
 }
 
 void

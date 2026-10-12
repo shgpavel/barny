@@ -64,6 +64,36 @@ setup_epoll(barny_state_t *s)
 	return 0;
 }
 
+static int
+rim_timeout(barny_state_t *s)
+{
+	barny_output_t *out;
+
+	if (!barny_rim_flowing(&s->config))
+		return 200;
+
+	for (out = s->outputs; out; out = out->next) {
+		if (out->configured && out->cr
+		    && !(out->frame_pending && out->redraw_queued)
+		    && (out->rim || !out->bg_cache))
+			return barny_rim_timeout_ms(&s->config, barny_now_us());
+	}
+
+	return 200;
+}
+
+static void
+rim_render_due(barny_state_t *s)
+{
+	barny_output_t *out;
+	uint64_t        now = barny_now_us();
+
+	for (out = s->outputs; out; out = out->next) {
+		if (barny_rim_due(out, now))
+			barny_render_frame(out);
+	}
+}
+
 static void
 run_event_loop(barny_state_t *s)
 {
@@ -104,7 +134,7 @@ run_event_loop(barny_state_t *s)
 			break;
 		}
 
-		nfds = epoll_wait(s->epoll_fd, events, 16, 200);
+		nfds = epoll_wait(s->epoll_fd, events, 16, rim_timeout(s));
 
 		if (nfds < 0) {
 			wl_display_cancel_read(s->display);
@@ -169,6 +199,8 @@ run_event_loop(barny_state_t *s)
 				barny_render_frame(s->dyn_output);
 			s->dyn_dirty = false;
 		}
+
+		rim_render_due(s);
 	}
 }
 

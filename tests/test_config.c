@@ -574,6 +574,111 @@ test_config_load(void)
 		cleanup_temp_config(path);
 	}
 
+	TEST("glass_prism_flow and glass_prism_fps default to 12 s, 15 fps")
+	{
+		barny_config_t config;
+
+		barny_config_defaults(&config);
+		ASSERT_EQ_DBL(12.0, config.glass_prism_flow, 0.0);
+		ASSERT_EQ_INT(15, config.glass_prism_fps);
+	}
+
+	TEST("glass_prism_flow = -30 reads as -30.0")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism_flow = -30\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_DBL(-30.0, config.glass_prism_flow, 0.0);
+		cleanup_temp_config(path);
+	}
+
+	TEST("glass_prism_flow = 0.5 reads as 0.0")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism_flow = 0.5\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_DBL(0.0, config.glass_prism_flow, 0.0);
+		cleanup_temp_config(path);
+	}
+
+	TEST("glass_prism_flow = -0.9 reads as 0.0")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism_flow = -0.9\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_DBL(0.0, config.glass_prism_flow, 0.0);
+		cleanup_temp_config(path);
+	}
+
+	TEST("glass_prism_flow = 1000 reads as 600.0")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism_flow = 1000\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_DBL(600.0, config.glass_prism_flow, 0.0);
+		cleanup_temp_config(path);
+	}
+
+	TEST("glass_prism_flow = -1000 reads as -600.0")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism_flow = -1000\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_DBL(-600.0, config.glass_prism_flow, 0.0);
+		cleanup_temp_config(path);
+	}
+
+	TEST("glass_prism_fps = 30 reads as 30")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism_fps = 30\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(30, config.glass_prism_fps);
+		cleanup_temp_config(path);
+	}
+
+	TEST("glass_prism_fps = 0 reads as 1")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism_fps = 0\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(1, config.glass_prism_fps);
+		cleanup_temp_config(path);
+	}
+
+	TEST("glass_prism_fps = 200 reads as 60")
+	{
+		barny_config_t config;
+		const char    *path;
+
+		barny_config_defaults(&config);
+		path = create_temp_config("glass_prism_fps = 200\n");
+		barny_config_load(&config, path);
+		ASSERT_EQ_INT(60, config.glass_prism_fps);
+		cleanup_temp_config(path);
+	}
+
 	TEST("parses noise_octaves")
 	{
 		barny_config_t config;

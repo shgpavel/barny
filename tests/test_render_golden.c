@@ -77,6 +77,11 @@ static const golden_t golden[] = {
 	{ "bar.top.alpha.bg_cache",          0xd62cb6ebe3636680ULL },
 	{ "bar.top.alpha.glass_clean",       0x55cd1d2e93770599ULL },
 	{ "bar.top.alpha.shadow_cache",      0x2b7685dca03e576eULL },
+	{ "flow.bot.t0.rest",                0x9f3a1cf5f835eb9bULL },
+	{ "flow.bot.t37.rest",               0x4128d2c977a71b11ULL },
+	{ "flow.bot.t37.centre",             0xd01e49a4424ecd07ULL },
+	{ "flow.bot.t90.left",               0xa6d170fbce225742ULL },
+	{ "flow2.top.t37.centre",            0xcf0177d806eb1486ULL },
 	{ "morph.bot.opaque.m002",           0x531f606c2fce3420ULL },
 	{ "morph.bot.opaque.m005",           0x0334310de12d311aULL },
 	{ "morph.bot.opaque.m010",           0x073609066afc90b6ULL },
@@ -434,6 +439,8 @@ bar_new(cairo_surface_t *wall, bool top, double prism)
 	b->state.config.glass_gleam   = 0.24;
 	b->state.config.glass_bulge   = 15.0;
 	b->state.config.glass_prism   = prism;
+	b->state.config.glass_prism_flow = 0.0;
+	b->state.config.glass_prism_fps  = 15;
 	b->state.config.border_radius = BAR_R;
 	b->state.config.position_top  = top;
 	b->state.blurred_wallpaper    = wall;
@@ -611,6 +618,29 @@ bar_cases(cairo_surface_t *wall, cairo_surface_t *veil)
 	b = bar_new(veil, true, 0.8);
 	bar_check(b, "bar.top.alpha.centre", 1, 517.37, 0.0, 1.0);
 	bar_caches(b, "bar.top.alpha");
+	bar_free(b);
+}
+
+static void
+flow_cases(cairo_surface_t *wall)
+{
+	bar_t *b;
+
+	b                                = bar_new(wall, false, 0.8);
+	b->state.config.glass_prism_flow = 12.0;
+	b->out.rim_tick                  = 0;
+	bar_check(b, "flow.bot.t0.rest", 1, 517.37, 0.0, 0.0);
+	b->out.rim_tick = 37;
+	bar_check(b, "flow.bot.t37.rest", 1, 517.37, 0.0, 0.0);
+	bar_check(b, "flow.bot.t37.centre", 1, 517.37, 0.0, 1.0);
+	b->out.rim_tick = 90;
+	bar_check(b, "flow.bot.t90.left", 1, 60.0, 0.0, 1.0);
+	bar_free(b);
+
+	b                                = bar_new(wall, true, 0.8);
+	b->state.config.glass_prism_flow = -12.0;
+	b->out.rim_tick                  = 37;
+	bar_check(b, "flow2.top.t37.centre", 2, 517.37, 0.0, 1.0);
 	bar_free(b);
 }
 
@@ -973,6 +1003,7 @@ main(int argc, char **argv)
 
 	lens_cases();
 	bar_cases(wall, veil);
+	flow_cases(wall);
 	rebuild_case(wall, false);
 	rebuild_case(wall, true);
 	partial_case(wall, false, "partial.bot", 1, 517.37, 560.9);

@@ -257,6 +257,93 @@ bench_lens_render(int iters)
 	barny_config_cleanup(&state.config);
 }
 
+static void
+bench_rim(int iters, int mode)
+{
+	static const char *const names[] = {
+		"ambient rim tick", "droplet frame, flow off",
+		"droplet frame, off a tick", "droplet frame, on a tick",
+	};
+	barny_state_t    state  = { 0 };
+	barny_output_t   output = { 0 };
+	barny_rect_t     rects[5];
+	cairo_surface_t *wallpaper;
+	cairo_surface_t *surface;
+	cairo_t         *cr;
+	cairo_t         *wc;
+	double           t0;
+	double           t1;
+	int              i;
+	int              j;
+	int              n;
+
+	barny_config_defaults(&state.config);
+	state.config.dynamic_glass = true;
+	if (mode == 1)
+		state.config.glass_prism_flow = 0.0;
+	state.dyn_output           = &output;
+	state.lens_scale           = mode == 0 ? 0.0 : 1.0;
+	state.lens_x               = BAR_W / 2.0;
+
+	output.state       = &state;
+	output.scale       = 1;
+	output.width       = BAR_W;
+	output.height      = BAR_H;
+	output.pad_left    = 8;
+	output.pad_right   = 8;
+	output.pad_top     = 4;
+	output.pad_bottom  = 8;
+	output.surf_width  = output.pad_left + output.width + output.pad_right;
+	output.surf_height = output.pad_top + output.height + output.pad_bottom;
+
+	wallpaper = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BAR_W, BAR_H);
+	wc        = cairo_create(wallpaper);
+	cairo_set_source_rgb(wc, 0.12, 0.16, 0.24);
+	cairo_paint(wc);
+	cairo_destroy(wc);
+	state.blurred_wallpaper = wallpaper;
+
+	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                     output.surf_width,
+	                                     output.surf_height);
+	cr      = cairo_create(surface);
+
+	barny_render_liquid_glass(&output, cr);
+
+	t0 = now_ns();
+	for (i = 0; i < iters; i++) {
+		int phase = i % 120;
+
+		n = 0;
+		if (mode != 0) {
+			state.lens_x  = 200.0 + phase * 12.0 + (i % 7) * 0.137;
+			state.lens_vx = (phase - 60) * 20.0;
+			barny_lens_rect(&output, &rects[0].x, &rects[0].y,
+			                &rects[0].w, &rects[0].h);
+			n = 1;
+		}
+		if (mode == 0 || mode == 3) {
+			output.rim_tick = (uint64_t)i + 1;
+			n += barny_rim_rects(&output, rects + n);
+		}
+		cairo_save(cr);
+		for (j = 0; j < n; j++)
+			cairo_rectangle(cr, rects[j].x, rects[j].y, rects[j].w,
+			                rects[j].h);
+		cairo_clip(cr);
+		barny_render_liquid_glass(&output, cr);
+		cairo_restore(cr);
+	}
+	t1 = now_ns();
+	report(names[mode], iters, t1 - t0);
+
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+	barny_output_free_glass_caches(&output, false);
+	cairo_surface_destroy(wallpaper);
+	barny_config_cleanup(&state.config);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -266,10 +353,20 @@ main(int argc, char **argv)
 		bench_lens_render(5000);
 		return 0;
 	}
+	if (argc > 1 && strcmp(argv[1], "--rim-only") == 0) {
+		bench_rim(5000, 0);
+		bench_rim(3000, 1);
+		bench_rim(3000, 2);
+		bench_rim(3000, 3);
+		return 0;
+	}
 
 	bench_config_parse(2000);
 	bench_text_measure(5000);
 	bench_lens_render(2000);
+	bench_rim(2000, 0);
+	bench_rim(1000, 2);
+	bench_rim(1000, 3);
 
 	{
 		PangoFontDescription *fd;

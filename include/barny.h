@@ -28,6 +28,7 @@ typedef struct barny_state  barny_state_t;
 typedef struct barny_output barny_output_t;
 typedef struct barny_module barny_module_t;
 typedef struct barny_menu   barny_menu_t;
+typedef struct barny_rim    barny_rim_t;
 
 typedef struct {
 	int x;
@@ -186,6 +187,8 @@ struct barny_config {
 	double                  glass_gleam;
 	double                  glass_bulge;
 	double                  glass_prism;
+	double                  glass_prism_flow;
+	int                     glass_prism_fps;
 	bool                    popup_animations;
 
 	barny_refraction_mode_t refraction_mode;
@@ -310,6 +313,10 @@ struct barny_output {
 	barny_rect_t                  lens_dmg;
 	bool                          lens_dmg_valid;
 
+	barny_rim_t                  *rim;
+	uint64_t                      rim_tick;
+	bool                          rim_mods_touch;
+
 	/* while set, modules that fall outside clip skip their render
 	   entirely (a lens frame must not re-shape text it cannot show) */
 	bool                          render_clipped;
@@ -399,6 +406,20 @@ void
 barny_output_free_lens_cache(barny_output_t *output);
 void
 barny_output_free_glass_caches(barny_output_t *output, bool keep_lens_map);
+bool
+barny_rim_flowing(const barny_config_t *config);
+uint64_t
+barny_rim_tick(const barny_config_t *config, uint64_t now_us);
+double
+barny_rim_phase(const barny_config_t *config, uint64_t tick);
+int
+barny_rim_timeout_ms(const barny_config_t *config, uint64_t now_us);
+bool
+barny_rim_due(const barny_output_t *output, uint64_t now_us);
+int
+barny_rim_rects(const barny_output_t *output, barny_rect_t *rects);
+void
+barny_output_free_rim(barny_output_t *output);
 void
 barny_render_modules(barny_output_t *output, cairo_t *cr);
 /* rect the module occupies on this output, false when it is not drawn there */

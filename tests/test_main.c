@@ -26,6 +26,8 @@ test_damage_rects(void);
 extern void
 test_lens_partial_redraw(void);
 extern void
+test_rim_flow(void);
+extern void
 test_lens_channel_tap(void);
 extern void
 test_lens_opaque_fast_path(void);
@@ -99,6 +101,7 @@ RUN_SUITE(test_prism_stops);
 RUN_SUITE(test_lens_opaque_fast_path);
 RUN_SUITE(test_damage_rects);
 RUN_SUITE(test_lens_partial_redraw);
+RUN_SUITE(test_rim_flow);
 RUN_SUITE(test_lens_map_lifetime);
 
 printf("\n--- Module System Tests ---\n");
