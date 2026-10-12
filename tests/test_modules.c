@@ -3,9 +3,7 @@
 #include <string.h>
 
 static int mock_init_called    = 0;
-static int mock_destroy_called = 0;
 static int mock_update_called  = 0;
-static int mock_render_called  = 0;
 
 static int
 mock_init(barny_module_t *self, barny_state_t *state)
@@ -20,7 +18,6 @@ static void
 mock_destroy(barny_module_t *self)
 {
 	(void)self;
-	mock_destroy_called++;
 }
 
 static void
@@ -39,16 +36,13 @@ mock_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	(void)y;
 	(void)w;
 	(void)h;
-	mock_render_called++;
 }
 
 static void
 reset_mock_counters(void)
 {
 	mock_init_called    = 0;
-	mock_destroy_called = 0;
 	mock_update_called  = 0;
-	mock_render_called  = 0;
 }
 
 static barny_module_t *

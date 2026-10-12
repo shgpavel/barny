@@ -6,6 +6,7 @@ Checks: >
   performance-*,
   portability-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-signed-bitwise,
   -bugprone-reserved-identifier,
   -bugprone-assignment-in-if-condition,
   -bugprone-implicit-widening-of-multiplication-result,
@@ -28,3 +29,4 @@ Checks: >
 
 WarningsAsErrors: ''
 HeaderFilterRegex: 'include/.*\.h$'
+ExcludeHeaderFilterRegex: '^/usr/'

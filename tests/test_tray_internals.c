@@ -6,8 +6,6 @@ static sni_item_t *test_items      = NULL;
 static int         activate_calls  = 0;
 static int         secondary_calls = 0;
 static sni_item_t *last_item       = NULL;
-static int         last_x          = 0;
-static int         last_y          = 0;
 static int         overflow_calls  = 0;
 
 sni_item_t *
@@ -23,8 +21,8 @@ barny_sni_item_activate(barny_state_t *state, sni_item_t *item, int x, int y)
 	(void)state;
 	activate_calls++;
 	last_item = item;
-	last_x    = x;
-	last_y    = y;
+	(void)x;
+	(void)y;
 }
 
 void
@@ -34,8 +32,8 @@ barny_sni_item_secondary_activate(barny_state_t *state, sni_item_t *item, int x,
 	(void)state;
 	secondary_calls++;
 	last_item = item;
-	last_x    = x;
-	last_y    = y;
+	(void)x;
+	(void)y;
 }
 
 bool
@@ -83,8 +81,6 @@ reset_tray_mocks(void)
 	activate_calls  = 0;
 	secondary_calls = 0;
 	last_item       = NULL;
-	last_x          = 0;
-	last_y          = 0;
 	overflow_calls  = 0;
 	test_items      = NULL;
 }
