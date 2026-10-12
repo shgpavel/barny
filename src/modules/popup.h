@@ -92,6 +92,9 @@ typedef struct {
 	double alpha;
 } barny_glass_bubble_t;
 
+bool
+barny_glass_bubble_bounds(const barny_glass_bubble_t *bub, int sw, int sh,
+                          int *x0, int *y0, int *x1, int *y1);
 void
 barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
                         const barny_glass_bubble_t *bub);

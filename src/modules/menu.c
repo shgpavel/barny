@@ -114,6 +114,8 @@ struct barny_menu {
 	cairo_surface_t              *glass_src;
 	cairo_surface_t              *content_cache;
 	cairo_surface_t              *rest_src; /* the open panel, bead aside */
+	bool                          rest_shown;
+	barny_rect_t                  bead_dmg;
 
 	enum menu_anim                anim;
 	double                        morph;
@@ -580,6 +582,7 @@ menu_build_rest(barny_menu_t *m)
 	barny_glass_panel_t panel;
 	cairo_t            *rc;
 
+	m->rest_shown = false;
 	if (m->rest_src) {
 		cairo_surface_destroy(m->rest_src);
 		m->rest_src = NULL;
@@ -690,18 +693,17 @@ menu_bead_step(barny_menu_t *m)
 	return true;
 }
 
-static void
-menu_draw_bead(barny_menu_t *m, cairo_t *cr)
+static bool
+menu_bead(barny_menu_t *m, barny_glass_bubble_t *bead)
 {
-	barny_glass_bubble_t bead;
-	double               s = m->bead_scale;
-	double               stretch_x;
-	double               stretch_y;
-	double               size;
+	double s = m->bead_scale;
+	double stretch_x;
+	double stretch_y;
+	double size;
 
 	if (!m->rest_src || s <= 0.004 || m->bead_hw < 1.0
 	    || m->bead_hh < 1.0)
-		return;
+		return false;
 	if (s > 1.0)
 		s = 1.0;
 
@@ -716,30 +718,57 @@ menu_draw_bead(barny_menu_t *m, cairo_t *cr)
 
 	size = MENU_BEAD_POP_SIZE + (1.0 - MENU_BEAD_POP_SIZE) * s;
 
-	bead.cx     = m->bead_x;
-	bead.cy     = m->bead_y;
-	bead.hw     = m->bead_hw * size
-	              * (1.0 + stretch_x - 0.25 * stretch_y);
-	bead.hh     = m->bead_hh * size
-	              * (1.0 + stretch_y - 0.25 * stretch_x);
-	bead.radius = MENU_BEAD_RADIUS;
-	bead.alpha  = s;
+	bead->cx     = m->bead_x;
+	bead->cy     = m->bead_y;
+	bead->hw     = m->bead_hw * size
+	               * (1.0 + stretch_x - 0.25 * stretch_y);
+	bead->hh     = m->bead_hh * size
+	               * (1.0 + stretch_y - 0.25 * stretch_x);
+	bead->radius = MENU_BEAD_RADIUS;
+	bead->alpha  = s;
 
-	barny_glass_bubble_draw(cr, m->rest_src, &bead);
+	return true;
+}
+
+static barny_rect_t
+menu_bead_rect(barny_menu_t *m, const barny_glass_bubble_t *bead, bool on)
+{
+	barny_rect_t r  = { 0, 0, 0, 0 };
+	int          sw = cairo_image_surface_get_width(m->rest_src);
+	int          sh = cairo_image_surface_get_height(m->rest_src);
+	int          x0, y0, x1, y1;
+
+	if (on
+	    && barny_glass_bubble_bounds(bead, sw, sh, &x0, &y0, &x1, &y1)) {
+		r.x = x0;
+		r.y = y0;
+		r.w = x1 - x0;
+		r.h = y1 - y0;
+	}
+	return r;
 }
 
 static void
 menu_present(barny_menu_t *m)
 {
-	barny_glass_panel_t panel;
-	cairo_t            *cr = m->cr;
-	barny_rect_t        patch;
-	barny_rect_t        dmg;
+	barny_glass_panel_t  panel;
+	barny_glass_bubble_t bead;
+	cairo_t             *cr = m->cr;
+	bool                 morphing;
+	bool                 bead_on  = false;
+	barny_rect_t         bead_dmg = { 0, 0, 0, 0 };
+	barny_rect_t         patch;
+	barny_rect_t         dmg;
 
 	if (!cr || !m->buffer)
 		return;
 
 	menu_panel(m, &panel);
+	morphing = m->anim == MENU_ANIM_OPENING || m->anim == MENU_ANIM_CLOSING;
+	if (!morphing && m->rest_src) {
+		bead_on  = menu_bead(m, &bead);
+		bead_dmg = menu_bead_rect(m, &bead, bead_on);
+	}
 
 	/* a submenu resizes the panel, so wipe and repost the union of the old
 	   rect and the new one or the wider layout leaves a ghost behind */
@@ -749,6 +778,14 @@ menu_present(barny_menu_t *m)
 	patch.h = m->patch_h;
 	dmg     = barny_rect_union(patch, m->damage);
 
+	if (!morphing && m->rest_src && m->rest_shown
+	    && m->damage.x == patch.x && m->damage.y == patch.y
+	    && m->damage.w == patch.w && m->damage.h == patch.h) {
+		dmg = barny_rect_union(bead_dmg, m->bead_dmg);
+		dmg.x += patch.x;
+		dmg.y += patch.y;
+	}
+
 	cairo_save(cr);
 	cairo_rectangle(cr, dmg.x, dmg.y, dmg.w, dmg.h);
 	cairo_clip(cr);
@@ -757,7 +794,7 @@ menu_present(barny_menu_t *m)
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
 	cairo_translate(cr, m->patch_x, m->patch_y);
-	if (m->anim == MENU_ANIM_OPENING || m->anim == MENU_ANIM_CLOSING) {
+	if (morphing) {
 		/* mid-morph the panel is still a droplet; the bead only rides a
 		   panel that has finished opening */
 		barny_glass_panel_morph(cr, &panel, m->glass_src,
@@ -766,7 +803,8 @@ menu_present(barny_menu_t *m)
 		cairo_set_source_surface(cr, m->rest_src, 0, 0);
 		cairo_paint(cr);
 		cairo_set_source_rgba(cr, 0, 0, 0, 0);
-		menu_draw_bead(m, cr);
+		if (bead_on)
+			barny_glass_bubble_draw(cr, m->rest_src, &bead);
 	} else {
 		barny_glass_panel_compose(cr, m->state, m->out, &panel,
 		                          m->content_cache);
@@ -775,9 +813,13 @@ menu_present(barny_menu_t *m)
 
 	cairo_surface_flush(m->cairo_surface);
 	wl_surface_attach(m->surface, m->buffer, 0, 0);
-	wl_surface_damage_buffer(m->surface, dmg.x, dmg.y, dmg.w, dmg.h);
+	if (!barny_rect_empty(dmg))
+		wl_surface_damage_buffer(m->surface, dmg.x, dmg.y, dmg.w,
+		                         dmg.h);
 
-	m->damage = patch;
+	m->rest_shown = !morphing && m->rest_src;
+	m->bead_dmg   = bead_dmg;
+	m->damage     = patch;
 }
 
 /* One frame of whatever is in motion: the panel's own morph, the bead chasing
@@ -863,6 +905,7 @@ menu_paint(barny_menu_t *m)
 static void
 menu_teardown_buffer(barny_menu_t *m)
 {
+	m->rest_shown = false;
 	if (m->cr) {
 		cairo_destroy(m->cr);
 		m->cr = NULL;

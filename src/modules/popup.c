@@ -742,6 +742,29 @@ bubble_patch(int w, int h)
 	return s_bub;
 }
 
+bool
+barny_glass_bubble_bounds(const barny_glass_bubble_t *bub, int sw, int sh,
+                          int *x0, int *y0, int *x1, int *y1)
+{
+	if (bub->alpha <= 0.004 || bub->hw < 1.0 || bub->hh < 1.0)
+		return false;
+
+	*x0 = (int)floor(bub->cx - bub->hw) - BUBBLE_PAD;
+	*y0 = (int)floor(bub->cy - bub->hh) - BUBBLE_PAD;
+	*x1 = (int)ceil(bub->cx + bub->hw) + BUBBLE_PAD;
+	*y1 = (int)ceil(bub->cy + bub->hh) + BUBBLE_PAD;
+	if (*x0 < 0)
+		*x0 = 0;
+	if (*y0 < 0)
+		*y0 = 0;
+	if (*x1 > sw)
+		*x1 = sw;
+	if (*y1 > sh)
+		*y1 = sh;
+
+	return *x1 > *x0 && *y1 > *y0;
+}
+
 void
 barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
                         const barny_glass_bubble_t *bub)
@@ -763,8 +786,15 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 	int              y1;
 	int              pw;
 	int              ph;
+	int              n;
+	int              c;
 	int              x;
 	int              y;
+	double          *field;
+	double          *fprev;
+	double          *fcur;
+	double          *fnext;
+	double          *ftmp;
 
 	if (!src || a <= 0.004 || hw < 1.0 || hh < 1.0)
 		return;
@@ -783,37 +813,43 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 	if (!sdata)
 		return;
 
-	x0 = (int)floor(bub->cx - hw) - BUBBLE_PAD;
-	y0 = (int)floor(bub->cy - hh) - BUBBLE_PAD;
-	x1 = (int)ceil(bub->cx + hw) + BUBBLE_PAD;
-	y1 = (int)ceil(bub->cy + hh) + BUBBLE_PAD;
-	if (x0 < 0)
-		x0 = 0;
-	if (y0 < 0)
-		y0 = 0;
-	if (x1 > sw)
-		x1 = sw;
-	if (y1 > sh)
-		y1 = sh;
+	if (!barny_glass_bubble_bounds(bub, sw, sh, &x0, &y0, &x1, &y1))
+		return;
 
 	pw = x1 - x0;
 	ph = y1 - y0;
-	if (pw <= 0 || ph <= 0)
-		return;
 
 	patch = bubble_patch(pw, ph);
 	if (!patch)
 		return;
 
+	n     = pw + 2;
+	field = field_rows(n);
+	if (!field)
+		return;
+
 	ddata   = cairo_image_surface_get_data(patch);
 	dstride = cairo_image_surface_get_stride(patch);
+
+#define BUBBLE_SDF(px, py) \
+	barny_sd_round_rect((px) - bub->cx, (py) - bub->cy, hw, hh, rr)
+#define BUBBLE_ROW(f, yy)                                                     \
+	for (c = 0; c < n; c++)                                               \
+		(f)[c] = BUBBLE_SDF((x0 - 1 + c) + 0.5, (yy) + 0.5)
+
+	fprev = field;
+	fcur  = field + n;
+	fnext = field + 2 * n;
+	BUBBLE_ROW(fprev, y0 - 1);
+	BUBBLE_ROW(fcur, y0);
 
 	for (y = 0; y < ph; y++) {
 		uint8_t *drow = ddata + (ptrdiff_t)y * dstride;
 		double   ly   = y0 + y + 0.5;
 
+		BUBBLE_ROW(fnext, y0 + y + 1);
+
 		for (x = 0; x < pw; x++) {
-			double  lx = x0 + x + 0.5;
 			double  d;
 			double  dl;
 			double  dr;
@@ -843,14 +879,14 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			double  band;
 			double  spec = 0.0;
 			double  ap;
-			uint8_t s1[4];
-			uint8_t s2[4];
-			uint8_t s3[4];
+			uint8_t a1;
+			uint8_t a2;
+			uint8_t a3;
+			uint8_t c1;
+			uint8_t c2;
+			uint8_t c3;
 
-#define BUBBLE_SDF(px, py) \
-	barny_sd_round_rect((px) - bub->cx, (py) - bub->cy, hw, hh, rr)
-
-			d = BUBBLE_SDF(lx, ly);
+			d = fcur[x + 1];
 			if (d >= 0.5) {
 				drow[x * 4 + 0] = 0;
 				drow[x * 4 + 1] = 0;
@@ -859,10 +895,10 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 				continue;
 			}
 
-			dl = BUBBLE_SDF(lx - 1.0, ly);
-			dr = BUBBLE_SDF(lx + 1.0, ly);
-			du = BUBBLE_SDF(lx, ly - 1.0);
-			dv = BUBBLE_SDF(lx, ly + 1.0);
+			dl = fcur[x];
+			dr = fcur[x + 2];
+			du = fprev[x + 1];
+			dv = fnext[x + 1];
 			if (!glass_sdf_normal_aa(d, dl, dr, du, dv, &nnx, &nny,
 			                         &aa)) {
 				drow[x * 4 + 0] = 0;
@@ -888,17 +924,31 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			pedge  = (1.0 - pp) * (1.0 - pp);
 			cs     = BUBBLE_CHROMA * pedge;
 
-			barny_sample_bilinear(sdata, sstride, sw, sh,
-			                      x0 + x + dispx - nnx * cs,
-			                      y0 + y + dispy - nny * cs, s1);
-			barny_sample_bilinear(sdata, sstride, sw, sh,
-			                      x0 + x + dispx, y0 + y + dispy, s2);
-			barny_sample_bilinear(sdata, sstride, sw, sh,
-			                      x0 + x + dispx + nnx * cs,
-			                      y0 + y + dispy + nny * cs, s3);
-			fb = s3[3] > 0 ? s3[0] * 255.0 / s3[3] : 0.0;
-			fg = s2[3] > 0 ? s2[1] * 255.0 / s2[3] : 0.0;
-			fr = s1[3] > 0 ? s1[2] * 255.0 / s1[3] : 0.0;
+			c1 = barny_sample_bilinear_ch(sdata, sstride, sw, sh,
+			                              x0 + x + dispx - nnx * cs,
+			                              y0 + y + dispy - nny * cs,
+			                              2);
+			a1 = barny_sample_bilinear_ch(sdata, sstride, sw, sh,
+			                              x0 + x + dispx - nnx * cs,
+			                              y0 + y + dispy - nny * cs,
+			                              3);
+			c2 = barny_sample_bilinear_ch(sdata, sstride, sw, sh,
+			                              x0 + x + dispx,
+			                              y0 + y + dispy, 1);
+			a2 = barny_sample_bilinear_ch(sdata, sstride, sw, sh,
+			                              x0 + x + dispx,
+			                              y0 + y + dispy, 3);
+			c3 = barny_sample_bilinear_ch(sdata, sstride, sw, sh,
+			                              x0 + x + dispx + nnx * cs,
+			                              y0 + y + dispy + nny * cs,
+			                              0);
+			a3 = barny_sample_bilinear_ch(sdata, sstride, sw, sh,
+			                              x0 + x + dispx + nnx * cs,
+			                              y0 + y + dispy + nny * cs,
+			                              3);
+			fb = a3 == 255 ? c3 : (a3 > 0 ? c3 * 255.0 / a3 : 0.0);
+			fg = a2 == 255 ? c2 : (a2 > 0 ? c2 * 255.0 / a2 : 0.0);
+			fr = a1 == 255 ? c1 : (a1 > 0 ? c1 * 255.0 / a1 : 0.0);
 
 			veil = depth / BUBBLE_VEIL_FADE;
 			if (veil < 0.0)
@@ -935,9 +985,15 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			           GLASS_NO_COUNTER);
 			ap = aa * a;
 			glass_put(drow + x * 4, fr, fg, fb, ap);
-#undef BUBBLE_SDF
 		}
+
+		ftmp  = fprev;
+		fprev = fcur;
+		fcur  = fnext;
+		fnext = ftmp;
 	}
+#undef BUBBLE_ROW
+#undef BUBBLE_SDF
 
 	cairo_surface_mark_dirty(patch);
 	cairo_set_source_surface(cr, patch, x0, y0);
