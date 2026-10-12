@@ -252,15 +252,7 @@ bench_lens_render(int iters)
 
 	cairo_destroy(cr);
 	cairo_surface_destroy(surface);
-	barny_output_free_lens_cache(&output);
-	if (output.bg_cache)
-		cairo_surface_destroy(output.bg_cache);
-	if (output.lens_map)
-		cairo_surface_destroy(output.lens_map);
-	if (output.shadow_cache)
-		cairo_surface_destroy(output.shadow_cache);
-	if (output.glass_clean)
-		cairo_surface_destroy(output.glass_clean);
+	barny_output_free_glass_caches(&output, false);
 	cairo_surface_destroy(wallpaper);
 	barny_config_cleanup(&state.config);
 }

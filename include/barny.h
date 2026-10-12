@@ -342,6 +342,8 @@ barny_lens_rect(barny_output_t *output, int *x, int *y, int *w, int *h);
 void
 barny_output_free_lens_cache(barny_output_t *output);
 void
+barny_output_free_glass_caches(barny_output_t *output, bool keep_lens_map);
+void
 barny_render_modules(barny_output_t *output, cairo_t *cr);
 /* rect the module occupies on this output, false when it is not drawn there */
 bool

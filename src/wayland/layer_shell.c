@@ -192,26 +192,9 @@ barny_output_create_surface(barny_output_t *output)
 	return 0;
 }
 
-void
-barny_output_destroy_surface(barny_output_t *output)
+static void
+output_free_buffer(barny_output_t *output)
 {
-	if (output->bg_cache) {
-		cairo_surface_destroy(output->bg_cache);
-		output->bg_cache = NULL;
-	}
-	if (output->lens_map) {
-		cairo_surface_destroy(output->lens_map);
-		output->lens_map = NULL;
-	}
-	if (output->shadow_cache) {
-		cairo_surface_destroy(output->shadow_cache);
-		output->shadow_cache = NULL;
-	}
-	if (output->glass_clean) {
-		cairo_surface_destroy(output->glass_clean);
-		output->glass_clean = NULL;
-	}
-	barny_output_free_lens_cache(output);
 	output->lens_dmg_valid = false;
 	if (output->cr) {
 		cairo_destroy(output->cr);
@@ -229,6 +212,13 @@ barny_output_destroy_surface(barny_output_t *output)
 		munmap(output->shm_data, output->shm_size);
 		output->shm_data = NULL;
 	}
+}
+
+void
+barny_output_destroy_surface(barny_output_t *output)
+{
+	barny_output_free_glass_caches(output, false);
+	output_free_buffer(output);
 	if (output->layer_surface) {
 		zwlr_layer_surface_v1_destroy(output->layer_surface);
 		output->layer_surface = NULL;
@@ -253,37 +243,8 @@ barny_output_create_buffer(barny_output_t *output)
 	int                 fd;
 	struct wl_shm_pool *pool;
 
-	if (output->cr) {
-		cairo_destroy(output->cr);
-	}
-	if (output->cairo_surface) {
-		cairo_surface_destroy(output->cairo_surface);
-	}
-	if (output->buffer) {
-		wl_buffer_destroy(output->buffer);
-	}
-	if (output->shm_data) {
-		munmap(output->shm_data, output->shm_size);
-	}
-
-	if (output->bg_cache) {
-		cairo_surface_destroy(output->bg_cache);
-		output->bg_cache = NULL;
-	}
-	if (output->lens_map) {
-		cairo_surface_destroy(output->lens_map);
-		output->lens_map = NULL;
-	}
-	if (output->shadow_cache) {
-		cairo_surface_destroy(output->shadow_cache);
-		output->shadow_cache = NULL;
-	}
-	if (output->glass_clean) {
-		cairo_surface_destroy(output->glass_clean);
-		output->glass_clean = NULL;
-	}
-	barny_output_free_lens_cache(output);
-	output->lens_dmg_valid = false;
+	output_free_buffer(output);
+	barny_output_free_glass_caches(output, true);
 
 	fd = create_shm_file(size);
 	if (fd < 0) {
@@ -294,6 +255,7 @@ barny_output_create_buffer(barny_output_t *output)
 	output->shm_data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (output->shm_data == MAP_FAILED) {
 		fprintf(stderr, "barny: mmap failed\n");
+		output->shm_data = NULL;
 		close(fd);
 		return -1;
 	}

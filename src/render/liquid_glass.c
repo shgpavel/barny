@@ -915,6 +915,29 @@ barny_output_free_lens_cache(barny_output_t *output)
 	output->lens_patch_h = 0;
 }
 
+void
+barny_output_free_glass_caches(barny_output_t *output, bool keep_lens_map)
+{
+	if (output->bg_cache) {
+		cairo_surface_destroy(output->bg_cache);
+		output->bg_cache = NULL;
+	}
+	if (output->shadow_cache) {
+		cairo_surface_destroy(output->shadow_cache);
+		output->shadow_cache = NULL;
+	}
+	if (output->glass_clean) {
+		cairo_surface_destroy(output->glass_clean);
+		output->glass_clean = NULL;
+	}
+	output->glass_clean_opaque = false;
+	if (output->lens_map && !keep_lens_map) {
+		cairo_surface_destroy(output->lens_map);
+		output->lens_map = NULL;
+	}
+	barny_output_free_lens_cache(output);
+}
+
 typedef struct {
 	int    x0;
 	int    y0;
@@ -1733,81 +1756,97 @@ draw_spectral_rim(cairo_t *cr, double w, double h, double r, double strength)
 	cairo_pattern_destroy(p);
 }
 
-static cairo_surface_t *
-build_glass_bg(barny_output_t *output)
+/* The clipped shadow is kept as its own cache: it is what shows through
+   wherever the lens pinches the bar silhouette away. */
+static void
+build_shadow_cache(barny_output_t *output)
 {
-	barny_state_t   *state  = output->state;
-	int              radius = state->config.border_radius;
-	int              sw     = output->surf_width;
-	int              sh     = output->surf_height;
-	int              cx     = output->pad_left;
-	int              cy     = output->pad_top;
-	int              cw     = output->width;
-	int              ch     = output->height;
-	int              over   = state->config.position_top
-	                                  ? output->pad_top
-	                                  : output->pad_bottom;
-	cairo_surface_t *cache;
-	cairo_t         *cr;
-	cairo_surface_t *bg;
-	cairo_surface_t *src;
-	cairo_surface_t *lensed;
+	barny_state_t   *state = output->state;
+	int              sw    = output->surf_width;
+	int              sh    = output->surf_height;
+	int              cy    = output->pad_top;
+	int              ch    = output->height;
 	cairo_surface_t *shadow;
-	cairo_surface_t *strip_src;
 	cairo_t         *sc;
 
-	cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sw, sh);
-	cr    = cairo_create(cache);
-	bg    = state->blurred_wallpaper;
-
-	/* The clipped shadow is kept as its own cache: it is what shows
-	   through wherever the lens pinches the bar silhouette away. */
 	if (output->shadow_cache) {
 		cairo_surface_destroy(output->shadow_cache);
 		output->shadow_cache = NULL;
 	}
-	shadow = create_bar_shadow(cx, cy, cw, ch, radius, sw, sh);
-	if (shadow) {
-		output->shadow_cache = cairo_image_surface_create(
-		        CAIRO_FORMAT_ARGB32, sw, sh);
-		sc = cairo_create(output->shadow_cache);
-		if (state->config.position_top)
-			cairo_rectangle(sc, 0, cy, sw, sh - cy);
-		else
-			cairo_rectangle(sc, 0, 0, sw, cy + ch);
-		cairo_clip(sc);
-		cairo_set_source_surface(sc, shadow, 0, 0);
-		cairo_paint(sc);
-		cairo_destroy(sc);
-		cairo_surface_destroy(shadow);
+	shadow = create_bar_shadow(output->pad_left, cy, output->width, ch,
+	                           state->config.border_radius, sw, sh);
+	if (!shadow)
+		return;
 
-		cairo_set_source_surface(cr, output->shadow_cache, 0, 0);
-		cairo_paint(cr);
-	}
+	output->shadow_cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                                  sw, sh);
+	sc                   = cairo_create(output->shadow_cache);
+	if (state->config.position_top)
+		cairo_rectangle(sc, 0, cy, sw, sh - cy);
+	else
+		cairo_rectangle(sc, 0, 0, sw, cy + ch);
+	cairo_clip(sc);
+	cairo_set_source_surface(sc, shadow, 0, 0);
+	cairo_paint(sc);
+	cairo_destroy(sc);
+	cairo_surface_destroy(shadow);
+}
+
+static cairo_surface_t *
+bar_lens_map(barny_output_t *output, int cw, int ch)
+{
+	cairo_surface_t *map = output->lens_map;
+
+	if (map && cairo_image_surface_get_width(map) == cw
+	    && cairo_image_surface_get_height(map) == ch)
+		return map;
+
+	if (map)
+		cairo_surface_destroy(map);
+	output->lens_map = barny_create_edge_lens_map(
+	        cw, ch, output->state->config.border_radius, BAR_LENS_EDGE,
+	        BAR_LENS_DISP);
+
+	return output->lens_map;
+}
+
+static cairo_surface_t *
+build_lensed_strip(barny_output_t *output)
+{
+	barny_state_t   *state = output->state;
+	int              cw    = output->width;
+	int              ch    = output->height;
+	cairo_surface_t *src;
+	cairo_surface_t *map;
+	cairo_surface_t *lensed;
+	cairo_t         *sc;
 
 	src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
 	sc  = cairo_create(src);
-	barny_paint_glass_bg(sc, bg, cw, ch, 0, 0, ch,
+	barny_paint_glass_bg(sc, state->blurred_wallpaper, cw, ch, 0, 0, ch,
 	                     state->config.position_top);
 	cairo_destroy(sc);
 
-	if (!output->lens_map)
-		output->lens_map = barny_create_edge_lens_map(
-		        cw, ch, radius, BAR_LENS_EDGE, BAR_LENS_DISP);
-
+	map    = bar_lens_map(output, cw, ch);
 	lensed = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
-	if (output->lens_map) {
-		barny_apply_displacement(src, lensed, output->lens_map,
-		                         BAR_LENS_DISP, BAR_LENS_CHROMA);
+	if (map) {
+		barny_apply_displacement(src, lensed, map, BAR_LENS_DISP,
+		                         BAR_LENS_CHROMA);
 	} else {
 		sc = cairo_create(lensed);
 		cairo_set_source_surface(sc, src, 0, 0);
 		cairo_paint(sc);
 		cairo_destroy(sc);
 	}
+	cairo_surface_destroy(src);
 
-	cairo_save(cr);
-	cairo_translate(cr, cx, cy);
+	return lensed;
+}
+
+static void
+paint_bar_glass(cairo_t *cr, cairo_surface_t *lensed, int cw, int ch,
+                int radius)
+{
 	cairo_save(cr);
 	barny_rounded_rect_path(cr, 0, 0, cw, ch, radius);
 	cairo_clip(cr);
@@ -1815,19 +1854,29 @@ build_glass_bg(barny_output_t *output)
 	cairo_paint(cr);
 	cairo_restore(cr);
 	barny_draw_glass_frame(cr, cw, ch, radius);
-	draw_spectral_rim(cr, cw, ch, radius, state->config.glass_prism);
-	cairo_restore(cr);
+}
 
-	/* Clean strip for the lens patch: bar interior + broad lighting only
-	   (no contour-keyed edge light, no spectral rim, no rounded clip);
-	   the overrun rows pad-extend the edge rows for the droplet caps. */
+/* Clean strip for the lens patch: bar interior + broad lighting only
+   (no contour-keyed edge light, no spectral rim, no rounded clip);
+   the overrun rows pad-extend the edge rows for the droplet caps. */
+static void
+build_glass_clean(barny_output_t *output, cairo_surface_t *lensed)
+{
+	int              cw   = output->width;
+	int              ch   = output->height;
+	int              over = output->state->config.position_top
+	                                ? output->pad_top
+	                                : output->pad_bottom;
+	cairo_surface_t *strip;
+	cairo_t         *sc;
+
 	if (output->glass_clean) {
 		cairo_surface_destroy(output->glass_clean);
 		output->glass_clean = NULL;
 	}
 	output->glass_clean_opaque = false;
-	strip_src = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
-	sc        = cairo_create(strip_src);
+	strip = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
+	sc    = cairo_create(strip);
 	cairo_set_source_surface(sc, lensed, 0, 0);
 	cairo_paint(sc);
 	barny_draw_broad_frame(sc, cw, ch);
@@ -1836,16 +1885,45 @@ build_glass_bg(barny_output_t *output)
 	output->glass_clean = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 	                                                 cw, ch + 2 * over);
 	sc                  = cairo_create(output->glass_clean);
-	cairo_set_source_surface(sc, strip_src, 0, over);
+	cairo_set_source_surface(sc, strip, 0, over);
 	cairo_pattern_set_extend(cairo_get_source(sc), CAIRO_EXTEND_PAD);
 	cairo_paint(sc);
 	cairo_destroy(sc);
 	output->glass_clean_opaque = surface_is_opaque(output->glass_clean);
-	cairo_surface_destroy(strip_src);
+	cairo_surface_destroy(strip);
+}
 
-	cairo_surface_destroy(src);
-	cairo_surface_destroy(lensed);
+static cairo_surface_t *
+build_glass_bg(barny_output_t *output)
+{
+	barny_state_t   *state  = output->state;
+	int              radius = state->config.border_radius;
+	int              cw     = output->width;
+	int              ch     = output->height;
+	cairo_surface_t *cache;
+	cairo_surface_t *lensed;
+	cairo_t         *cr;
+
+	cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                   output->surf_width,
+	                                   output->surf_height);
+	cr    = cairo_create(cache);
+
+	build_shadow_cache(output);
+	if (output->shadow_cache) {
+		cairo_set_source_surface(cr, output->shadow_cache, 0, 0);
+		cairo_paint(cr);
+	}
+
+	lensed = build_lensed_strip(output);
+
+	cairo_translate(cr, output->pad_left, output->pad_top);
+	paint_bar_glass(cr, lensed, cw, ch, radius);
+	draw_spectral_rim(cr, cw, ch, radius, state->config.glass_prism);
 	cairo_destroy(cr);
+
+	build_glass_clean(output, lensed);
+	cairo_surface_destroy(lensed);
 
 	return cache;
 }

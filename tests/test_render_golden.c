@@ -459,15 +459,7 @@ bar_new(cairo_surface_t *wall, bool top, double prism)
 static void
 bar_free(bar_t *b)
 {
-	barny_output_free_lens_cache(&b->out);
-	if (b->out.bg_cache)
-		cairo_surface_destroy(b->out.bg_cache);
-	if (b->out.lens_map)
-		cairo_surface_destroy(b->out.lens_map);
-	if (b->out.shadow_cache)
-		cairo_surface_destroy(b->out.shadow_cache);
-	if (b->out.glass_clean)
-		cairo_surface_destroy(b->out.glass_clean);
+	barny_output_free_glass_caches(&b->out, false);
 	free(b);
 }
 
@@ -619,6 +611,41 @@ bar_cases(cairo_surface_t *wall, cairo_surface_t *veil)
 	b = bar_new(veil, true, 0.8);
 	bar_check(b, "bar.top.alpha.centre", 1, 517.37, 0.0, 1.0);
 	bar_caches(b, "bar.top.alpha");
+	bar_free(b);
+}
+
+static void
+rebuild_case(cairo_surface_t *wall, bool top)
+{
+	bar_t           *b    = bar_new(wall, top, 0.8);
+	cairo_surface_t *surf = bar_target(b, 1);
+	cairo_surface_t *map;
+	uint64_t         bg;
+	uint64_t         clean;
+	uint64_t         shadow;
+	const char      *side = top ? "top" : "bot";
+	char             label[64];
+
+	bar_draw(b, surf, 517.37, 0.0, 1.0, NULL);
+	map    = cairo_surface_reference(b->out.lens_map);
+	bg     = fnv1a(b->out.bg_cache);
+	clean  = fnv1a(b->out.glass_clean);
+	shadow = fnv1a(b->out.shadow_cache);
+
+	barny_output_free_glass_caches(&b->out, true);
+	bar_draw(b, surf, 517.37, 0.0, 1.0, NULL);
+
+	snprintf(label, sizeof(label), "rebuild.%s lens_map kept", side);
+	expect(label, map && b->out.lens_map == map, "map rebuilt", 0);
+	snprintf(label, sizeof(label), "rebuild.%s bg_cache same", side);
+	expect(label, fnv1a(b->out.bg_cache) == bg, "hash changed", 0);
+	snprintf(label, sizeof(label), "rebuild.%s glass_clean same", side);
+	expect(label, fnv1a(b->out.glass_clean) == clean, "hash changed", 0);
+	snprintf(label, sizeof(label), "rebuild.%s shadow_cache same", side);
+	expect(label, fnv1a(b->out.shadow_cache) == shadow, "hash changed", 0);
+
+	cairo_surface_destroy(map);
+	cairo_surface_destroy(surf);
 	bar_free(b);
 }
 
@@ -946,6 +973,8 @@ main(int argc, char **argv)
 
 	lens_cases();
 	bar_cases(wall, veil);
+	rebuild_case(wall, false);
+	rebuild_case(wall, true);
 	partial_case(wall, false, "partial.bot", 1, 517.37, 560.9);
 	partial_case(wall, false, "partial.bot.corner", 1, 60.0, 200.0);
 	partial_case(wall, true, "partial.top", 1, 700.2, 655.0);

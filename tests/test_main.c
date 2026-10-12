@@ -30,6 +30,8 @@ test_lens_opaque_fast_path(void);
 extern void
 test_prism_stops(void);
 extern void
+test_lens_map_lifetime(void);
+extern void
 test_spring_step(void);
 
 extern void
@@ -94,6 +96,7 @@ RUN_SUITE(test_lens_channel_tap);
 RUN_SUITE(test_prism_stops);
 RUN_SUITE(test_lens_opaque_fast_path);
 RUN_SUITE(test_lens_partial_redraw);
+RUN_SUITE(test_lens_map_lifetime);
 
 printf("\n--- Module System Tests ---\n");
 RUN_SUITE(test_module_register);

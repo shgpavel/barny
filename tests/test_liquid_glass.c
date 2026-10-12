@@ -655,15 +655,7 @@ test_lens_opaque_fast_path(void)
 	cairo_surface_destroy(fast);
 	cairo_surface_destroy(generic);
 	cairo_surface_destroy(wallpaper);
-	barny_output_free_lens_cache(&out);
-	if (out.bg_cache)
-		cairo_surface_destroy(out.bg_cache);
-	if (out.lens_map)
-		cairo_surface_destroy(out.lens_map);
-	if (out.shadow_cache)
-		cairo_surface_destroy(out.shadow_cache);
-	if (out.glass_clean)
-		cairo_surface_destroy(out.glass_clean);
+	barny_output_free_glass_caches(&out, false);
 
 	TEST_SUITE_END();
 }
@@ -881,15 +873,78 @@ test_lens_partial_redraw(void)
 
 	cairo_surface_destroy(full);
 	cairo_surface_destroy(part);
-	barny_output_free_lens_cache(&out);
-	if (out.bg_cache)
-		cairo_surface_destroy(out.bg_cache);
-	if (out.lens_map)
-		cairo_surface_destroy(out.lens_map);
-	if (out.shadow_cache)
-		cairo_surface_destroy(out.shadow_cache);
-	if (out.glass_clean)
-		cairo_surface_destroy(out.glass_clean);
+	barny_output_free_glass_caches(&out, false);
+
+	TEST_SUITE_END();
+}
+
+void
+test_lens_map_lifetime(void)
+{
+	barny_state_t    state;
+	barny_output_t   out;
+	cairo_surface_t *first;
+	cairo_surface_t *again;
+	cairo_surface_t *wide;
+	cairo_surface_t *map;
+
+	TEST_SUITE_BEGIN("Bar Lens Map Lifetime");
+
+	lens_setup(&state, &out);
+	first = lens_target(&out);
+	again = lens_target(&out);
+	lens_draw(&out, first, 300.0, NULL);
+	map = cairo_surface_reference(out.lens_map);
+
+	barny_output_free_glass_caches(&out, true);
+
+	TEST("a buffer rebuild drops the baked bar but keeps the lens map")
+	{
+		ASSERT_NOT_NULL(map);
+		ASSERT_TRUE(out.lens_map == map);
+		ASSERT_NULL(out.bg_cache);
+		ASSERT_NULL(out.shadow_cache);
+		ASSERT_NULL(out.glass_clean);
+		ASSERT_FALSE(out.glass_clean_opaque);
+	}
+
+	lens_draw(&out, again, 300.0, NULL);
+
+	TEST("a same-size rebuild reuses the map and bakes the same bar")
+	{
+		ASSERT_TRUE(out.lens_map == map);
+		ASSERT_EQ_INT(0, lens_diff(first, again));
+	}
+
+	out.width      += 40;
+	out.surf_width += 40;
+	barny_output_free_glass_caches(&out, true);
+	wide = lens_target(&out);
+	lens_draw(&out, wide, 300.0, NULL);
+
+	TEST("a resized bar gets a lens map of the new size")
+	{
+		ASSERT_NOT_NULL(out.lens_map);
+		ASSERT_TRUE(out.lens_map != map);
+		ASSERT_EQ_INT(LENS_BAR_W + 40,
+		              cairo_image_surface_get_width(out.lens_map));
+		ASSERT_EQ_INT(LENS_BAR_H,
+		              cairo_image_surface_get_height(out.lens_map));
+	}
+
+	barny_output_free_glass_caches(&out, false);
+
+	TEST("a full teardown frees the lens map as well")
+	{
+		ASSERT_NULL(out.lens_map);
+		ASSERT_NULL(out.bg_cache);
+		ASSERT_NULL(out.lens_patch);
+	}
+
+	cairo_surface_destroy(map);
+	cairo_surface_destroy(first);
+	cairo_surface_destroy(again);
+	cairo_surface_destroy(wide);
 
 	TEST_SUITE_END();
 }
