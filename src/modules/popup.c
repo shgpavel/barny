@@ -730,6 +730,8 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			depth  = -d;
 			zone   = hh < BUBBLE_ZONE ? hh : BUBBLE_ZONE;
 			pp     = zone > 0.0 ? depth / zone : 1.0;
+			if (pp < 0.0)
+				pp = 0.0;
 			if (pp > 1.0)
 				pp = 1.0;
 			srcoff = glass_dome(pp, zone) * BUBBLE_REFRACT;
@@ -751,6 +753,8 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			fr = s1[3] > 0 ? s1[2] * 255.0 / s1[3] : 0.0;
 
 			veil = depth / BUBBLE_VEIL_FADE;
+			if (veil < 0.0)
+				veil = 0.0;
 			if (veil > 1.0)
 				veil = 1.0;
 			veil *= BUBBLE_VEIL;
@@ -758,7 +762,7 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			facing = nnx * GLASS_SPEC_LX + nny * GLASS_SPEC_LY;
 			lit    = glass_lit(facing);
 			ri     = 1.0 - depth / POPUP_RIM_W;
-			if (ri < 0.0)
+			if (ri < 0.0 || d > 0.0)
 				ri = 0.0;
 			ri   = ri * ri;
 			core = 1.0 - fabs(d) / 1.4;
@@ -766,7 +770,7 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 				core = 0.0;
 			rim = POPUP_RIM_STR * ri + POPUP_RIM_CORE * core * lit;
 
-			if (depth < POPUP_SPEC_W && facing > 0.0) {
+			if (d < 0.0 && depth < POPUP_SPEC_W && facing > 0.0) {
 				band = 1.0 - depth / POPUP_SPEC_W;
 				band = glass_smoothstep01(band);
 				spec = POPUP_SPEC_GAIN * band

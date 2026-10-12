@@ -131,13 +131,13 @@ static const golden_t golden[] = {
 	{ "popup.top.m100",                  0x07e6dcaa28931138ULL },
 	{ "popup.top.compose",               0x1af19fe5837af2eaULL },
 	{ "popup.bot.nowall.compose",        0x88b01908713a8294ULL },
-	{ "bead.row",                        0xeecc54c20a9573fdULL },
-	{ "bead.cell",                       0xd7b291093c2fa32fULL },
-	{ "bead.pop",                        0x9b75b0a7059ae600ULL },
-	{ "bead.travel",                     0xe233110cc786799cULL },
-	{ "bead.edge",                       0xce8a17964a54faecULL },
-	{ "bead.alpha.row",                  0x25579d2833e4bb00ULL },
-	{ "bead.on_rest",                    0x4fdbc49c9eee82c1ULL },
+	{ "bead.row",                        0xc99ba74cfe896af0ULL },
+	{ "bead.cell",                       0x0bfde5ef0f54ca09ULL },
+	{ "bead.pop",                        0xfe8128ef5fe9bb5eULL },
+	{ "bead.travel",                     0x8f5811620c0013adULL },
+	{ "bead.edge",                       0x518b62c83b0c2f7dULL },
+	{ "bead.alpha.row",                  0xdf34484fbc8216d5ULL },
+	{ "bead.on_rest",                    0xc19841873b19e6a6ULL },
 };
 
 #define N_GOLDEN (sizeof(golden) / sizeof(golden[0]))
