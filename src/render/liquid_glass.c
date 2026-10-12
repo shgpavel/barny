@@ -242,6 +242,187 @@ barny_blur_surface(cairo_surface_t *surface, int radius)
 	cairo_surface_mark_dirty(surface);
 }
 
+static void
+stack_blur_line_a8(const uint8_t *src, uint8_t *dst, int width, int radius,
+                   int *stack)
+{
+	int div     = radius * 2 + 1;
+	int mul_sum = (radius + 1) * (radius + 1);
+	int sum     = 0;
+	int sum_in  = 0;
+	int sum_out = 0;
+	int sp;
+	int stack_start;
+	int i;
+	int x;
+	int px;
+
+	for (i = -radius; i <= radius; i++) {
+		x                   = i < 0 ? 0 : (i >= width ? width - 1 : i);
+		stack[i + radius]   = src[x];
+		sum                += src[x] * (radius + 1 - abs(i));
+		if (i > 0)
+			sum_in  += src[x];
+		else
+			sum_out += src[x];
+	}
+
+	sp = radius;
+
+	for (x = 0; x < width; x++) {
+		dst[x]       = sum / mul_sum;
+		sum         -= sum_out;
+
+		stack_start  = sp + div - radius;
+		if (stack_start >= div)
+			stack_start -= div;
+
+		sum_out     -= stack[stack_start];
+
+		px           = x + radius + 1;
+		if (px >= width)
+			px = width - 1;
+
+		stack[stack_start]  = src[px];
+		sum_in             += src[px];
+		sum                += sum_in;
+
+		sp++;
+		if (sp >= div)
+			sp = 0;
+
+		sum_out += stack[sp];
+		sum_in  -= stack[sp];
+	}
+}
+
+static void
+stack_blur_columns_a8(const uint8_t *plane, uint8_t *data, int stride,
+                      int width, int height, int radius, int *sums,
+                      uint8_t *stack)
+{
+	int       div     = radius * 2 + 1;
+	int       mul_sum = (radius + 1) * (radius + 1);
+	int      *sum     = sums;
+	int      *sum_in  = sums + width;
+	int      *sum_out = sums + 2 * width;
+	uint8_t  *slot;
+	uint32_t *row;
+	int       sp;
+	int       stack_start;
+	int       i;
+	int       x;
+	int       y;
+	int       px;
+	int       v;
+
+	memset(sums, 0, 3 * (size_t)width * sizeof(int));
+
+	for (i = -radius; i <= radius; i++) {
+		y    = i < 0 ? 0 : (i >= height ? height - 1 : i);
+		slot = stack + (size_t)(i + radius) * width;
+		for (x = 0; x < width; x++) {
+			v        = plane[(size_t)y * width + x];
+			slot[x]  = v;
+			sum[x]  += v * (radius + 1 - abs(i));
+			if (i > 0)
+				sum_in[x]  += v;
+			else
+				sum_out[x] += v;
+		}
+	}
+
+	sp = radius;
+
+	for (y = 0; y < height; y++) {
+		row         = (uint32_t *)(data + y * stride);
+		stack_start = sp + div - radius;
+		if (stack_start >= div)
+			stack_start -= div;
+		px          = y + radius + 1;
+		if (px >= height)
+			px = height - 1;
+		slot        = stack + (size_t)stack_start * width;
+
+		for (x = 0; x < width; x++) {
+			row[x]      = (uint32_t)(sum[x] / mul_sum) << 24;
+			sum[x]     -= sum_out[x];
+			sum_out[x] -= slot[x];
+			v           = plane[(size_t)px * width + x];
+			slot[x]     = v;
+			sum_in[x]  += v;
+			sum[x]     += sum_in[x];
+		}
+
+		sp++;
+		if (sp >= div)
+			sp = 0;
+		slot = stack + (size_t)sp * width;
+
+		for (x = 0; x < width; x++) {
+			sum_out[x] += slot[x];
+			sum_in[x]  -= slot[x];
+		}
+	}
+}
+
+static void
+blur_alpha_surface(cairo_surface_t *surface, int radius)
+{
+	int       width;
+	int       height;
+	int       stride;
+	uint8_t  *data;
+	uint8_t  *plane;
+	uint8_t  *line;
+	uint8_t  *col_stack;
+	int      *stack;
+	int      *sums;
+	uint32_t *row;
+	int       x;
+	int       y;
+
+	if (radius < 1)
+		return;
+
+	cairo_surface_flush(surface);
+
+	width  = cairo_image_surface_get_width(surface);
+	height = cairo_image_surface_get_height(surface);
+
+	if (width <= 0 || height <= 0)
+		return;
+
+	stride    = cairo_image_surface_get_stride(surface);
+	data      = cairo_image_surface_get_data(surface);
+
+	plane     = malloc((size_t)width * height);
+	line      = malloc(width);
+	stack     = malloc((radius * 2 + 1) * sizeof(int));
+	sums      = malloc(3 * (size_t)width * sizeof(int));
+	col_stack = malloc((size_t)(radius * 2 + 1) * width);
+
+	if (plane && line && stack && sums && col_stack) {
+		for (y = 0; y < height; y++) {
+			row = (uint32_t *)(data + y * stride);
+			for (x = 0; x < width; x++)
+				line[x] = row[x] >> 24;
+			stack_blur_line_a8(line, plane + (size_t)y * width,
+			                   width, radius, stack);
+		}
+		stack_blur_columns_a8(plane, data, stride, width, height,
+		                      radius, sums, col_stack);
+	}
+
+	free(col_stack);
+	free(sums);
+	free(stack);
+	free(line);
+	free(plane);
+
+	cairo_surface_mark_dirty(surface);
+}
+
 void
 barny_apply_vibrancy(cairo_surface_t *surface, double saturation,
                      double brightness)
@@ -2270,7 +2451,7 @@ create_bar_shadow(int cx, int cy, int cw, int ch, int radius, int surf_w,
 	cairo_fill(sc);
 	cairo_destroy(sc);
 
-	barny_blur_surface(shadow, 12);
+	blur_alpha_surface(shadow, 12);
 
 	return shadow;
 }
