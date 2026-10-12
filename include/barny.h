@@ -315,7 +315,7 @@ struct barny_output {
 
 	barny_rim_t                  *rim;
 	uint64_t                      rim_tick;
-	bool                          rim_mods_touch;
+	unsigned int                  rim_mods_touch;
 
 	/* while set, modules that fall outside clip skip their render
 	   entirely (a lens frame must not re-shape text it cannot show) */

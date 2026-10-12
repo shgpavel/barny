@@ -276,7 +276,7 @@ lens_partial_ok(barny_output_t *output)
 	       && !barny_modules_any_dirty(state);
 }
 
-static bool
+static unsigned int
 rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
          uint8_t **buf, bool cmp)
 {
@@ -285,7 +285,7 @@ rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
 	uint8_t         *p;
 	size_t           len  = 0;
 	size_t           rlen;
-	bool             diff = false;
+	unsigned int     diff = 0;
 	int              s    = output->scale;
 	int              bw;
 	int              bh;
@@ -300,7 +300,7 @@ rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
 	bh   = cairo_image_surface_get_height(surf);
 	st   = cairo_image_surface_get_stride(surf);
 	if (!data)
-		return false;
+		return 0;
 
 	for (i = 0; i < n; i++) {
 		r = barny_rect_clamp((barny_rect_t){ rects[i].x * s,
@@ -313,7 +313,7 @@ rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
 	if (!cmp) {
 		*buf = malloc(len ? len : 1);
 		if (!*buf)
-			return false;
+			return 0;
 	}
 
 	p = *buf;
@@ -325,11 +325,10 @@ rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
 		                        bw, bh);
 		rlen = (size_t)r.w * 4;
 		for (y = r.y; y < r.y + r.h; y++) {
-			if (cmp)
-				diff |= memcmp(p, data + y * st + r.x * 4,
-				               rlen) != 0;
-			else
+			if (!cmp)
 				memcpy(p, data + y * st + r.x * 4, rlen);
+			else if (memcmp(p, data + y * st + r.x * 4, rlen) != 0)
+				diff |= 1u << i;
 			p += rlen;
 		}
 	}
@@ -473,6 +472,7 @@ barny_render_frame(barny_output_t *output)
 	bool           partial;
 	bool           lens_anim;
 	int            n = 0;
+	int            k;
 	int            i;
 
 	if (!output->configured || !output->cr) {
@@ -504,11 +504,13 @@ barny_render_frame(barny_output_t *output)
 	                                 : lens_partial_ok(output);
 	if (partial && !barny_rect_empty(mods))
 		dmg[n++] = mods;
-	if (partial && rim_moved)
+	if (partial && rim_moved) {
+		k  = n;
 		n += barny_rim_rects(output, dmg + n);
-	if (n > 0 && output->rim_mods_touch)
-		for (i = 0; i < n; i++)
-			mods = barny_rect_union(mods, dmg[i]);
+		for (i = k; i < n; i++)
+			if (output->rim_mods_touch & (1u << (i - k)))
+				mods = barny_rect_union(mods, dmg[i]);
+	}
 
 	render_bar(output, cr, dmg, n, &mods);
 
