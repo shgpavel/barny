@@ -2657,30 +2657,50 @@ build_glass_clean(barny_output_t *output, cairo_surface_t *lensed)
 	int              over = output->state->config.position_top
 	                                ? output->pad_top
 	                                : output->pad_bottom;
+	cairo_surface_t *clean;
 	cairo_surface_t *strip;
 	cairo_t         *sc;
+	uint8_t         *data;
+	uint8_t         *first;
+	uint8_t         *last;
+	int              stride;
+	int              y;
 
 	if (output->glass_clean) {
 		cairo_surface_destroy(output->glass_clean);
 		output->glass_clean = NULL;
 	}
 	output->glass_clean_opaque = false;
-	strip = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw, ch);
-	sc    = cairo_create(strip);
+
+	clean = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, cw,
+	                                   ch + 2 * over);
+	if (cairo_surface_status(clean) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(clean);
+		return;
+	}
+	cairo_surface_flush(clean);
+	data   = cairo_image_surface_get_data(clean);
+	stride = cairo_image_surface_get_stride(clean);
+	first  = data + (size_t)over * stride;
+	last   = first + (size_t)(ch - 1) * stride;
+
+	strip  = cairo_image_surface_create_for_data(first, CAIRO_FORMAT_ARGB32,
+	                                             cw, ch, stride);
+	sc     = cairo_create(strip);
 	cairo_set_source_surface(sc, lensed, 0, 0);
 	cairo_paint(sc);
 	barny_draw_broad_frame(sc, cw, ch);
 	cairo_destroy(sc);
-
-	output->glass_clean = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-	                                                 cw, ch + 2 * over);
-	sc                  = cairo_create(output->glass_clean);
-	cairo_set_source_surface(sc, strip, 0, over);
-	cairo_pattern_set_extend(cairo_get_source(sc), CAIRO_EXTEND_PAD);
-	cairo_paint(sc);
-	cairo_destroy(sc);
-	output->glass_clean_opaque = surface_is_opaque(output->glass_clean);
 	cairo_surface_destroy(strip);
+
+	for (y = 0; y < over; y++) {
+		memcpy(data + (size_t)y * stride, first, (size_t)cw * 4);
+		memcpy(last + (size_t)(y + 1) * stride, last, (size_t)cw * 4);
+	}
+	cairo_surface_mark_dirty(clean);
+
+	output->glass_clean        = clean;
+	output->glass_clean_opaque = surface_is_opaque(clean);
 }
 
 static cairo_surface_t *
