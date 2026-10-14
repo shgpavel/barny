@@ -1403,7 +1403,13 @@ rim_build(barny_output_t *output)
 	int              ch    = output->height;
 	int              cx    = output->pad_left;
 	int              cy    = output->pad_top;
-	int              grow  = output->scale > 1 ? 1 : 0;
+	uint32_t         s120  = output->scale120 ? output->scale120
+	                                          : BARNY_SCALE_UNIT;
+	int              grow  = s120 == BARNY_SCALE_UNIT ? 0
+	                         : s120 > BARNY_SCALE_UNIT
+	                                 ? 1
+	                                 : (int)((BARNY_SCALE_UNIT + s120 - 1)
+	                                         / s120);
 	barny_rect_t     bb[4];
 	rim_path_t       p;
 	cairo_surface_t *mask;

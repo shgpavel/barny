@@ -134,6 +134,9 @@ struct barny_menu {
 	double                        bead_sv;
 	uint64_t                      bead_us;
 
+	barny_scaler_t                scaler;
+	uint32_t                      scale120;
+
 	bool                          configured;
 };
 
@@ -440,11 +443,11 @@ menu_draw_label(barny_menu_t *m, cairo_t *cr, PangoLayout *layout,
 	ty = y + (row_h - th) / 2;
 
 	cairo_set_source_rgba(cr, 0, 0, 0, 0.4 * alpha);
-	cairo_move_to(cr, x + 1, ty + 1);
+	barny_move_to_pixel(cr, x + 1, ty + 1);
 	pango_cairo_show_layout(cr, layout);
 
 	cairo_set_source_rgba(cr, tr, tg, tb, alpha);
-	cairo_move_to(cr, x, ty);
+	barny_move_to_pixel(cr, x, ty);
 	pango_cairo_show_layout(cr, layout);
 }
 
@@ -493,7 +496,7 @@ menu_render_rows(barny_menu_t *m, cairo_t *cr)
 			ay = r->y + (r->h - ah) / 2;
 			cairo_set_source_rgba(cr, 0.9, 0.9, 0.92,
 			                      r->enabled ? 0.85 : 0.35);
-			cairo_move_to(cr, mw - MENU_PAD_X - aw, ay);
+			barny_move_to_pixel(cr, mw - MENU_PAD_X - aw, ay);
 			pango_cairo_show_layout(cr, layout);
 		}
 	}
@@ -513,20 +516,15 @@ menu_build_content(barny_menu_t *m)
 		m->content_cache = NULL;
 	}
 
-	m->content_cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-	                                              m->menu_w, m->menu_h);
-	if (cairo_surface_status(m->content_cache) != CAIRO_STATUS_SUCCESS) {
-		cairo_surface_destroy(m->content_cache);
-		m->content_cache = NULL;
+	cc = barny_popup_surface_begin(m->menu_w, m->menu_h, m->scale120);
+	if (!cc)
 		return;
-	}
 
-	cc = cairo_create(m->content_cache);
 	if (m->kind == MENU_KIND_TRAY)
 		menu_render_tray(m, cc);
 	else
 		menu_render_rows(m, cc);
-	cairo_destroy(cc);
+	m->content_cache = barny_popup_surface_end(cc, m->scale120);
 }
 
 static void
@@ -550,6 +548,7 @@ static void
 menu_build_rest(barny_menu_t *m)
 {
 	barny_glass_panel_t panel;
+	cairo_surface_t    *glass;
 	cairo_t            *rc;
 
 	m->rest_shown = false;
@@ -561,14 +560,23 @@ menu_build_rest(barny_menu_t *m)
 		return;
 
 	menu_panel(m, &panel);
-	m->rest_src = barny_glass_panel_rest(m->state, m->out, &panel,
-	                                     m->glass_src);
-	if (!m->rest_src)
+	glass = barny_glass_panel_rest(m->state, m->out, &panel, m->glass_src);
+	if (!glass)
 		return;
 
-	rc = cairo_create(m->rest_src);
+	rc = barny_popup_surface_begin(m->patch_w, m->patch_h, m->scale120);
+	if (!rc) {
+		cairo_surface_destroy(glass);
+		return;
+	}
+
+	cairo_set_operator(rc, CAIRO_OPERATOR_SOURCE);
+	cairo_set_source_surface(rc, glass, 0, 0);
+	cairo_paint(rc);
+	cairo_set_operator(rc, CAIRO_OPERATOR_OVER);
 	barny_glass_panel_rest_content(rc, m->state, &panel, m->content_cache);
-	cairo_destroy(rc);
+	m->rest_src = barny_popup_surface_end(rc, m->scale120);
+	cairo_surface_destroy(glass);
 }
 
 static int
@@ -710,19 +718,28 @@ menu_bead(barny_menu_t *m, barny_glass_bubble_t *bead)
 static barny_rect_t
 menu_bead_rect(barny_menu_t *m, const barny_glass_bubble_t *bead, bool on)
 {
-	barny_rect_t r  = { 0, 0, 0, 0 };
-	int          sw = cairo_image_surface_get_width(m->rest_src);
-	int          sh = cairo_image_surface_get_height(m->rest_src);
+	barny_rect_t r = { 0, 0, 0, 0 };
 	int          x0, y0, x1, y1;
 
 	if (on
-	    && barny_glass_bubble_bounds(bead, sw, sh, &x0, &y0, &x1, &y1)) {
+	    && barny_glass_bubble_bounds(bead, m->patch_w, m->patch_h, &x0, &y0,
+	                                 &x1, &y1)) {
 		r.x = x0;
 		r.y = y0;
 		r.w = x1 - x0;
 		r.h = y1 - y0;
 	}
 	return r;
+}
+
+static void
+menu_origin(const barny_menu_t *m, cairo_t *cr)
+{
+	double s = (double)m->scale120 / BARNY_SCALE_UNIT;
+
+	cairo_identity_matrix(cr);
+	cairo_translate(cr, round(m->patch_x * s), round(m->patch_y * s));
+	cairo_scale(cr, s, s);
 }
 
 static void
@@ -763,14 +780,21 @@ menu_present(barny_menu_t *m)
 		dmg.y += patch.y;
 	}
 
+	if (m->scale120 != BARNY_SCALE_UNIT && !barny_rect_empty(dmg)) {
+		dmg.x -= 1;
+		dmg.y -= 1;
+		dmg.w += 2;
+		dmg.h += 2;
+	}
+	dmg = barny_rect_clamp(dmg, m->surf_w, m->surf_h);
+
 	cairo_save(cr);
-	cairo_rectangle(cr, dmg.x, dmg.y, dmg.w, dmg.h);
-	cairo_clip(cr);
+	barny_clip_buffer_rects(cr, &dmg, 1, m->scale120);
 	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
 	cairo_paint(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-	cairo_translate(cr, m->patch_x, m->patch_y);
+	menu_origin(m, cr);
 	if (morphing) {
 		/* mid-morph the panel is still a droplet; the bead only rides a
 		   panel that has finished opening */
@@ -790,9 +814,11 @@ menu_present(barny_menu_t *m)
 
 	cairo_surface_flush(m->cairo_surface);
 	wl_surface_attach(m->surface, m->buffer, 0, 0);
-	if (!barny_rect_empty(dmg))
+	if (!barny_rect_empty(dmg)) {
+		dmg = barny_rect_to_buffer(dmg, m->scale120);
 		wl_surface_damage_buffer(m->surface, dmg.x, dmg.y, dmg.w,
 		                         dmg.h);
+	}
 
 	m->rest_shown = !morphing && m->rest_src;
 	m->bead_dmg   = bead_dmg;
@@ -902,13 +928,85 @@ menu_teardown_buffer(barny_menu_t *m)
 	m->shm_size = 0;
 }
 
+static uint32_t
+menu_scale(const barny_menu_t *m)
+{
+	return barny_scaler_scale(&m->scaler, m->out ? m->out->scale120 : 0,
+	                          m->out ? m->out->scale : 1);
+}
+
+static bool
+menu_alloc_buffer(barny_menu_t *m, int pw, int ph)
+{
+	uint32_t            s120 = menu_scale(m);
+	int                 bw   = barny_scale_len(pw, s120);
+	int                 bh   = barny_scale_len(ph, s120);
+	int                 stride, size, fd;
+	struct wl_shm_pool *pool;
+
+	if (m->buffer)
+		menu_teardown_buffer(m);
+
+	stride = bw * 4;
+	size   = stride * bh;
+
+	fd     = barny_shm_create((size_t)size);
+	if (fd < 0)
+		return false;
+
+	m->shm_data = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE,
+	                   MAP_SHARED, fd, 0);
+	if (m->shm_data == MAP_FAILED) {
+		close(fd);
+		m->shm_data = NULL;
+		return false;
+	}
+	m->shm_size = size;
+
+	pool      = wl_shm_create_pool(m->state->shm, fd, size);
+	m->buffer = wl_shm_pool_create_buffer(pool, 0, bw, bh, stride,
+	                                      WL_SHM_FORMAT_ARGB8888);
+	wl_shm_pool_destroy(pool);
+	close(fd);
+
+	m->cairo_surface = cairo_image_surface_create_for_data(
+	        m->shm_data, CAIRO_FORMAT_ARGB32, bw, bh, stride);
+	m->cr       = cairo_create(m->cairo_surface);
+	m->scale120 = s120;
+	if (s120 != BARNY_SCALE_UNIT)
+		cairo_scale(m->cr, (double)s120 / BARNY_SCALE_UNIT,
+		            (double)s120 / BARNY_SCALE_UNIT);
+	barny_scaler_apply(&m->scaler, m->surface, s120, pw, ph);
+	m->surf_w = pw;
+	m->surf_h = ph;
+
+	return true;
+}
+
+static void
+menu_scale_changed(void *data)
+{
+	barny_menu_t *m = data;
+
+	if (!m->configured || !m->buffer || menu_scale(m) == m->scale120)
+		return;
+	if (!menu_alloc_buffer(m, m->surf_w, m->surf_h))
+		return;
+
+	m->damage = (barny_rect_t){ 0, 0, 0, 0 };
+	menu_build_content(m);
+	menu_build_rest(m);
+	if (m->anim == MENU_ANIM_OPENING || m->anim == MENU_ANIM_CLOSING)
+		return;
+	menu_paint(m);
+}
+
 static void
 menu_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
                      uint32_t serial, uint32_t width, uint32_t height)
 {
-	barny_menu_t       *m = userdata;
-	int                 pw, ph, stride, size, fd;
-	struct wl_shm_pool *pool;
+	barny_menu_t *m = userdata;
+	int           pw, ph;
 
 	zwlr_layer_surface_v1_ack_configure(surface, serial);
 
@@ -918,42 +1016,15 @@ menu_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
 	if (pw <= 0 || ph <= 0)
 		return;
 
-	if (m->buffer && pw == m->surf_w && ph == m->surf_h) {
+	if (m->buffer && pw == m->surf_w && ph == m->surf_h
+	    && menu_scale(m) == m->scale120) {
 		menu_compute_rect(m);
 		menu_paint(m);
 		return;
 	}
 
-	if (m->buffer)
-		menu_teardown_buffer(m);
-
-	stride = pw * 4;
-	size   = stride * ph;
-
-	fd     = barny_shm_create((size_t)size);
-	if (fd < 0)
+	if (!menu_alloc_buffer(m, pw, ph))
 		return;
-
-	m->shm_data = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE,
-	                   MAP_SHARED, fd, 0);
-	if (m->shm_data == MAP_FAILED) {
-		close(fd);
-		m->shm_data = NULL;
-		return;
-	}
-	m->shm_size = size;
-
-	pool      = wl_shm_create_pool(m->state->shm, fd, size);
-	m->buffer = wl_shm_pool_create_buffer(pool, 0, pw, ph, stride,
-	                                      WL_SHM_FORMAT_ARGB8888);
-	wl_shm_pool_destroy(pool);
-	close(fd);
-
-	m->cairo_surface = cairo_image_surface_create_for_data(
-	        m->shm_data, CAIRO_FORMAT_ARGB32, pw, ph, stride);
-	m->cr         = cairo_create(m->cairo_surface);
-	m->surf_w     = pw;
-	m->surf_h     = ph;
 	m->configured = true;
 
 	menu_compute_rect(m);
@@ -1120,11 +1191,13 @@ barny_menu_open(barny_state_t *state, sni_item_t *item, int anchor_x,
 		free(m);
 		return;
 	}
+	barny_scaler_init(&m->scaler, state, m->surface, menu_scale_changed, m);
 
 	m->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
 	        state->layer_shell, m->surface, m->out->wl_output,
 	        ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "barny-menu");
 	if (!m->layer_surface) {
+		barny_scaler_fini(&m->scaler);
 		wl_surface_destroy(m->surface);
 		barny_dbusmenu_free(m->root);
 		if (m->font)
@@ -1180,6 +1253,7 @@ barny_tray_menu_open(barny_state_t *state, int anchor_x, int anchor_y,
 	m->surface = wl_compositor_create_surface(state->compositor);
 	if (!m->surface)
 		goto fail;
+	barny_scaler_init(&m->scaler, state, m->surface, menu_scale_changed, m);
 
 	m->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
 	        state->layer_shell, m->surface, m->out->wl_output,
@@ -1200,6 +1274,7 @@ barny_tray_menu_open(barny_state_t *state, int anchor_x, int anchor_y,
 fail:
 	if (m->layer_surface)
 		zwlr_layer_surface_v1_destroy(m->layer_surface);
+	barny_scaler_fini(&m->scaler);
 	if (m->surface)
 		wl_surface_destroy(m->surface);
 	free(m);
@@ -1231,6 +1306,7 @@ menu_finalize_destroy(barny_menu_t *m)
 
 	if (m->layer_surface)
 		zwlr_layer_surface_v1_destroy(m->layer_surface);
+	barny_scaler_fini(&m->scaler);
 	if (m->surface)
 		wl_surface_destroy(m->surface);
 

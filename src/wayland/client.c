@@ -6,6 +6,8 @@
 
 #include "barny.h"
 #include "util.h"
+#include "fractional-scale-v1-client-protocol.h"
+#include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 static void
@@ -512,6 +514,15 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 	} else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
 		state->layer_shell = wl_registry_bind(
 		        registry, name, &zwlr_layer_shell_v1_interface, 4);
+	} else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
+		state->viewporter = wl_registry_bind(registry, name,
+		                                     &wp_viewporter_interface, 1);
+	} else if (strcmp(interface,
+	                  wp_fractional_scale_manager_v1_interface.name)
+	           == 0) {
+		state->fractional_scale = wl_registry_bind(
+		        registry, name,
+		        &wp_fractional_scale_manager_v1_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
 		state->seat
 		        = wl_registry_bind(registry, name, &wl_seat_interface, 7);
@@ -633,6 +644,12 @@ barny_wayland_cleanup(barny_state_t *state)
 	}
 	if (state->layer_shell) {
 		zwlr_layer_shell_v1_destroy(state->layer_shell);
+	}
+	if (state->fractional_scale) {
+		wp_fractional_scale_manager_v1_destroy(state->fractional_scale);
+	}
+	if (state->viewporter) {
+		wp_viewporter_destroy(state->viewporter);
 	}
 	if (state->shm) {
 		wl_shm_destroy(state->shm);

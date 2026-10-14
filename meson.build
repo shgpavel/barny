@@ -73,6 +73,8 @@ wl_protocol_sources = []
 protocols = [
     'xdg-shell',
     'wlr-layer-shell-unstable-v1',
+    'fractional-scale-v1',
+    'viewporter',
 ]
 
 foreach proto : protocols

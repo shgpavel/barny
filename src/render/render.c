@@ -286,7 +286,7 @@ rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
 	size_t           len  = 0;
 	size_t           rlen;
 	unsigned int     diff = 0;
-	int              s    = output->scale;
+	uint32_t         s    = output->scale120;
 	int              bw;
 	int              bh;
 	int              st;
@@ -303,11 +303,7 @@ rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
 		return 0;
 
 	for (i = 0; i < n; i++) {
-		r = barny_rect_clamp((barny_rect_t){ rects[i].x * s,
-		                                     rects[i].y * s,
-		                                     rects[i].w * s,
-		                                     rects[i].h * s },
-		                     bw, bh);
+		r = barny_rect_clamp(barny_rect_to_buffer(rects[i], s), bw, bh);
 		len += (size_t)r.w * 4 * (size_t)r.h;
 	}
 	if (!cmp) {
@@ -318,11 +314,8 @@ rim_snap(barny_output_t *output, const barny_rect_t *rects, int n,
 
 	p = *buf;
 	for (i = 0; i < n; i++) {
-		r    = barny_rect_clamp((barny_rect_t){ rects[i].x * s,
-		                                        rects[i].y * s,
-		                                        rects[i].w * s,
-		                                        rects[i].h * s },
-		                        bw, bh);
+		r    = barny_rect_clamp(barny_rect_to_buffer(rects[i], s), bw,
+		                        bh);
 		rlen = (size_t)r.w * 4;
 		for (y = r.y; y < r.y + r.h; y++) {
 			if (!cmp)
@@ -361,8 +354,6 @@ static void
 render_bar(barny_output_t *output, cairo_t *cr, const barny_rect_t *clip,
            int n, const barny_rect_t *mods)
 {
-	int i;
-
 	if (n == 0) {
 		render_full(output, cr);
 		return;
@@ -372,9 +363,7 @@ render_bar(barny_output_t *output, cairo_t *cr, const barny_rect_t *clip,
 	   land inside the clip rects, and the modules outside them skip
 	   their text shaping entirely. */
 	cairo_save(cr);
-	for (i = 0; i < n; i++)
-		cairo_rectangle(cr, clip[i].x, clip[i].y, clip[i].w, clip[i].h);
-	cairo_clip(cr);
+	barny_clip_buffer_rects(cr, clip, n, output->scale120);
 
 	output->render_clipped = true;
 	output->clip           = *mods;
@@ -438,22 +427,22 @@ modules_clear_dirty(barny_state_t *state)
 static void
 frame_commit(barny_output_t *output, const barny_rect_t *dmg, int n)
 {
-	int s = output->scale;
-	int i;
+	barny_rect_t r;
+	int          i;
 
 	barny_output_request_frame(output);
 
 	cairo_surface_flush(output->cairo_surface);
 	wl_surface_attach(output->surface, output->buffer, 0, 0);
 	if (n == 0) {
-		wl_surface_damage_buffer(output->surface, 0, 0,
-		                         output->surf_width * s,
-		                         output->surf_height * s);
+		wl_surface_damage_buffer(
+		        output->surface, 0, 0,
+		        cairo_image_surface_get_width(output->cairo_surface),
+		        cairo_image_surface_get_height(output->cairo_surface));
 	}
 	for (i = 0; i < n; i++) {
-		wl_surface_damage_buffer(output->surface, dmg[i].x * s,
-		                         dmg[i].y * s, dmg[i].w * s,
-		                         dmg[i].h * s);
+		r = barny_rect_to_buffer(dmg[i], output->scale120);
+		wl_surface_damage_buffer(output->surface, r.x, r.y, r.w, r.h);
 	}
 	wl_surface_commit(output->surface);
 }

@@ -31,6 +31,7 @@ test_support_sources = files(
     '../src/modules/weather.c',
     '../src/modules/windowtitle.c',
     '../src/modules/workspace.c',
+    '../src/wayland/scale.c',
 )
 
 test_inc_dirs = include_directories('.', '..', '../include')

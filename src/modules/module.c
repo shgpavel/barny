@@ -156,7 +156,7 @@ barny_module_render_text(cairo_t *cr, PangoFontDescription *font,
 	ty = y + (h - th) / 2;
 
 	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_move_to(cr, x + 1, ty + 1);
+	barny_move_to_pixel(cr, x + 1, ty + 1);
 	pango_cairo_show_layout(cr, layout);
 
 	if (cfg->text_color_set) {
@@ -165,7 +165,7 @@ barny_module_render_text(cairo_t *cr, PangoFontDescription *font,
 	} else {
 		cairo_set_source_rgba(cr, fb_r, fb_g, fb_b, alpha);
 	}
-	cairo_move_to(cr, x, ty);
+	barny_move_to_pixel(cr, x, ty);
 	pango_cairo_show_layout(cr, layout);
 
 	g_object_unref(layout);

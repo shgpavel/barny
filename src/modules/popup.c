@@ -77,6 +77,11 @@ struct barny_popup {
 	cairo_surface_t              *content_cache; /* rendered data rows */
 	cairo_surface_t              *rest_glass;
 	barny_output_t               *rest_out;
+
+	barny_scaler_t                scaler;
+	uint32_t                      scale120;
+	uint32_t                      out_scale120;
+	int32_t                       out_scale;
 };
 
 static int
@@ -145,22 +150,19 @@ popup_build_content(barny_popup_t *p)
 		p->content_cache = NULL;
 	}
 
-	p->content_cache = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-	                                              p->body_w, p->body_h);
-	if (cairo_surface_status(p->content_cache) != CAIRO_STATUS_SUCCESS) {
-		cairo_surface_destroy(p->content_cache);
-		p->content_cache = NULL;
+	cc = barny_popup_surface_begin(p->body_w, p->body_h, p->scale120);
+	if (!cc)
 		return;
+
+	if (p->cb.render) {
+		cairo_save(cc);
+		cairo_translate(cc, BARNY_POPUP_PAD_X, BARNY_POPUP_PAD_Y);
+		p->cb.render(p->cb.userdata, cc,
+		             p->body_w - 2 * BARNY_POPUP_PAD_X,
+		             p->body_h - 2 * BARNY_POPUP_PAD_Y);
+		cairo_restore(cc);
 	}
-
-	if (!p->cb.render)
-		return;
-
-	cc = cairo_create(p->content_cache);
-	cairo_translate(cc, BARNY_POPUP_PAD_X, BARNY_POPUP_PAD_Y);
-	p->cb.render(p->cb.userdata, cc, p->body_w - 2 * BARNY_POPUP_PAD_X,
-	             p->body_h - 2 * BARNY_POPUP_PAD_Y);
-	cairo_destroy(cc);
+	p->content_cache = barny_popup_surface_end(cc, p->scale120);
 }
 
 /* One scratch patch serves every panel: only one is ever being rasterised at a
@@ -624,19 +626,32 @@ panel_morph_content(cairo_t *cr, const barny_glass_panel_t *panel,
                     const panel_shape_t *s, cairo_surface_t *content)
 {
 	double ca;
+	double sx;
+	double sy;
+	double ox;
+	double oy;
 
 	/* the data window condenses inside the blob near the end of the morph */
 	ca = popup_phase(s->p, POPUP_CONTENT_IN, 1.0);
 	if (ca > 0.003 && content) {
+		sx = 2.0 * s->hw / panel->body_w;
+		sy = 2.0 * s->hh / panel->body_h;
 		cairo_save(cr);
 		barny_rounded_rect_path(cr, s->ccx - s->hw, s->ccy - s->hh,
 		                        2.0 * s->hw, 2.0 * s->hh, s->rr);
 		cairo_clip(cr);
-		cairo_translate(cr, s->ccx, s->ccy);
-		cairo_scale(cr, 2.0 * s->hw / panel->body_w,
-		            2.0 * s->hh / panel->body_h);
-		cairo_translate(cr, -panel->body_w / 2.0, -panel->body_h / 2.0);
-		cairo_set_source_surface(cr, content, 0, 0);
+		if (fabs(sx - 1.0) < 1e-9 && fabs(sy - 1.0) < 1e-9) {
+			ox = s->ccx - panel->body_w / 2.0;
+			oy = s->ccy - panel->body_h / 2.0;
+			barny_snap_to_pixel(cr, &ox, &oy);
+			cairo_set_source_surface(cr, content, ox, oy);
+		} else {
+			cairo_translate(cr, s->ccx, s->ccy);
+			cairo_scale(cr, sx, sy);
+			cairo_translate(cr, -panel->body_w / 2.0,
+			                -panel->body_h / 2.0);
+			cairo_set_source_surface(cr, content, 0, 0);
+		}
 		cairo_paint_with_alpha(cr, ca);
 		cairo_restore(cr);
 	}
@@ -738,34 +753,50 @@ void
 barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
                         const barny_glass_bubble_t *bub)
 {
-	double           hw = bub->hw;
-	double           hh = bub->hh;
-	double           rr = bub->radius;
-	double           a  = bub->alpha;
-	cairo_surface_t *patch;
-	uint8_t         *sdata;
-	uint8_t         *ddata;
-	int              sstride;
-	int              dstride;
-	int              sw;
-	int              sh;
-	int              x0;
-	int              y0;
-	int              x1;
-	int              y1;
-	int              pw;
-	int              ph;
-	int              n;
-	int              c;
-	int              x;
-	int              y;
-	double          *field;
-	double          *fprev;
-	double          *fcur;
-	double          *fnext;
-	double          *ftmp;
+	barny_glass_bubble_t px;
+	double               k  = 1.0;
+	double               ky = 1.0;
+	double               hw;
+	double               hh;
+	double               rr;
+	double               a  = bub->alpha;
+	cairo_surface_t     *patch;
+	uint8_t             *sdata;
+	uint8_t             *ddata;
+	int                  sstride;
+	int                  dstride;
+	int                  sw;
+	int                  sh;
+	int                  x0;
+	int                  y0;
+	int                  x1;
+	int                  y1;
+	int                  pw;
+	int                  ph;
+	int                  n;
+	int                  c;
+	int                  x;
+	int                  y;
+	double              *field;
+	double              *fprev;
+	double              *fcur;
+	double              *fnext;
+	double              *ftmp;
 
-	if (!src || a <= 0.004 || hw < 1.0 || hh < 1.0)
+	if (!src)
+		return;
+	cairo_surface_get_device_scale(src, &k, &ky);
+	px        = *bub;
+	px.cx     = bub->cx * k;
+	px.cy     = bub->cy * k;
+	px.hw     = bub->hw * k;
+	px.hh     = bub->hh * k;
+	px.radius = bub->radius * k;
+	hw        = px.hw;
+	hh        = px.hh;
+	rr        = px.radius;
+
+	if (a <= 0.004 || hw < 1.0 || hh < 1.0)
 		return;
 	if (a > 1.0)
 		a = 1.0;
@@ -782,7 +813,7 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 	if (!sdata)
 		return;
 
-	if (!barny_glass_bubble_bounds(bub, sw, sh, &x0, &y0, &x1, &y1))
+	if (!barny_glass_bubble_bounds(&px, sw, sh, &x0, &y0, &x1, &y1))
 		return;
 
 	pw = x1 - x0;
@@ -800,8 +831,8 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 	ddata   = cairo_image_surface_get_data(patch);
 	dstride = cairo_image_surface_get_stride(patch);
 
-#define BUBBLE_SDF(px, py) \
-	barny_sd_round_rect((px) - bub->cx, (py) - bub->cy, hw, hh, rr)
+#define BUBBLE_SDF(qx, qy) \
+	barny_sd_round_rect((qx) - px.cx, (qy) - px.cy, hw, hh, rr)
 #define BUBBLE_ROW(f, yy)                                                     \
 	for (c = 0; c < n; c++)                                               \
 		(f)[c] = BUBBLE_SDF((x0 - 1 + c) + 0.5, (yy) + 0.5)
@@ -881,7 +912,7 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			   toward the bead's edge, hardest right at the rim,
 			   and dead flat by the time it reaches the label */
 			depth  = -d;
-			zone   = hh < BUBBLE_ZONE ? hh : BUBBLE_ZONE;
+			zone   = hh < BUBBLE_ZONE * k ? hh : BUBBLE_ZONE * k;
 			pp     = zone > 0.0 ? depth / zone : 1.0;
 			if (pp < 0.0)
 				pp = 0.0;
@@ -891,7 +922,7 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			dispx  = -nnx * srcoff;
 			dispy  = -nny * srcoff;
 			pedge  = (1.0 - pp) * (1.0 - pp);
-			cs     = BUBBLE_CHROMA * pedge;
+			cs     = BUBBLE_CHROMA * k * pedge;
 
 			c1 = barny_sample_bilinear_ch(sdata, sstride, sw, sh,
 			                              x0 + x + dispx - nnx * cs,
@@ -919,7 +950,7 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 			fg = a2 == 255 ? c2 : (a2 > 0 ? c2 * 255.0 / a2 : 0.0);
 			fr = a1 == 255 ? c1 : (a1 > 0 ? c1 * 255.0 / a1 : 0.0);
 
-			veil = depth / BUBBLE_VEIL_FADE;
+			veil = depth / (BUBBLE_VEIL_FADE * k);
 			if (veil < 0.0)
 				veil = 0.0;
 			if (veil > 1.0)
@@ -928,23 +959,23 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 
 			facing = nnx * GLASS_SPEC_LX + nny * GLASS_SPEC_LY;
 			lit    = glass_lit(facing);
-			ri     = 1.0 - depth / POPUP_RIM_W;
+			ri     = 1.0 - depth / (POPUP_RIM_W * k);
 			if (ri < 0.0 || d > 0.0)
 				ri = 0.0;
 			ri   = ri * ri;
-			core = 1.0 - fabs(d) / 1.4;
+			core = 1.0 - fabs(d) / (1.4 * k);
 			if (core < 0.0)
 				core = 0.0;
 			rim = POPUP_RIM_STR * ri + POPUP_RIM_CORE * core * lit;
 
-			if (d < 0.0 && depth < POPUP_SPEC_W && facing > 0.0) {
-				band = 1.0 - depth / POPUP_SPEC_W;
+			if (d < 0.0 && depth < POPUP_SPEC_W * k && facing > 0.0) {
+				band = 1.0 - depth / (POPUP_SPEC_W * k);
 				band = glass_smoothstep01(band);
 				spec = POPUP_SPEC_GAIN * band
 				       * glass_pow10(facing);
 			}
 
-			ty = hh > 0.0 ? (ly - bub->cy) / hh : 0.0;
+			ty = hh > 0.0 ? (ly - px.cy) / hh : 0.0;
 			if (ty < -1.0)
 				ty = -1.0;
 			if (ty > 1.0)
@@ -965,7 +996,8 @@ barny_glass_bubble_draw(cairo_t *cr, cairo_surface_t *src,
 #undef BUBBLE_SDF
 
 	cairo_surface_mark_dirty(patch);
-	cairo_set_source_surface(cr, patch, x0, y0);
+	cairo_surface_set_device_scale(patch, k, k);
+	cairo_set_source_surface(cr, patch, x0 / k, y0 / k);
 	cairo_paint(cr);
 	cairo_set_source_rgba(cr, 0, 0, 0, 0);
 }
@@ -1028,14 +1060,16 @@ static void
 panel_compose_content(cairo_t *cr, const barny_glass_panel_t *panel,
                       cairo_surface_t *content)
 {
+	double ox = 0.0;
+	double oy = panel->body_y;
+
 	if (!content)
 		return;
 
-	cairo_save(cr);
-	cairo_translate(cr, 0, panel->body_y);
-	cairo_set_source_surface(cr, content, 0, 0);
+	barny_snap_to_pixel(cr, &ox, &oy);
+	cairo_set_source_surface(cr, content, ox, oy);
 	cairo_paint(cr);
-	cairo_restore(cr);
+	cairo_set_source_rgba(cr, 0, 0, 0, 0);
 }
 
 void
@@ -1202,7 +1236,9 @@ popup_present(barny_popup_t *p, double m)
 
 	cairo_surface_flush(p->cairo_surface);
 	wl_surface_attach(p->surface, p->buffer, 0, 0);
-	wl_surface_damage_buffer(p->surface, 0, 0, p->current_w, p->current_h);
+	wl_surface_damage_buffer(p->surface, 0, 0,
+	                         cairo_image_surface_get_width(p->cairo_surface),
+	                         cairo_image_surface_get_height(p->cairo_surface));
 }
 
 static void
@@ -1231,6 +1267,7 @@ popup_finalize_destroy(barny_popup_t *p)
 		zwlr_layer_surface_v1_destroy(p->layer_surface);
 		p->layer_surface = NULL;
 	}
+	barny_scaler_fini(&p->scaler);
 	if (p->surface) {
 		wl_surface_destroy(p->surface);
 		p->surface = NULL;
@@ -1322,47 +1359,88 @@ popup_teardown_buffer(barny_popup_t *p)
 	p->shm_size = 0;
 }
 
-static void
-popup_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
-                      uint32_t serial, uint32_t width, uint32_t height)
+static bool
+popup_alloc_buffer(barny_popup_t *p, int pw, int ph)
 {
-	barny_popup_t      *p = userdata;
-	int                 pw, ph, stride, size, fd;
+	uint32_t            s120;
+	double              s;
+	int                 bw, bh, stride, size, fd;
 	struct wl_shm_pool *pool;
-
-	zwlr_layer_surface_v1_ack_configure(surface, serial);
 
 	if (p->buffer)
 		popup_teardown_buffer(p);
 
-	pw     = (int)width > 0 ? (int)width : popup_compute_width(p);
-	ph     = (int)height > 0 ? (int)height
-	                         : popup_compute_height(p) + p->neck_h;
-	stride = pw * 4;
-	size   = stride * ph;
+	s120   = barny_scaler_scale(&p->scaler, p->out_scale120, p->out_scale);
+	s      = (double)s120 / BARNY_SCALE_UNIT;
+	bw     = barny_scale_len(pw, s120);
+	bh     = barny_scale_len(ph, s120);
+	stride = bw * 4;
+	size   = stride * bh;
 
 	fd     = barny_shm_create((size_t)size);
 	if (fd < 0)
-		return;
+		return false;
 
 	p->shm_data = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE,
 	                   MAP_SHARED, fd, 0);
 	if (p->shm_data == MAP_FAILED) {
 		close(fd);
 		p->shm_data = NULL;
-		return;
+		return false;
 	}
 	p->shm_size = size;
 
 	pool        = wl_shm_create_pool(p->state->shm, fd, size);
-	p->buffer   = wl_shm_pool_create_buffer(pool, 0, pw, ph, stride,
+	p->buffer   = wl_shm_pool_create_buffer(pool, 0, bw, bh, stride,
 	                                        WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
 	close(fd);
 
 	p->cairo_surface = cairo_image_surface_create_for_data(
-	        p->shm_data, CAIRO_FORMAT_ARGB32, pw, ph, stride);
-	p->cr        = cairo_create(p->cairo_surface);
+	        p->shm_data, CAIRO_FORMAT_ARGB32, bw, bh, stride);
+	p->cr       = cairo_create(p->cairo_surface);
+	p->scale120 = s120;
+	if (s120 != BARNY_SCALE_UNIT)
+		cairo_scale(p->cr, s, s);
+	barny_scaler_apply(&p->scaler, p->surface, s120, pw, ph);
+
+	return true;
+}
+
+static void
+popup_scale_changed(void *data)
+{
+	barny_popup_t *p = data;
+
+	if (!p->configured || !p->buffer)
+		return;
+	if (barny_scaler_scale(&p->scaler, p->out_scale120, p->out_scale)
+	    == p->scale120)
+		return;
+	if (!popup_alloc_buffer(p, p->current_w, p->current_h))
+		return;
+
+	if (p->anim != POPUP_ANIM_CLOSING)
+		popup_build_content(p);
+	if (p->anim == POPUP_ANIM_OPENING || p->anim == POPUP_ANIM_CLOSING)
+		return;
+	popup_paint(p);
+}
+
+static void
+popup_layer_configure(void *userdata, struct zwlr_layer_surface_v1 *surface,
+                      uint32_t serial, uint32_t width, uint32_t height)
+{
+	barny_popup_t *p = userdata;
+	int            pw, ph;
+
+	zwlr_layer_surface_v1_ack_configure(surface, serial);
+
+	pw = (int)width > 0 ? (int)width : popup_compute_width(p);
+	ph = (int)height > 0 ? (int)height : popup_compute_height(p) + p->neck_h;
+	if (!popup_alloc_buffer(p, pw, ph))
+		return;
+
 	p->current_w = pw;
 	p->current_h = ph;
 	p->body_w    = pw;
@@ -1455,10 +1533,16 @@ barny_popup_create(barny_state_t *state, barny_module_t *owner,
 	wl_surface_set_input_region(p->surface, empty);
 	wl_region_destroy(empty);
 
+	p->out_scale120 = out->scale120;
+	p->out_scale    = out->scale;
+	barny_scaler_init(&p->scaler, state, p->surface, popup_scale_changed,
+	                  p);
+
 	p->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
 	        state->layer_shell, p->surface, out->wl_output,
 	        ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "barny-popup");
 	if (!p->layer_surface) {
+		barny_scaler_fini(&p->scaler);
 		wl_surface_destroy(p->surface);
 		p->surface = NULL;
 		free(p);
@@ -1549,10 +1633,10 @@ barny_popup_draw_row(cairo_t *cr, PangoLayout *layout, int row_y, int line_h,
 	pango_layout_get_pixel_size(layout, &tw, &th);
 	ty = row_y + (line_h - th) / 2;
 	cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-	cairo_move_to(cr, 1, ty + 1);
+	barny_move_to_pixel(cr, 1, ty + 1);
 	pango_cairo_show_layout(cr, layout);
 	cairo_set_source_rgba(cr, lr, lg, lb, 0.9);
-	cairo_move_to(cr, 0, ty);
+	barny_move_to_pixel(cr, 0, ty);
 	pango_cairo_show_layout(cr, layout);
 
 	pango_layout_set_text(layout, value, -1);
@@ -1560,11 +1644,47 @@ barny_popup_draw_row(cairo_t *cr, PangoLayout *layout, int row_y, int line_h,
 	ty = row_y + (line_h - th) / 2;
 	vx = width - tw;
 	cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-	cairo_move_to(cr, vx + 1, ty + 1);
+	barny_move_to_pixel(cr, vx + 1, ty + 1);
 	pango_cairo_show_layout(cr, layout);
 	cairo_set_source_rgba(cr, vr, vg, vb, val_alpha);
-	cairo_move_to(cr, vx, ty);
+	barny_move_to_pixel(cr, vx, ty);
 	pango_cairo_show_layout(cr, layout);
+}
+
+cairo_t *
+barny_popup_surface_begin(int w, int h, uint32_t scale120)
+{
+	cairo_surface_t *surf;
+	cairo_t         *cr;
+	double           s = (double)scale120 / BARNY_SCALE_UNIT;
+
+	surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+	                                  barny_scale_len(w, scale120),
+	                                  barny_scale_len(h, scale120));
+	if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(surf);
+		return NULL;
+	}
+
+	cr = cairo_create(surf);
+	cairo_surface_destroy(surf);
+	if (scale120 != BARNY_SCALE_UNIT)
+		cairo_scale(cr, s, s);
+
+	return cr;
+}
+
+cairo_surface_t *
+barny_popup_surface_end(cairo_t *cr, uint32_t scale120)
+{
+	cairo_surface_t *surf = cairo_surface_reference(cairo_get_target(cr));
+	double           s    = (double)scale120 / BARNY_SCALE_UNIT;
+
+	cairo_destroy(cr);
+	cairo_surface_flush(surf);
+	cairo_surface_set_device_scale(surf, s, s);
+
+	return surf;
 }
 
 PangoFontDescription *

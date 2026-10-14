@@ -91,6 +91,24 @@ static const struct wl_callback_listener frame_listener = {
 	.done = frame_done,
 };
 
+static void
+output_scale_changed(void *data)
+{
+	barny_output_t *output = data;
+
+	if (!output->configured || !output->buffer)
+		return;
+	if (barny_scaler_scale(&output->scaler, 0, output->scale)
+	    == output->scale120)
+		return;
+
+	if (barny_output_create_buffer(output) < 0) {
+		fprintf(stderr, "barny: failed to create buffer\n");
+		return;
+	}
+	barny_render_frame(output);
+}
+
 int
 barny_output_create_surface(barny_output_t *output)
 {
@@ -108,6 +126,9 @@ barny_output_create_surface(barny_output_t *output)
 		return -1;
 	}
 
+	barny_scaler_init(&output->scaler, state, output->surface,
+	                  output_scale_changed, output);
+
 	layer                 = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
 	output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
 	        state->layer_shell, output->surface, output->wl_output, layer,
@@ -115,6 +136,7 @@ barny_output_create_surface(barny_output_t *output)
 
 	if (!output->layer_surface) {
 		fprintf(stderr, "barny: failed to create layer surface\n");
+		barny_scaler_fini(&output->scaler);
 		wl_surface_destroy(output->surface);
 		output->surface = NULL;
 		return -1;
@@ -206,6 +228,7 @@ barny_output_destroy_surface(barny_output_t *output)
 		zwlr_layer_surface_v1_destroy(output->layer_surface);
 		output->layer_surface = NULL;
 	}
+	barny_scaler_fini(&output->scaler);
 	if (output->surface) {
 		wl_surface_destroy(output->surface);
 		output->surface = NULL;
@@ -219,8 +242,10 @@ int
 barny_output_create_buffer(barny_output_t *output)
 {
 	barny_state_t      *state  = output->state;
-	int                 width  = output->surf_width * output->scale;
-	int                 height = output->surf_height * output->scale;
+	uint32_t            s120   = barny_scaler_scale(&output->scaler, 0,
+	                                                output->scale);
+	int                 width  = barny_scale_len(output->surf_width, s120);
+	int                 height = barny_scale_len(output->surf_height, s120);
 	int                 stride = width * 4;
 	int                 size   = stride * height;
 	int                 fd;
@@ -252,12 +277,14 @@ barny_output_create_buffer(barny_output_t *output)
 
 	output->cairo_surface = cairo_image_surface_create_for_data(
 	        output->shm_data, CAIRO_FORMAT_ARGB32, width, height, stride);
-	output->cr = cairo_create(output->cairo_surface);
+	output->cr       = cairo_create(output->cairo_surface);
+	output->scale120 = s120;
 
-	if (output->scale > 1) {
-		cairo_scale(output->cr, output->scale, output->scale);
-		wl_surface_set_buffer_scale(output->surface, output->scale);
-	}
+	if (s120 != BARNY_SCALE_UNIT)
+		cairo_scale(output->cr, (double)s120 / BARNY_SCALE_UNIT,
+		            (double)s120 / BARNY_SCALE_UNIT);
+	barny_scaler_apply(&output->scaler, output->surface, s120,
+	                   output->surf_width, output->surf_height);
 
 	return 0;
 }

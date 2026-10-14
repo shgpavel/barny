@@ -90,6 +90,97 @@ barny_rect_clamp(barny_rect_t r, int w, int h)
 	return r;
 }
 
+#define BARNY_SCALE_UNIT 120
+
+static inline int
+barny_scale_len(int v, uint32_t scale120)
+{
+	return (int)(((int64_t)v * scale120 + BARNY_SCALE_UNIT / 2)
+	             / BARNY_SCALE_UNIT);
+}
+
+static inline int64_t
+barny_div_floor(int64_t a, int64_t b)
+{
+	return a >= 0 ? a / b : -((-a + b - 1) / b);
+}
+
+static inline barny_rect_t
+barny_rect_to_buffer(barny_rect_t r, uint32_t scale120)
+{
+	int64_t x0;
+	int64_t y0;
+	int64_t x1;
+	int64_t y1;
+
+	if (barny_rect_empty(r))
+		return (barny_rect_t){ 0 };
+
+	x0 = barny_div_floor((int64_t)r.x * scale120, BARNY_SCALE_UNIT);
+	y0 = barny_div_floor((int64_t)r.y * scale120, BARNY_SCALE_UNIT);
+	x1 = -barny_div_floor(-(int64_t)(r.x + r.w) * scale120, BARNY_SCALE_UNIT);
+	y1 = -barny_div_floor(-(int64_t)(r.y + r.h) * scale120, BARNY_SCALE_UNIT);
+
+	return (barny_rect_t){ (int)x0, (int)y0, (int)(x1 - x0),
+		               (int)(y1 - y0) };
+}
+
+static inline void
+barny_snap_to_pixel(cairo_t *cr, double *x, double *y)
+{
+	cairo_user_to_device(cr, x, y);
+	*x = round(*x);
+	*y = round(*y);
+	cairo_device_to_user(cr, x, y);
+}
+
+static inline void
+barny_move_to_pixel(cairo_t *cr, double x, double y)
+{
+	barny_snap_to_pixel(cr, &x, &y);
+	cairo_move_to(cr, x, y);
+}
+
+static inline void
+barny_clip_buffer_rects(cairo_t *cr, const barny_rect_t *rects, int n,
+                        uint32_t scale120)
+{
+	cairo_matrix_t m;
+	barny_rect_t   r;
+	int            i;
+
+	cairo_get_matrix(cr, &m);
+	cairo_identity_matrix(cr);
+	cairo_new_path(cr);
+	for (i = 0; i < n; i++) {
+		r = barny_rect_to_buffer(rects[i], scale120);
+		cairo_rectangle(cr, r.x, r.y, r.w, r.h);
+	}
+	cairo_set_matrix(cr, &m);
+	cairo_clip(cr);
+}
+
+typedef struct {
+	struct wp_viewport            *viewport;
+	struct wp_fractional_scale_v1 *fractional;
+	uint32_t                       preferred;
+	void                         (*changed)(void *data);
+	void                          *data;
+} barny_scaler_t;
+
+void
+barny_scaler_init(barny_scaler_t *sc, barny_state_t *state,
+                  struct wl_surface *surface, void (*changed)(void *),
+                  void *data);
+void
+barny_scaler_fini(barny_scaler_t *sc);
+uint32_t
+barny_scaler_scale(const barny_scaler_t *sc, uint32_t guess120,
+                   int32_t output_scale);
+void
+barny_scaler_apply(const barny_scaler_t *sc, struct wl_surface *surface,
+                   uint32_t scale120, int w, int h);
+
 typedef enum {
 	BARNY_POS_LEFT,
 	BARNY_POS_CENTER,
@@ -280,6 +371,8 @@ struct barny_output {
 	int32_t                       pad_bottom;
 	int32_t                       mode_height;
 	int32_t                       scale;
+	uint32_t                      scale120;
+	barny_scaler_t                scaler;
 	char                         *name;
 	uint32_t                      registry_name;
 
@@ -332,6 +425,8 @@ struct barny_state {
 	struct wl_compositor       *compositor;
 	struct wl_shm              *shm;
 	struct zwlr_layer_shell_v1 *layer_shell;
+	struct wp_viewporter       *viewporter;
+	struct wp_fractional_scale_manager_v1 *fractional_scale;
 	struct wl_seat             *seat;
 	struct wl_pointer          *pointer;
 

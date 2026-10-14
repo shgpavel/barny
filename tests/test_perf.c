@@ -287,6 +287,7 @@ bench_rim(int iters, int mode)
 
 	output.state       = &state;
 	output.scale       = 1;
+	output.scale120    = BARNY_SCALE_UNIT;
 	output.width       = BAR_W;
 	output.height      = BAR_H;
 	output.pad_left    = 8;

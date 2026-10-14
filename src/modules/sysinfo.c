@@ -897,11 +897,11 @@ render_text(cairo_t *cr, PangoLayout *layout, const char *text, int x, int y,
 	text_y = y + (h - th) / 2;
 
 	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_move_to(cr, x + 1, text_y + 1);
+	barny_move_to_pixel(cr, x + 1, text_y + 1);
 	pango_cairo_show_layout(cr, layout);
 
 	cairo_set_source_rgba(cr, r, g, b, 0.9);
-	cairo_move_to(cr, x, text_y);
+	barny_move_to_pixel(cr, x, text_y);
 	pango_cairo_show_layout(cr, layout);
 
 	return tw;

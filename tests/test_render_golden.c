@@ -449,6 +449,7 @@ bar_new(cairo_surface_t *wall, bool top, double prism)
 
 	b->out.state                  = &b->state;
 	b->out.scale                  = 1;
+	b->out.scale120               = BARNY_SCALE_UNIT;
 	b->out.width                  = BAR_W;
 	b->out.height                 = BAR_H;
 	b->out.pad_left               = 8;
@@ -487,6 +488,7 @@ bar_draw(bar_t *b, cairo_surface_t *surf, double lens_x, double vx,
 	                 / b->out.surf_width;
 
 	b->out.scale        = scale;
+	b->out.scale120     = (uint32_t)scale * BARNY_SCALE_UNIT;
 	b->state.lens_x     = lens_x;
 	b->state.lens_vx    = vx;
 	b->state.lens_scale = s;

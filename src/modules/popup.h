@@ -114,6 +114,11 @@ barny_popup_redraw(barny_popup_t *popup);
 bool
 barny_popup_visible(const barny_popup_t *popup);
 
+cairo_t *
+barny_popup_surface_begin(int w, int h, uint32_t scale120);
+cairo_surface_t *
+barny_popup_surface_end(cairo_t *cr, uint32_t scale120);
+
 int
 barny_popup_measure_text(PangoFontDescription *font_desc, const char *text);
 

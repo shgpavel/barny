@@ -3,6 +3,7 @@
 #include <cairo/cairo.h>
 
 #include "../src/render/liquid_glass.c"
+#include "../src/modules/popup.h"
 
 #define perlin_fade_test    perlin_fade
 #define perlin_lerp_test    perlin_lerp
@@ -558,6 +559,7 @@ lens_setup(barny_state_t *state, barny_output_t *out)
 	out->pad_bottom             = LENS_PAD_B;
 	out->surf_width             = LENS_PAD_L + LENS_BAR_W + LENS_PAD_R;
 	out->surf_height            = LENS_PAD_T + LENS_BAR_H + LENS_PAD_B;
+	out->scale120               = BARNY_SCALE_UNIT;
 
 	state->dyn_output           = out;
 	state->lens_scale           = 1.0;
@@ -979,11 +981,11 @@ test_lens_map_lifetime(void)
 }
 
 static cairo_surface_t *
-rim_target(const barny_output_t *out, int scale)
+rim_target(const barny_output_t *out)
 {
-	return cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-	                                  out->surf_width * scale,
-	                                  out->surf_height * scale);
+	return cairo_image_surface_create(
+	        CAIRO_FORMAT_ARGB32, barny_scale_len(out->surf_width, out->scale120),
+	        barny_scale_len(out->surf_height, out->scale120));
 }
 
 static void
@@ -991,37 +993,31 @@ rim_draw(barny_output_t *out, cairo_surface_t *surf, double lens_x,
          uint64_t tick, const barny_rect_t *clip, int n)
 {
 	cairo_t *cr = cairo_create(surf);
-	int      i;
+	double   s  = (double)out->scale120 / BARNY_SCALE_UNIT;
 
-	out->scale         = cairo_image_surface_get_width(surf)
-	                     / out->surf_width;
 	out->rim_tick      = tick;
 	out->state->lens_x = lens_x;
 
-	if (out->scale > 1)
-		cairo_scale(cr, out->scale, out->scale);
-	if (n > 0) {
-		for (i = 0; i < n; i++)
-			cairo_rectangle(cr, clip[i].x, clip[i].y, clip[i].w,
-			                clip[i].h);
-		cairo_clip(cr);
-	}
+	if (out->scale120 != BARNY_SCALE_UNIT)
+		cairo_scale(cr, s, s);
+	if (n > 0)
+		barny_clip_buffer_rects(cr, clip, n, out->scale120);
 	barny_render_liquid_glass(out, cr);
 	cairo_destroy(cr);
 }
 
 static void
-rim_setup(barny_state_t *state, barny_output_t *out, int scale)
+rim_setup(barny_state_t *state, barny_output_t *out, uint32_t scale120)
 {
 	lens_setup(state, out);
 	state->config.glass_prism_flow = 12.0;
 	state->config.glass_prism_fps  = 15;
 	state->lens_scale              = 0.0;
-	out->scale                     = scale;
+	out->scale120                  = scale120;
 }
 
 static int
-rim_partial_diff(int scale, int shrink, bool droplet)
+rim_partial_diff(uint32_t scale120, int shrink, bool droplet)
 {
 	static const uint64_t ticks[] = { 1, 7, 40, 133, 391 };
 	barny_state_t         state;
@@ -1038,11 +1034,11 @@ rim_partial_diff(int scale, int shrink, bool droplet)
 	int                   j;
 	int                   diff = 0;
 
-	rim_setup(&state, &out, scale);
+	rim_setup(&state, &out, scale120);
 	if (droplet)
 		state.lens_scale = 1.0;
-	full = rim_target(&out, scale);
-	part = rim_target(&out, scale);
+	full = rim_target(&out);
+	part = rim_target(&out);
 	rim_draw(&out, part, 300.0, 0, NULL, 0);
 
 	for (i = 0; i < sizeof(ticks) / sizeof(ticks[0]); i++) {
@@ -1147,9 +1143,9 @@ test_rim_flow(void)
 
 	TEST("glass_prism 0 or flow 0 allocates no rim data")
 	{
-		rim_setup(&state, &out, 1);
+		rim_setup(&state, &out, 120);
 		state.config.glass_prism = 0.0;
-		on                       = rim_target(&out, 1);
+		on                       = rim_target(&out);
 		rim_draw(&out, on, 300.0, 5, NULL, 0);
 		ASSERT_NULL(out.rim);
 		ASSERT_EQ_INT(0, barny_rim_rects(&out, rects));
@@ -1170,30 +1166,41 @@ test_rim_flow(void)
 
 	TEST("rim-only redraw matches a full redraw at scale 1")
 	{
-		ASSERT_EQ_INT(0, rim_partial_diff(1, 0, false));
+		ASSERT_EQ_INT(0, rim_partial_diff(120, 0, false));
 	}
 
 	TEST("rim-only redraw matches a full redraw at scale 2")
 	{
-		ASSERT_EQ_INT(0, rim_partial_diff(2, 0, false));
+		ASSERT_EQ_INT(0, rim_partial_diff(240, 0, false));
+	}
+
+	TEST("rim-only redraw matches a full redraw at scale 1.25")
+	{
+		ASSERT_EQ_INT(0, rim_partial_diff(150, 0, false));
 	}
 
 	TEST("at scale 2 the rim rects need their 1 px grow")
 	{
-		ASSERT_TRUE(rim_partial_diff(2, 1, false) > 0);
+		ASSERT_TRUE(rim_partial_diff(240, 1, false) > 0);
+	}
+
+	TEST("at scale 1.25 the rim rects need their 1 px grow")
+	{
+		ASSERT_TRUE(rim_partial_diff(150, 1, false) > 0);
 	}
 
 	TEST("strip plus rim redraw matches a full redraw while moving")
 	{
-		ASSERT_EQ_INT(0, rim_partial_diff(1, 0, true));
-		ASSERT_EQ_INT(0, rim_partial_diff(2, 0, true));
+		ASSERT_EQ_INT(0, rim_partial_diff(120, 0, true));
+		ASSERT_EQ_INT(0, rim_partial_diff(240, 0, true));
+		ASSERT_EQ_INT(0, rim_partial_diff(150, 0, true));
 	}
 
 	TEST("the droplet's far columns match the droplet-free frame")
 	{
-		rim_setup(&state, &out, 1);
-		on  = rim_target(&out, 1);
-		off = rim_target(&out, 1);
+		rim_setup(&state, &out, 120);
+		on  = rim_target(&out);
+		off = rim_target(&out);
 		bad = 0;
 		for (c = 0; c < 3; c++) {
 			state.lens_scale = 0.0;
@@ -1224,6 +1231,117 @@ test_rim_flow(void)
 		cairo_surface_destroy(on);
 		cairo_surface_destroy(off);
 		barny_output_free_glass_caches(&out, false);
+	}
+
+	TEST_SUITE_END();
+}
+
+void
+test_hidpi_helpers(void)
+{
+	cairo_surface_t *dst;
+	cairo_surface_t *src;
+	cairo_t         *cr;
+	barny_rect_t     r;
+	double           x;
+	double           y;
+	double           sx;
+	double           sy;
+	uint8_t         *sd;
+	uint8_t         *dd;
+	int              ss;
+	int              ds;
+	int              bad;
+	int              i;
+	int              j;
+
+	TEST_SUITE_BEGIN("HiDPI Helpers");
+
+	TEST("buffer lengths round like wp_fractional_scale_v1")
+	{
+		ASSERT_EQ_INT(2560, barny_scale_len(2048, 150));
+		ASSERT_EQ_INT(101, barny_scale_len(81, 150));
+		ASSERT_EQ_INT(162, barny_scale_len(81, 240));
+		ASSERT_EQ_INT(81, barny_scale_len(81, BARNY_SCALE_UNIT));
+	}
+
+	TEST("logical rects grow outward to whole buffer pixels")
+	{
+		r = barny_rect_to_buffer((barny_rect_t){ 3, 3, 10, 10 }, 150);
+		ASSERT_EQ_INT(3, r.x);
+		ASSERT_EQ_INT(3, r.y);
+		ASSERT_EQ_INT(14, r.w);
+		ASSERT_EQ_INT(14, r.h);
+		r = barny_rect_to_buffer((barny_rect_t){ -1, 0, 2, 1 }, 150);
+		ASSERT_EQ_INT(-2, r.x);
+		ASSERT_EQ_INT(0, r.y);
+		ASSERT_EQ_INT(4, r.w);
+		ASSERT_EQ_INT(2, r.h);
+		r = barny_rect_to_buffer((barny_rect_t){ 3, 4, 5, 6 }, 240);
+		ASSERT_EQ_INT(6, r.x);
+		ASSERT_EQ_INT(8, r.y);
+		ASSERT_EQ_INT(10, r.w);
+		ASSERT_EQ_INT(12, r.h);
+		r = barny_rect_to_buffer((barny_rect_t){ 3, 4, 0, 6 }, 150);
+		ASSERT_TRUE(barny_rect_empty(r));
+	}
+
+	TEST("text origins land on whole device pixels at 1.25")
+	{
+		dst = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 64, 64);
+		cr  = cairo_create(dst);
+		cairo_scale(cr, 1.25, 1.25);
+		for (i = 0; i < 8; i++) {
+			barny_move_to_pixel(cr, 3 + i, 5 + 0.5 * i);
+			cairo_get_current_point(cr, &x, &y);
+			cairo_user_to_device(cr, &x, &y);
+			ASSERT_EQ_DBL(round(x), x, 1e-9);
+			ASSERT_EQ_DBL(round(y), y, 1e-9);
+		}
+		cairo_destroy(cr);
+		cairo_surface_destroy(dst);
+	}
+
+	TEST("text caches are drawn at buffer size and composite 1:1")
+	{
+		cr = barny_popup_surface_begin(40, 20, 150);
+		ASSERT_NOT_NULL(cr);
+		for (i = 0; i < 40; i++)
+			for (j = 0; j < 20; j++)
+				if ((i + j) % 3 == 0)
+					cairo_rectangle(cr, i, j, 1, 1);
+		cairo_set_source_rgb(cr, 1, 1, 1);
+		cairo_fill(cr);
+		src = barny_popup_surface_end(cr, 150);
+		ASSERT_EQ_INT(50, cairo_image_surface_get_width(src));
+		ASSERT_EQ_INT(25, cairo_image_surface_get_height(src));
+		cairo_surface_get_device_scale(src, &sx, &sy);
+		ASSERT_EQ_DBL(1.25, sx, 0.0);
+		ASSERT_EQ_DBL(1.25, sy, 0.0);
+
+		dst = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 80, 80);
+		cr  = cairo_create(dst);
+		cairo_scale(cr, 1.25, 1.25);
+		x = 3.0;
+		y = 7.0;
+		barny_snap_to_pixel(cr, &x, &y);
+		cairo_set_source_surface(cr, src, x, y);
+		cairo_paint(cr);
+		cairo_destroy(cr);
+		cairo_surface_flush(dst);
+
+		sd  = cairo_image_surface_get_data(src);
+		dd  = cairo_image_surface_get_data(dst);
+		ss  = cairo_image_surface_get_stride(src);
+		ds  = cairo_image_surface_get_stride(dst);
+		bad = 0;
+		for (j = 0; j < 25; j++)
+			bad += memcmp(sd + j * ss, dd + (j + 9) * ds + 4 * 4,
+			              50 * 4)
+			       != 0;
+		ASSERT_EQ_INT(0, bad);
+		cairo_surface_destroy(dst);
+		cairo_surface_destroy(src);
 	}
 
 	TEST_SUITE_END();

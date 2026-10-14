@@ -259,7 +259,7 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 		pango_layout_set_text(layout, label, -1);
 		pango_layout_get_pixel_size(layout, &tw, &th);
 		cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, fg_a);
-		cairo_move_to(cr, cx - tw / 2.0, cy - th / 2.0);
+		barny_move_to_pixel(cr, cx - tw / 2.0, cy - th / 2.0);
 		pango_cairo_show_layout(cr, layout);
 
 		total_width += indicator_size + spacing;
