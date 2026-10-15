@@ -697,6 +697,12 @@ barny_module_find(barny_state_t *state, const char *name);
 bool
 barny_modules_any_dirty(const barny_state_t *state);
 
+PangoLayout *
+barny_text_layout(cairo_t *cr, PangoFontDescription *font, const char *text);
+
+void
+barny_text_cache_clear(void);
+
 int
 barny_module_render_text(cairo_t *cr, PangoFontDescription *font,
                          const char *text, int x, int y, int h,

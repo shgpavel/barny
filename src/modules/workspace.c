@@ -210,9 +210,6 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 	int               i;
 	(void)w;
 
-	layout = pango_cairo_create_layout(cr);
-	pango_layout_set_font_description(layout, data->font_desc);
-
 	for (i = 0; i < data->workspace_count; i++) {
 		workspace_info_t *ws = &data->workspaces[i];
 		int               cx = x + total_width + indicator_size / 2;
@@ -256,7 +253,7 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 		draw_shape(cr, cx, cy, indicator_size, square, corner_radius,
 		           fill);
 
-		pango_layout_set_text(layout, label, -1);
+		layout = barny_text_layout(cr, data->font_desc, label);
 		pango_layout_get_pixel_size(layout, &tw, &th);
 		cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, fg_a);
 		barny_move_to_pixel(cr, cx - tw / 2.0, cy - th / 2.0);
@@ -264,8 +261,6 @@ workspace_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 
 		total_width += indicator_size + spacing;
 	}
-
-	g_object_unref(layout);
 
 	self->width = total_width > 0 ? total_width - spacing : 0;
 }

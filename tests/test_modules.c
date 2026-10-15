@@ -475,3 +475,193 @@ test_module_data(void)
 
 	TEST_SUITE_END();
 }
+
+static int
+render_text_fresh(cairo_t *cr, PangoFontDescription *font, const char *text,
+                  int x, int y, int h, const barny_config_t *cfg)
+{
+	PangoLayout *layout;
+	int          tw;
+	int          th;
+	int          ty;
+
+	layout = pango_cairo_create_layout(cr);
+	pango_layout_set_font_description(layout, font);
+	pango_layout_set_text(layout, text, -1);
+	pango_layout_get_pixel_size(layout, &tw, &th);
+	ty = y + (h - th) / 2;
+	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
+	barny_move_to_pixel(cr, x + 1, ty + 1);
+	pango_cairo_show_layout(cr, layout);
+	cairo_set_source_rgba(cr, cfg->text_color_r, cfg->text_color_g,
+	                      cfg->text_color_b, 0.9);
+	barny_move_to_pixel(cr, x, ty);
+	pango_cairo_show_layout(cr, layout);
+	g_object_unref(layout);
+
+	return tw;
+}
+
+static void
+surface_clear(cairo_t *cr)
+{
+	cairo_save(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+	cairo_paint(cr);
+	cairo_restore(cr);
+}
+
+static bool
+surfaces_equal(cairo_surface_t *a, cairo_surface_t *b)
+{
+	cairo_surface_flush(a);
+	cairo_surface_flush(b);
+
+	return memcmp(cairo_image_surface_get_data(a),
+	              cairo_image_surface_get_data(b),
+	              (size_t)cairo_image_surface_get_stride(a)
+	                      * cairo_image_surface_get_height(a))
+	       == 0;
+}
+
+void
+test_text_cache(void)
+{
+	static const char *const fonts[] = { "Sans 10", "Monospace Bold 13",
+		                             "Serif 21" };
+	static const char *const texts[] = { "12:34:56", "BTC $109234.56", "1",
+		                             "",         "CPU 4.2 GHz",    "日本",
+		                             "  wl0: 10.0.0.2" };
+	static const double      scales[] = { 1.0, 1.25, 2.0 };
+	PangoFontDescription    *fd[3];
+	cairo_surface_t         *cs[3];
+	cairo_surface_t         *rs[3];
+	cairo_t                 *cc[3];
+	cairo_t                 *rc[3];
+	barny_config_t           cfg = { 0 };
+	int                      pass;
+	int                      s;
+	int                      f;
+	int                      t;
+	int                      cw;
+	int                      rw;
+	int                      bad;
+
+	TEST_SUITE_BEGIN("Text Layout Cache");
+
+	cfg.text_color_set = true;
+	cfg.text_color_r   = 0.9;
+	cfg.text_color_g   = 0.8;
+	cfg.text_color_b   = 0.7;
+	for (f = 0; f < 3; f++)
+		fd[f] = pango_font_description_from_string(fonts[f]);
+	for (s = 0; s < 3; s++) {
+		cs[s] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 480, 80);
+		rs[s] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 480, 80);
+		cc[s] = cairo_create(cs[s]);
+		rc[s] = cairo_create(rs[s]);
+		cairo_scale(cc[s], scales[s], scales[s]);
+		cairo_scale(rc[s], scales[s], scales[s]);
+	}
+
+	TEST("cached text draws the pixels of a fresh layout")
+	{
+		bad = 0;
+		for (pass = 0; pass < 3; pass++) {
+			for (t = 0; t < 7; t++) {
+				for (s = 0; s < 3; s++) {
+					for (f = 0; f < 3; f++) {
+						surface_clear(cc[s]);
+						surface_clear(rc[s]);
+						cw = barny_module_render_text(
+						        cc[s], fd[f], texts[t], 3,
+						        2, 30, &cfg, 1, 1, 1, 0.9);
+						rw = render_text_fresh(
+						        rc[s], fd[f], texts[t], 3, 2,
+						        30, &cfg);
+						if (cw != rw
+						    || !surfaces_equal(cs[s],
+						                       rs[s])) {
+							printf("[pass %d '%s' "
+							       "x%.2f %s] ",
+							       pass, texts[t],
+							       scales[s], fonts[f]);
+							bad++;
+						}
+					}
+				}
+			}
+		}
+		ASSERT_EQ_INT(0, bad);
+	}
+
+	TEST("a cleared cache still draws the same pixels")
+	{
+		barny_text_cache_clear();
+		surface_clear(cc[1]);
+		surface_clear(rc[1]);
+		barny_module_render_text(cc[1], fd[0], texts[0], 3, 2, 30, &cfg,
+		                         1, 1, 1, 0.9);
+		render_text_fresh(rc[1], fd[0], texts[0], 3, 2, 30, &cfg);
+		ASSERT_TRUE(surfaces_equal(cs[1], rs[1]));
+	}
+
+	TEST("repeat draws reuse the shaped layout")
+	{
+		PangoLayout *l1;
+		PangoLayout *l2;
+		guint        serial;
+
+		l1     = barny_text_layout(cc[1], fd[0], "12:34");
+		pango_layout_get_pixel_size(l1, &cw, &rw);
+		serial = pango_layout_get_serial(l1);
+		l2     = barny_text_layout(cc[1], fd[0], "12:34");
+		ASSERT_TRUE(l1 == l2);
+		ASSERT_EQ_INT((int)serial, (int)pango_layout_get_serial(l2));
+	}
+
+	TEST("same cairo context, new CTM: fresh layout pixels")
+	{
+		barny_module_render_text(cc[0], fd[1], "CPU 4.2 GHz", 3, 2, 30,
+		                         &cfg, 1, 1, 1, 0.9);
+		cairo_scale(cc[0], 1.5, 1.5);
+		cairo_scale(rc[0], 1.5, 1.5);
+		surface_clear(cc[0]);
+		surface_clear(rc[0]);
+		barny_module_render_text(cc[0], fd[1], "CPU 4.2 GHz", 3, 2, 30,
+		                         &cfg, 1, 1, 1, 0.9);
+		render_text_fresh(rc[0], fd[1], "CPU 4.2 GHz", 3, 2, 30, &cfg);
+		ASSERT_TRUE(surfaces_equal(cs[0], rs[0]));
+	}
+
+	TEST("same cairo context, new font options: fresh layout pixels")
+	{
+		cairo_font_options_t *fo = cairo_font_options_create();
+
+		barny_module_render_text(cc[2], fd[2], "日本", 3, 2, 30, &cfg, 1,
+		                         1, 1, 0.9);
+		cairo_font_options_set_hint_metrics(fo, CAIRO_HINT_METRICS_OFF);
+		cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
+		cairo_set_font_options(cc[2], fo);
+		cairo_set_font_options(rc[2], fo);
+		surface_clear(cc[2]);
+		surface_clear(rc[2]);
+		barny_module_render_text(cc[2], fd[2], "日本", 3, 2, 30, &cfg, 1,
+		                         1, 1, 0.9);
+		render_text_fresh(rc[2], fd[2], "日本", 3, 2, 30, &cfg);
+		ASSERT_TRUE(surfaces_equal(cs[2], rs[2]));
+		cairo_font_options_destroy(fo);
+	}
+
+	barny_text_cache_clear();
+	for (s = 0; s < 3; s++) {
+		cairo_destroy(cc[s]);
+		cairo_destroy(rc[s]);
+		cairo_surface_destroy(cs[s]);
+		cairo_surface_destroy(rs[s]);
+	}
+	for (f = 0; f < 3; f++)
+		pango_font_description_free(fd[f]);
+
+	TEST_SUITE_END();
+}

@@ -59,6 +59,8 @@ test_module_positions(void);
 extern void
 test_module_data(void);
 extern void
+test_text_cache(void);
+extern void
 test_module_layout_basics(void);
 extern void
 test_module_layout_parsing_and_ops(void);
@@ -125,6 +127,7 @@ RUN_SUITE(test_module_lifecycle);
 RUN_SUITE(test_module_factories);
 RUN_SUITE(test_module_positions);
 RUN_SUITE(test_module_data);
+RUN_SUITE(test_text_cache);
 RUN_SUITE(test_module_layout_basics);
 RUN_SUITE(test_module_layout_parsing_and_ops);
 RUN_SUITE(test_module_layout_runtime_apply);

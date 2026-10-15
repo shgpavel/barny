@@ -884,13 +884,14 @@ sysinfo_update(barny_module_t *self)
 }
 
 static int
-render_text(cairo_t *cr, PangoLayout *layout, const char *text, int x, int y,
-            int h, double r, double g, double b)
+render_text(cairo_t *cr, PangoFontDescription *font, const char *text, int x,
+            int y, int h, double r, double g, double b)
 {
-	int tw, th;
-	int text_y;
+	PangoLayout *layout;
+	int          tw, th;
+	int          text_y;
 
-	pango_layout_set_text(layout, text, -1);
+	layout = barny_text_layout(cr, font, text);
 
 	pango_layout_get_pixel_size(layout, &tw, &th);
 
@@ -912,15 +913,11 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 {
 	sysinfo_data_t *data = self->data;
 	barny_config_t *cfg  = &data->state->config;
-	PangoLayout    *layout;
 	int             total_width  = 0;
 	int             item_spacing = cfg->sysinfo_item_spacing;
 	double          r, g, b;
 
 	(void)w;
-
-	layout = pango_cairo_create_layout(cr);
-	pango_layout_set_font_description(layout, data->font_desc);
 
 	if (cfg->text_color_set) {
 		r = cfg->text_color_r;
@@ -931,8 +928,8 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 		g = 0.9;
 		b = 1.0;
 	}
-	total_width += render_text(cr, layout, data->freq_str, x + total_width, y,
-	                           h, r, g, b);
+	total_width += render_text(cr, data->font_desc, data->freq_str,
+	                           x + total_width, y, h, r, g, b);
 	total_width += item_spacing;
 
 	if (cfg->text_color_set) {
@@ -944,8 +941,8 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 		g = 0.9;
 		b = 0.7;
 	}
-	total_width += render_text(cr, layout, data->power_str, x + total_width, y,
-	                           h, r, g, b);
+	total_width += render_text(cr, data->font_desc, data->power_str,
+	                           x + total_width, y, h, r, g, b);
 	total_width += item_spacing;
 
 	if (cfg->text_color_set) {
@@ -966,10 +963,8 @@ sysinfo_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 			b = 0.4;
 		}
 	}
-	total_width += render_text(cr, layout, data->temp_str, x + total_width, y,
-	                           h, r, g, b);
-
-	g_object_unref(layout);
+	total_width += render_text(cr, data->font_desc, data->temp_str,
+	                           x + total_width, y, h, r, g, b);
 
 	self->width = total_width + 8;
 }
