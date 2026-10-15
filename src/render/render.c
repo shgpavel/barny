@@ -404,38 +404,46 @@ rim_partial_ok(barny_output_t *output)
 	       && !barny_modules_any_dirty(state);
 }
 
-static bool
-dirty_partial_ok(barny_output_t *output, barny_rect_t lens)
+static uint32_t
+dirty_mask(const barny_state_t *state)
 {
-	barny_state_t  *state = output->state;
-	barny_module_t *mod;
-	int             i;
+	uint32_t mask = 0;
+	int      i;
+
+	for (i = 0; i < state->module_count; i++)
+		if (state->modules[i] && state->modules[i]->dirty)
+			mask |= 1u << i;
+
+	return mask;
+}
+
+static bool
+dirty_partial_ok(barny_output_t *output, barny_rect_t lens, uint32_t stale)
+{
+	barny_state_t *state = output->state;
+	int            i;
 
 	if (!output->lens_dmg_valid || !output->bg_cache
 	    || (output != state->dyn_output && !barny_rect_empty(lens)))
 		return false;
 
-	for (i = 0; i < state->module_count; i++) {
-		mod = state->modules[i];
-		if (mod && mod->dirty && output->mod_x[i] < 0)
+	for (i = 0; i < state->module_count; i++)
+		if ((stale & (1u << i)) && output->mod_x[i] < 0)
 			return false;
-	}
 
 	return true;
 }
 
 static int
-dirty_rects(const barny_output_t *output, barny_rect_t *rects)
+dirty_rects(const barny_output_t *output, uint32_t stale, barny_rect_t *rects)
 {
 	const barny_state_t *state = output->state;
-	barny_module_t      *mod;
 	barny_rect_t         r;
 	int                  n = 0;
 	int                  i;
 
 	for (i = 0; i < state->module_count; i++) {
-		mod = state->modules[i];
-		if (!mod || !mod->dirty)
+		if (!state->modules[i] || !(stale & (1u << i)))
 			continue;
 		r = (barny_rect_t){ output->mod_x[i] - MODULE_BLEED, 0,
 			            output->mod_w[i] + 2 * MODULE_BLEED,
@@ -548,18 +556,21 @@ frame_commit(barny_output_t *output, const barny_rect_t *dmg, int n)
 static int
 frame_render(barny_output_t *output, uint64_t now_us, barny_rect_t *dmg)
 {
-	cairo_t       *cr    = output->cr;
-	barny_state_t *state = output->state;
-	int            saved_widths[BARNY_MAX_MODULES];
-	barny_rect_t   lens;
-	barny_rect_t   mods;
-	uint64_t       tick;
-	bool           rim_moved;
-	bool           dirty;
-	bool           partial;
-	int            n = 0;
-	int            k;
-	int            i;
+	cairo_t        *cr    = output->cr;
+	barny_state_t  *state = output->state;
+	int             saved_widths[BARNY_MAX_MODULES];
+	barny_rect_t    lens;
+	barny_rect_t    mods;
+	uint64_t        tick;
+	barny_output_t *other;
+	uint32_t        changed;
+	uint32_t        stale;
+	bool            rim_moved;
+	bool            dirty;
+	bool            partial;
+	int             n = 0;
+	int             k;
+	int             i;
 
 	module_widths_load(output);
 	module_widths_save(state, saved_widths);
@@ -570,10 +581,12 @@ frame_render(barny_output_t *output, uint64_t now_us, barny_rect_t *dmg)
 
 	if (!barny_lens_rect(output, &lens.x, &lens.y, &lens.w, &lens.h))
 		lens = (barny_rect_t){ 0 };
-	mods  = lens_damage(output, lens);
-	dirty = barny_modules_any_dirty(state);
+	mods    = lens_damage(output, lens);
+	changed = dirty_mask(state);
+	stale   = changed | output->mod_stale;
+	dirty   = stale != 0;
 	if (dirty)
-		partial = dirty_partial_ok(output, mods);
+		partial = dirty_partial_ok(output, mods, stale);
 	else
 		partial = barny_rect_empty(mods) ? rim_partial_ok(output)
 		                                 : lens_partial_ok(output);
@@ -588,7 +601,7 @@ frame_render(barny_output_t *output, uint64_t now_us, barny_rect_t *dmg)
 	}
 	if (partial && dirty) {
 		k  = n;
-		n += dirty_rects(output, dmg + n);
+		n += dirty_rects(output, stale, dmg + n);
 		for (i = k; i < n; i++)
 			mods = barny_rect_union(mods, dmg[i]);
 	}
@@ -603,6 +616,10 @@ frame_render(barny_output_t *output, uint64_t now_us, barny_rect_t *dmg)
 	}
 	module_widths_store(output);
 
+	for (other = state->outputs; other; other = other->next)
+		if (other != output)
+			other->mod_stale |= changed;
+	output->mod_stale = 0;
 	modules_clear_dirty(state);
 
 	output->lens_dmg       = lens;

@@ -43,6 +43,8 @@ rf_mock_render(barny_module_t *self, cairo_t *cr, int x, int y, int w, int h)
 typedef struct {
 	barny_state_t    state;
 	barny_output_t   out;
+	barny_output_t   side;
+	barny_output_t  *on;
 	barny_module_t   mods[3];
 	rf_mock_t        data[3];
 	cairo_surface_t *wallpaper;
@@ -52,12 +54,39 @@ typedef struct {
 } rf_bar_t;
 
 static void
+rf_output_init(rf_bar_t *b, barny_output_t *o, uint32_t s120)
+{
+	double k = (double)s120 / BARNY_SCALE_UNIT;
+	int    i;
+
+	o->state         = &b->state;
+	o->scale         = s120 > BARNY_SCALE_UNIT ? 2 : 1;
+	o->scale120      = s120;
+	o->width         = RF_BAR_W;
+	o->height        = RF_BAR_H;
+	o->pad_left      = 8;
+	o->pad_right     = 8;
+	o->pad_top       = 4;
+	o->pad_bottom    = 8;
+	o->surf_width    = 8 + RF_BAR_W + 8;
+	o->surf_height   = 4 + RF_BAR_H + 8;
+	o->configured    = true;
+	o->cairo_surface = cairo_image_surface_create(
+	        CAIRO_FORMAT_ARGB32, barny_scale_len(o->surf_width, s120),
+	        barny_scale_len(o->surf_height, s120));
+	o->cr = cairo_create(o->cairo_surface);
+	if (s120 != BARNY_SCALE_UNIT)
+		cairo_scale(o->cr, k, k);
+	for (i = 0; i < BARNY_MAX_MODULES; i++)
+		o->mod_x[i] = -1;
+}
+
+static void
 rf_setup(rf_bar_t *b, uint32_t s120)
 {
 	static const barny_position_t pos[3] = { BARNY_POS_LEFT,
 		                                 BARNY_POS_CENTER,
 		                                 BARNY_POS_RIGHT };
-	double                        k      = (double)s120 / BARNY_SCALE_UNIT;
 	cairo_t                      *wc;
 	int                           i;
 
@@ -92,29 +121,9 @@ rf_setup(rf_bar_t *b, uint32_t s120)
 	}
 	b->state.module_count = 3;
 
-	b->out.state       = &b->state;
-	b->out.scale       = s120 > BARNY_SCALE_UNIT ? 2 : 1;
-	b->out.scale120    = s120;
-	b->out.width       = RF_BAR_W;
-	b->out.height      = RF_BAR_H;
-	b->out.pad_left    = 8;
-	b->out.pad_right   = 8;
-	b->out.pad_top     = 4;
-	b->out.pad_bottom  = 8;
-	b->out.surf_width  = 8 + RF_BAR_W + 8;
-	b->out.surf_height = 4 + RF_BAR_H + 8;
-	b->out.configured  = true;
-	b->out.cairo_surface
-	        = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-	                                     barny_scale_len(b->out.surf_width,
-	                                                     s120),
-	                                     barny_scale_len(b->out.surf_height,
-	                                                     s120));
-	b->out.cr = cairo_create(b->out.cairo_surface);
-	if (s120 != BARNY_SCALE_UNIT)
-		cairo_scale(b->out.cr, k, k);
-	for (i = 0; i < BARNY_MAX_MODULES; i++)
-		b->out.mod_x[i] = -1;
+	rf_output_init(b, &b->out, s120);
+	b->state.outputs = &b->out;
+	b->on            = &b->out;
 }
 
 static void
@@ -126,6 +135,11 @@ rf_teardown(rf_bar_t *b)
 	cairo_destroy(b->out.cr);
 	cairo_surface_destroy(b->out.cairo_surface);
 	barny_output_free_glass_caches(&b->out, false);
+	if (b->side.cr) {
+		cairo_destroy(b->side.cr);
+		cairo_surface_destroy(b->side.cairo_surface);
+		barny_output_free_glass_caches(&b->side, false);
+	}
 	cairo_surface_destroy(b->wallpaper);
 	for (i = 0; i < 3; i++)
 		pango_font_description_free(b->data[i].font);
@@ -136,13 +150,13 @@ rf_teardown(rf_bar_t *b)
 static int
 rf_frame(rf_bar_t *b, uint64_t now_us)
 {
-	return frame_render(&b->out, now_us, b->dmg);
+	return frame_render(b->on, now_us, b->dmg);
 }
 
 static void
 rf_snapshot(rf_bar_t *b)
 {
-	cairo_surface_t *s = b->out.cairo_surface;
+	cairo_surface_t *s = b->on->cairo_surface;
 
 	cairo_surface_flush(s);
 	b->len = (size_t)cairo_image_surface_get_stride(s)
@@ -155,8 +169,8 @@ rf_snapshot(rf_bar_t *b)
 static bool
 rf_matches_full(rf_bar_t *b, uint64_t now_us)
 {
-	cairo_surface_t *s     = b->out.cairo_surface;
-	bool             exact = b->out.scale120 % BARNY_SCALE_UNIT == 0;
+	cairo_surface_t *s     = b->on->cairo_surface;
+	bool             exact = b->on->scale120 % BARNY_SCALE_UNIT == 0;
 	const uint8_t   *d;
 	size_t           off   = 0;
 	size_t           i;
@@ -164,7 +178,7 @@ rf_matches_full(rf_bar_t *b, uint64_t now_us)
 	int              worst = 0;
 
 	rf_snapshot(b);
-	b->out.lens_dmg_valid = false;
+	b->on->lens_dmg_valid = false;
 	if (rf_frame(b, now_us) != 0)
 		return false;
 	cairo_surface_flush(s);
@@ -248,6 +262,37 @@ rf_case(uint32_t s120)
 	rf_teardown(&b);
 }
 
+static void
+rf_two_outputs(uint32_t s120)
+{
+	rf_bar_t b;
+	char     name[96];
+
+	rf_setup(&b, s120);
+	rf_output_init(&b, &b.side, s120);
+	b.out.next = &b.side;
+	rf_frame(&b, RF_T0_US);
+	b.on = &b.side;
+	rf_frame(&b, RF_T0_US);
+
+	snprintf(name, sizeof(name),
+	         "x%.2f: a module changed on one output redraws on the other",
+	         s120 / 120.0);
+	TEST(name)
+	{
+		snprintf(b.data[1].text, sizeof(b.data[1].text), "12:01");
+		b.mods[1].dirty = true;
+		b.on            = &b.out;
+		ASSERT_EQ_INT(1, rf_frame(&b, RF_T0_US));
+		b.on = &b.side;
+		ASSERT_EQ_INT(4 + 1, rf_frame(&b, RF_T1_US));
+		ASSERT_TRUE(rf_matches_full(&b, RF_T1_US));
+		ASSERT_EQ_INT(0, (int)b.side.mod_stale);
+	}
+
+	rf_teardown(&b);
+}
+
 void
 test_render_frame_partial(void)
 {
@@ -256,6 +301,8 @@ test_render_frame_partial(void)
 	rf_case(BARNY_SCALE_UNIT);
 	rf_case(150);
 	rf_case(240);
+	rf_two_outputs(BARNY_SCALE_UNIT);
+	rf_two_outputs(150);
 
 	TEST_SUITE_END();
 }

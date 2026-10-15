@@ -387,6 +387,7 @@ struct barny_output {
 	int                           mod_w[BARNY_MAX_MODULES];
 	int                           mod_width[BARNY_MAX_MODULES];
 	bool                          mod_width_valid;
+	uint32_t                      mod_stale;
 
 	cairo_surface_t              *bg_cache;
 	cairo_surface_t              *lens_map;
