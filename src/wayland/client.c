@@ -59,7 +59,7 @@ output_done(void *data, struct wl_output *output)
 	barny_output_t *out = data;
 	(void)output;
 
-	if (!out->configured && out->width > 0) {
+	if (!out->surface && out->width > 0) {
 		barny_output_create_surface(out);
 	}
 }
@@ -147,14 +147,8 @@ pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial,
 }
 
 static void
-pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
-              struct wl_surface *surface)
+pointer_gone(barny_state_t *state)
 {
-	barny_state_t *state = data;
-	(void)pointer;
-	(void)serial;
-	(void)surface;
-
 	if (state->hover_module && state->hover_module->on_hover) {
 		state->hover_module->on_hover(state->hover_module, false, 0,
 		                              0);
@@ -168,6 +162,17 @@ pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
 	lens_wake(state);
 
 	state->dyn_dirty       = true;
+}
+
+static void
+pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial,
+              struct wl_surface *surface)
+{
+	(void)pointer;
+	(void)serial;
+	(void)surface;
+
+	pointer_gone(data);
 }
 
 /* Hit-testing runs against the layout of the output the pointer is on: the
@@ -557,17 +562,18 @@ registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
 	for (out = state->outputs; out; out = out->next) {
 		if (out->registry_name == name) {
 			if (state->pointer_output == out) {
-				state->pointer_output = NULL;
+				pointer_gone(state);
 			}
 			if (state->dyn_output == out) {
 				state->dyn_output = NULL;
 			}
+			barny_menu_output_gone(state, out);
 
 			*prev = out->next;
 
 			barny_output_destroy_surface(out);
 			if (out->wl_output) {
-				wl_output_destroy(out->wl_output);
+				wl_output_release(out->wl_output);
 			}
 			free(out->name);
 			free(out);
@@ -625,7 +631,7 @@ barny_wayland_cleanup(barny_state_t *state)
 		next = out->next;
 		barny_output_destroy_surface(out);
 		if (out->wl_output) {
-			wl_output_destroy(out->wl_output);
+			wl_output_release(out->wl_output);
 		}
 		free(out->name);
 		free(out);

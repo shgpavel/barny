@@ -1358,6 +1358,18 @@ barny_menu_close(barny_state_t *state)
 	wl_display_flush(state->display);
 }
 
+void
+barny_menu_output_gone(barny_state_t *state, barny_output_t *out)
+{
+	barny_menu_t *m = state->menu;
+
+	if (!m || m->out != out)
+		return;
+
+	state->menu = NULL;
+	menu_finalize_destroy(m);
+}
+
 bool
 barny_menu_is_open(barny_state_t *state)
 {

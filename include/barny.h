@@ -376,6 +376,7 @@ struct barny_output {
 	char                         *name;
 	uint32_t                      registry_name;
 
+	struct wl_callback           *frame_cb;
 	bool                          configured;
 	bool                          frame_pending;
 	bool                          redraw_queued;
@@ -847,6 +848,8 @@ barny_tray_menu_open(barny_state_t *state, int anchor_x, int anchor_y,
                      int anchor_w);
 void
 barny_menu_close(barny_state_t *state);
+void
+barny_menu_output_gone(barny_state_t *state, barny_output_t *out);
 bool
 barny_menu_is_open(barny_state_t *state);
 bool

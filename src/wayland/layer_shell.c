@@ -60,7 +60,6 @@ layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surface)
 	(void)surface;
 
 	barny_output_destroy_surface(output);
-	output->state->running = false;
 }
 
 static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
@@ -75,6 +74,7 @@ frame_done(void *data, struct wl_callback *callback, uint32_t callback_time)
 	(void)callback_time;
 
 	wl_callback_destroy(callback);
+	output->frame_cb      = NULL;
 	output->frame_pending = false;
 
 	if (output->redraw_queued) {
@@ -233,6 +233,10 @@ barny_output_destroy_surface(barny_output_t *output)
 		wl_surface_destroy(output->surface);
 		output->surface = NULL;
 	}
+	if (output->frame_cb) {
+		wl_callback_destroy(output->frame_cb);
+		output->frame_cb = NULL;
+	}
 	output->configured    = false;
 	output->frame_pending = false;
 	output->redraw_queued = false;
@@ -300,5 +304,6 @@ barny_output_request_frame(barny_output_t *output)
 
 	cb = wl_surface_frame(output->surface);
 	wl_callback_add_listener(cb, &frame_listener, output);
+	output->frame_cb      = cb;
 	output->frame_pending = true;
 }
