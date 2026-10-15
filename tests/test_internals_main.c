@@ -23,6 +23,9 @@ extern void
 test_format_size(void);
 
 extern void
+test_battery_update(void);
+
+extern void
 test_is_physical_interface(void);
 
 extern void
@@ -57,6 +60,9 @@ RUN_SUITE(test_format_bytes);
 
 printf("\n--- RAM Internal Functions ---\n");
 RUN_SUITE(test_format_size);
+
+printf("\n--- Battery Internal Functions ---\n");
+RUN_SUITE(test_battery_update);
 
 printf("\n--- Network Internal Functions ---\n");
 RUN_SUITE(test_is_physical_interface);

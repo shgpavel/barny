@@ -11,8 +11,31 @@ typedef struct {
 	int                   capacity;
 	char                  status[16];
 	char                  device_path[256];
+	char                  attr_dir[256];
 	PangoFontDescription *font_desc;
 } battery_data_t;
+
+static bool
+read_line_file(const char *path, char *buf, size_t buflen)
+{
+	FILE *f;
+	char *nl;
+	bool  got;
+
+	f = fopen(path, "r");
+	if (!f)
+		return false;
+
+	buf[0] = '\0';
+	got    = fgets(buf, buflen, f) != NULL;
+	if (got) {
+		nl = strchr(buf, '\n');
+		if (nl)
+			*nl = '\0';
+	}
+	fclose(f);
+	return got;
+}
 
 static bool
 read_ps_attr(const char *supply, const char *attr, char *buf, size_t buflen)
@@ -39,6 +62,72 @@ read_ps_attr(const char *supply, const char *attr, char *buf, size_t buflen)
 	}
 	fclose(f);
 	return true;
+}
+
+static void
+uevent_attr_dir(const char *uevent, char *dir, size_t dirlen)
+{
+	const char *slash = strrchr(uevent, '/');
+	size_t      n;
+
+	dir[0] = '\0';
+	if (!slash || strcmp(slash + 1, "uevent") != 0)
+		return;
+	n = (size_t)(slash - uevent);
+	if (n + 1 > dirlen)
+		return;
+	memcpy(dir, uevent, n);
+	dir[n] = '\0';
+}
+
+static bool
+read_dir_attr(const char *dir, const char *attr, char *buf, size_t buflen)
+{
+	char path[512];
+	int  n;
+
+	n = snprintf(path, sizeof(path), "%s/%s", dir, attr);
+	if (n < 0 || (size_t)n >= sizeof(path))
+		return false;
+
+	return read_line_file(path, buf, buflen);
+}
+
+static bool
+read_attrs(const battery_data_t *data, int *capacity, char *status,
+           size_t status_len)
+{
+	char cap[16];
+
+	if (!data->attr_dir[0]
+	    || !read_dir_attr(data->attr_dir, "capacity", cap, sizeof(cap)))
+		return false;
+
+	*capacity = atoi(cap);
+	if (!read_dir_attr(data->attr_dir, "status", status, status_len))
+		status[0] = '\0';
+	return true;
+}
+
+static void
+read_uevent(FILE *f, int *capacity, char *status, size_t status_len)
+{
+	char  line[256];
+	char *val;
+	char *nl;
+
+	while (fgets(line, sizeof(line), f)) {
+		if (strncmp(line, "POWER_SUPPLY_STATUS=", 20) == 0) {
+			val = line + 20;
+			nl  = strchr(val, '\n');
+			if (nl)
+				*nl = '\0';
+			strncpy(status, val, status_len - 1);
+			status[status_len - 1] = '\0';
+		} else if (strncmp(line, "POWER_SUPPLY_CAPACITY=", 22) == 0) {
+			*capacity = atoi(line + 22);
+		}
+	}
 }
 
 static int
@@ -101,6 +190,9 @@ battery_init(barny_module_t *self, barny_state_t *state)
 		         "/sys/class/power_supply/BAT0/uevent");
 	}
 
+	uevent_attr_dir(data->device_path, data->attr_dir,
+	                sizeof(data->attr_dir));
+
 	strcpy(data->display_str, "BAT --");
 
 	return 0;
@@ -128,9 +220,6 @@ battery_update(barny_module_t *self)
 	FILE           *f;
 	char            new_status[16];
 	int             new_capacity;
-	char            line[256];
-	char           *val;
-	char           *nl;
 	const char     *sp;
 	char            pct_str[16];
 	const char     *prefix;
@@ -138,26 +227,16 @@ battery_update(barny_module_t *self)
 	data = self->data;
 	cfg  = &data->state->config;
 
-	f    = fopen(data->device_path, "r");
-	if (!f)
-		return;
-
 	new_status[0] = '\0';
 	new_capacity  = -1;
 
-	while (fgets(line, sizeof(line), f)) {
-		if (strncmp(line, "POWER_SUPPLY_STATUS=", 20) == 0) {
-			val = line + 20;
-			nl  = strchr(val, '\n');
-			if (nl)
-				*nl = '\0';
-			strncpy(new_status, val, sizeof(new_status) - 1);
-			new_status[sizeof(new_status) - 1] = '\0';
-		} else if (strncmp(line, "POWER_SUPPLY_CAPACITY=", 22) == 0) {
-			new_capacity = atoi(line + 22);
-		}
+	if (!read_attrs(data, &new_capacity, new_status, sizeof(new_status))) {
+		f = fopen(data->device_path, "r");
+		if (!f)
+			return;
+		read_uevent(f, &new_capacity, new_status, sizeof(new_status));
+		fclose(f);
 	}
-	fclose(f);
 
 	if (new_capacity < 0)
 		return;

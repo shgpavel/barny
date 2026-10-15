@@ -55,6 +55,7 @@ test_internals_sources = files(
     'test_config_internals.c',
     'test_clock_internals.c',
     'test_disk_internals.c',
+    'test_battery_internals.c',
     'test_ram_internals.c',
     'test_network_internals.c',
     'test_workspace_internals.c',
