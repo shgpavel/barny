@@ -385,6 +385,8 @@ struct barny_output {
 	   must never share one geometry across outputs */
 	int                           mod_x[BARNY_MAX_MODULES];
 	int                           mod_w[BARNY_MAX_MODULES];
+	int                           mod_width[BARNY_MAX_MODULES];
+	bool                          mod_width_valid;
 
 	cairo_surface_t              *bg_cache;
 	cairo_surface_t              *lens_map;

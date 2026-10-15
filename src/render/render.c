@@ -397,6 +397,42 @@ module_widths_save(const barny_state_t *state, int *widths)
 	}
 }
 
+static int  rendered_width[BARNY_MAX_MODULES];
+static bool rendered_width_valid;
+
+static void
+module_widths_load(barny_output_t *output)
+{
+	barny_state_t  *state = output->state;
+	barny_module_t *mod;
+	int             i;
+
+	if (!output->mod_width_valid || !rendered_width_valid)
+		return;
+
+	for (i = 0; i < state->module_count; i++) {
+		mod = state->modules[i];
+		if (mod && mod->width == rendered_width[i])
+			mod->width = output->mod_width[i];
+	}
+}
+
+static void
+module_widths_store(barny_output_t *output)
+{
+	barny_state_t *state = output->state;
+	int            i;
+
+	for (i = 0; i < state->module_count; i++) {
+		output->mod_width[i] = state->modules[i]
+		                               ? state->modules[i]->width
+		                               : 0;
+		rendered_width[i]    = output->mod_width[i];
+	}
+	output->mod_width_valid = true;
+	rendered_width_valid    = true;
+}
+
 static bool
 module_widths_changed(const barny_state_t *state, const int *widths)
 {
@@ -480,6 +516,7 @@ barny_render_frame(barny_output_t *output)
 	cr                    = output->cr;
 	state                 = output->state;
 
+	module_widths_load(output);
 	module_widths_save(state, saved_widths);
 
 	tick             = barny_rim_tick(&state->config, barny_now_us());
@@ -509,6 +546,7 @@ barny_render_frame(barny_output_t *output)
 		n = 0;
 		render_bar(output, cr, NULL, 0, NULL);
 	}
+	module_widths_store(output);
 
 	modules_clear_dirty(state);
 
