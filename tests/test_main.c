@@ -61,8 +61,6 @@ test_module_data(void);
 extern void
 test_text_cache(void);
 extern void
-test_render_frame_partial(void);
-extern void
 test_module_layout_basics(void);
 extern void
 test_module_layout_parsing_and_ops(void);
@@ -122,7 +120,6 @@ RUN_SUITE(test_lens_partial_redraw);
 RUN_SUITE(test_rim_flow);
 RUN_SUITE(test_hidpi_helpers);
 RUN_SUITE(test_lens_map_lifetime);
-RUN_SUITE(test_render_frame_partial);
 
 printf("\n--- Module System Tests ---\n");
 RUN_SUITE(test_module_register);

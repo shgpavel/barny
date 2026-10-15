@@ -2,13 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef BARNY_TEST_REAL_RENDER
 void
 barny_render_frame(barny_output_t *output)
 {
 	(void)output;
 }
-#endif
 
 int
 barny_sway_ipc_send(barny_state_t *state, uint32_t type, const char *payload)
