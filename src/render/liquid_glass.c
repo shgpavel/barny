@@ -2755,13 +2755,33 @@ build_glass_bg(barny_output_t *output)
 	return cache;
 }
 
-void
-barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
+static void
+paint_clear(cairo_t *cr)
 {
 	cairo_save(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
 	cairo_paint(cr);
 	cairo_restore(cr);
+}
+
+static bool
+clip_is_pixel_rects(cairo_t *cr)
+{
+	cairo_rectangle_list_t *list = cairo_copy_clip_rectangle_list(cr);
+	bool                    ok   = list->status == CAIRO_STATUS_SUCCESS;
+
+	cairo_rectangle_list_destroy(list);
+
+	return ok;
+}
+
+void
+barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
+{
+	bool pixel_clip = clip_is_pixel_rects(cr);
+
+	if (!pixel_clip)
+		paint_clear(cr);
 
 	if (!output->bg_cache) {
 		output->bg_cache = build_glass_bg(output);
@@ -2771,7 +2791,16 @@ barny_render_liquid_glass(barny_output_t *output, cairo_t *cr)
 
 	if (output->bg_cache) {
 		cairo_set_source_surface(cr, output->bg_cache, 0, 0);
-		cairo_paint(cr);
+		if (pixel_clip) {
+			cairo_save(cr);
+			cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+			cairo_paint(cr);
+			cairo_restore(cr);
+		} else {
+			cairo_paint(cr);
+		}
+	} else if (pixel_clip) {
+		paint_clear(cr);
 	}
 
 	render_dynamic(output, cr);
