@@ -263,8 +263,9 @@ lens_damage(const barny_output_t *output, barny_rect_t lens)
 
 /* A droplet-only frame may repaint just the droplet's strip: the rest of the
    bar is already correct in the (single, persistent) shm buffer. Anything that
-   can change pixels elsewhere -- a dirty module, a rebuilt bar cache, the
-   droplet living on another output -- forces the full path. */
+   can change pixels elsewhere -- a rebuilt bar cache, the droplet living on
+   another output -- forces the full path; dirty modules add their own strips
+   (dirty_partial_ok). */
 static bool
 lens_partial_ok(barny_output_t *output)
 {
@@ -352,8 +353,12 @@ render_full(barny_output_t *output, cairo_t *cr)
 
 static void
 render_bar(barny_output_t *output, cairo_t *cr, const barny_rect_t *clip,
-           int n, const barny_rect_t *mods)
+           int n, const barny_rect_t *mods, bool track_rims)
 {
+	barny_rect_t rims[4];
+	uint8_t     *snap = NULL;
+	int          nr   = 0;
+
 	if (n == 0) {
 		render_full(output, cr);
 		return;
@@ -369,7 +374,19 @@ render_bar(barny_output_t *output, cairo_t *cr, const barny_rect_t *clip,
 	output->clip           = *mods;
 
 	barny_render_liquid_glass(output, cr);
+
+	if (track_rims) {
+		nr = barny_rim_rects(output, rims);
+		if (nr > 0)
+			rim_snap(output, rims, nr, &snap, false);
+	}
+
 	barny_render_modules(output, cr);
+
+	if (snap) {
+		output->rim_mods_touch |= rim_snap(output, rims, nr, &snap, true);
+		free(snap);
+	}
 
 	output->render_clipped = false;
 	cairo_restore(cr);
@@ -385,6 +402,49 @@ rim_partial_ok(barny_output_t *output)
 	       && (output == state->dyn_output
 	           || barny_rect_empty(output->lens_dmg))
 	       && !barny_modules_any_dirty(state);
+}
+
+static bool
+dirty_partial_ok(barny_output_t *output, barny_rect_t lens)
+{
+	barny_state_t  *state = output->state;
+	barny_module_t *mod;
+	int             i;
+
+	if (!output->lens_dmg_valid || !output->bg_cache
+	    || (output != state->dyn_output && !barny_rect_empty(lens)))
+		return false;
+
+	for (i = 0; i < state->module_count; i++) {
+		mod = state->modules[i];
+		if (mod && mod->dirty && output->mod_x[i] < 0)
+			return false;
+	}
+
+	return true;
+}
+
+static int
+dirty_rects(const barny_output_t *output, barny_rect_t *rects)
+{
+	const barny_state_t *state = output->state;
+	barny_module_t      *mod;
+	barny_rect_t         r;
+	int                  n = 0;
+	int                  i;
+
+	for (i = 0; i < state->module_count; i++) {
+		mod = state->modules[i];
+		if (!mod || !mod->dirty)
+			continue;
+		r = (barny_rect_t){ output->mod_x[i] - MODULE_BLEED, 0,
+			            output->mod_w[i] + 2 * MODULE_BLEED,
+			            output->surf_height };
+		rects[n++] = barny_rect_clamp(r, output->surf_width,
+		                              output->surf_height);
+	}
+
+	return n;
 }
 
 static void
@@ -447,22 +507,78 @@ frame_commit(barny_output_t *output, const barny_rect_t *dmg, int n)
 	wl_surface_commit(output->surface);
 }
 
-void
-barny_render_frame(barny_output_t *output)
+#define FRAME_DMG_MAX (5 + BARNY_MAX_MODULES)
+
+static int
+frame_render(barny_output_t *output, uint64_t now_us, barny_rect_t *dmg)
 {
-	cairo_t       *cr;
-	barny_state_t *state;
+	cairo_t       *cr    = output->cr;
+	barny_state_t *state = output->state;
 	int            saved_widths[BARNY_MAX_MODULES];
 	barny_rect_t   lens;
-	barny_rect_t   dmg[5];
 	barny_rect_t   mods;
 	uint64_t       tick;
 	bool           rim_moved;
+	bool           dirty;
 	bool           partial;
-	bool           lens_anim;
 	int            n = 0;
 	int            k;
 	int            i;
+
+	module_widths_save(state, saved_widths);
+
+	tick             = barny_rim_tick(&state->config, now_us);
+	rim_moved        = output->rim && output->rim_tick != tick;
+	output->rim_tick = tick;
+
+	if (!barny_lens_rect(output, &lens.x, &lens.y, &lens.w, &lens.h))
+		lens = (barny_rect_t){ 0 };
+	mods  = lens_damage(output, lens);
+	dirty = barny_modules_any_dirty(state);
+	if (dirty)
+		partial = dirty_partial_ok(output, mods);
+	else
+		partial = barny_rect_empty(mods) ? rim_partial_ok(output)
+		                                 : lens_partial_ok(output);
+	if (partial && !barny_rect_empty(mods))
+		dmg[n++] = mods;
+	if (partial && rim_moved) {
+		k  = n;
+		n += barny_rim_rects(output, dmg + n);
+		for (i = k; i < n; i++)
+			if (output->rim_mods_touch & (1u << (i - k)))
+				mods = barny_rect_union(mods, dmg[i]);
+	}
+	if (partial && dirty) {
+		k  = n;
+		n += dirty_rects(output, dmg + n);
+		for (i = k; i < n; i++)
+			mods = barny_rect_union(mods, dmg[i]);
+	}
+
+	render_bar(output, cr, dmg, n, &mods, partial && dirty);
+
+	/* A module resized while drawing, so the layout it was drawn with is
+	   stale: redo the bar in full, strip or not. */
+	if (module_widths_changed(state, saved_widths)) {
+		n = 0;
+		render_bar(output, cr, NULL, 0, NULL, false);
+	}
+
+	modules_clear_dirty(state);
+
+	output->lens_dmg       = lens;
+	output->lens_dmg_valid = true;
+
+	return n;
+}
+
+void
+barny_render_frame(barny_output_t *output)
+{
+	barny_rect_t dmg[FRAME_DMG_MAX];
+	bool         lens_anim;
+	int          n;
 
 	if (!output->configured || !output->cr) {
 		return;
@@ -477,47 +593,11 @@ barny_render_frame(barny_output_t *output)
 
 	lens_anim             = barny_lens_step(output);
 
-	cr                    = output->cr;
-	state                 = output->state;
-
-	module_widths_save(state, saved_widths);
-
-	tick             = barny_rim_tick(&state->config, barny_now_us());
-	rim_moved        = output->rim && output->rim_tick != tick;
-	output->rim_tick = tick;
-
-	if (!barny_lens_rect(output, &lens.x, &lens.y, &lens.w, &lens.h))
-		lens = (barny_rect_t){ 0 };
-	mods = lens_damage(output, lens);
-	partial = barny_rect_empty(mods) ? rim_partial_ok(output)
-	                                 : lens_partial_ok(output);
-	if (partial && !barny_rect_empty(mods))
-		dmg[n++] = mods;
-	if (partial && rim_moved) {
-		k  = n;
-		n += barny_rim_rects(output, dmg + n);
-		for (i = k; i < n; i++)
-			if (output->rim_mods_touch & (1u << (i - k)))
-				mods = barny_rect_union(mods, dmg[i]);
-	}
-
-	render_bar(output, cr, dmg, n, &mods);
-
-	/* A module resized while drawing, so the layout it was drawn with is
-	   stale: redo the bar in full, strip or not. */
-	if (module_widths_changed(state, saved_widths)) {
-		n = 0;
-		render_bar(output, cr, NULL, 0, NULL);
-	}
-
-	modules_clear_dirty(state);
+	n                     = frame_render(output, barny_now_us(), dmg);
 
 	if (lens_anim) {
 		output->redraw_queued = true;
 	}
-
-	output->lens_dmg       = lens;
-	output->lens_dmg_valid = true;
 
 	frame_commit(output, dmg, n);
 }
