@@ -1,5 +1,6 @@
 test_sources = files(
     'test_animation.c',
+    'test_render_frame.c',
     'test_config.c',
     'test_liquid_glass.c',
     'test_main.c',
@@ -43,6 +44,7 @@ barny_tests = executable(
     wl_protocol_sources,
     dependencies: all_deps,
     include_directories: test_inc_dirs,
+    c_args: ['-DBARNY_TEST_REAL_RENDER'],
     build_by_default: false,
 )
 
