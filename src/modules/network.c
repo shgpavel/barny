@@ -209,13 +209,9 @@ collect_interface_addrs(const char *iface, char *ipv4, size_t ipv4_len,
 }
 
 static bool
-get_interface_ip(const char *iface, char *ip, size_t ip_len, bool prefer_ipv4)
+pick_interface_ip(const char *ipv4, const char *ipv6, char *ip, size_t ip_len,
+                  bool prefer_ipv4)
 {
-	char ipv4[INET_ADDRSTRLEN]  = "";
-	char ipv6[INET6_ADDRSTRLEN] = "";
-
-	collect_interface_addrs(iface, ipv4, sizeof(ipv4), ipv6, sizeof(ipv6));
-
 	if (prefer_ipv4) {
 		if (ipv4[0]) {
 			strncpy(ip, ipv4, ip_len - 1);
@@ -400,7 +396,7 @@ format_speed(double bps, char *out, size_t out_len)
 }
 
 static bool
-refresh_popup_data(network_data_t *data)
+refresh_popup_data(network_data_t *data, const char *ipv4, const char *ipv6)
 {
 	bool               changed                    = false;
 	char               new_type[16]               = "";
@@ -427,9 +423,14 @@ refresh_popup_data(network_data_t *data)
 	}
 
 	if (data->is_online && data->current_iface[0]) {
-		collect_interface_addrs(data->current_iface, new_ipv4,
-		                        sizeof(new_ipv4), new_ipv6,
-		                        sizeof(new_ipv6));
+		if (ipv4 && ipv6) {
+			snprintf(new_ipv4, sizeof(new_ipv4), "%s", ipv4);
+			snprintf(new_ipv6, sizeof(new_ipv6), "%s", ipv6);
+		} else {
+			collect_interface_addrs(data->current_iface, new_ipv4,
+			                        sizeof(new_ipv4), new_ipv6,
+			                        sizeof(new_ipv6));
+		}
 
 		iface_mac_stale = strcmp(data->cached_mac_iface,
 		                         data->current_iface)
@@ -695,7 +696,7 @@ network_on_hover(barny_module_t *self, bool hovering, int x, int y)
 
 	if (hovering) {
 		if (!data->popup) {
-			refresh_popup_data(data);
+			refresh_popup_data(data, NULL, NULL);
 			barny_popup_callbacks_t cb = {
 				.content_height = network_popup_height,
 				.content_width  = network_popup_width,
@@ -774,6 +775,8 @@ network_update(barny_module_t *self)
 	barny_config_t *cfg       = &data->state->config;
 	char            iface[32] = "";
 	char            ip[64]    = "";
+	char            ipv4[INET_ADDRSTRLEN]  = "";
+	char            ipv6[INET6_ADDRSTRLEN] = "";
 	bool            online    = false;
 	const char     *cfg_iface = cfg->network_interface;
 	bool            changed;
@@ -794,8 +797,12 @@ network_update(barny_module_t *self)
 		}
 	}
 
-	if (online && cfg->network_show_ip) {
-		get_interface_ip(iface, ip, sizeof(ip), cfg->network_prefer_ipv4);
+	if (online) {
+		collect_interface_addrs(iface, ipv4, sizeof(ipv4), ipv6,
+		                        sizeof(ipv6));
+		if (cfg->network_show_ip)
+			pick_interface_ip(ipv4, ipv6, ip, sizeof(ip),
+			                  cfg->network_prefer_ipv4);
 	}
 
 	changed = (online != data->is_online)
@@ -836,7 +843,7 @@ network_update(barny_module_t *self)
 		data->have_last_sample = false;
 	}
 
-	popup_changed = refresh_popup_data(data);
+	popup_changed = refresh_popup_data(data, ipv4, ipv6);
 	if (popup_changed && barny_popup_visible(data->popup))
 		barny_popup_redraw(data->popup);
 }
