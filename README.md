@@ -159,7 +159,7 @@ You can add proportional spacer tokens in these CSV lists:
 | `crypto_symbol_position` | `prefix` | `prefix` for `$1234`, `suffix` for `1234$` |
 | `crypto_decimals` | `0` | Decimal places (0-6). `0` = auto: 4 dp under \$1, 2 dp under \$1000, else 0 |
 
-Note: the shipped `config/barny.conf` sets a different example list (BTC, ETH, SOL, BZ, ADA, POL, OP, TON, TRX); the default above is the built-in fallback used when no config is provided.
+Note: the shipped `config/barny.conf` sets a different example list (BTC, ETH, SOL, BZ, ADA, POL, OP, GRAM, TRX); the default above is the built-in fallback used when no config is provided.
 
 ### Sysinfo Module
 
